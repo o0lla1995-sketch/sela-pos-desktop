@@ -6,3 +6,4 @@ src-tauri/target/
 .idea/
 .DS_Store
 Thumbs.db
+target/

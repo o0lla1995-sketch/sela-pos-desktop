@@ -44,11 +44,12 @@ mod imp {
                 ))
             })?;
             let result = (|| -> Result<usize> {
-                let doc_name: Vec<u16> = "sela receipt"
+                let mut doc_name: Vec<u16> = "sela receipt"
                     .encode_utf16()
                     .chain(std::iter::once(0))
                     .collect();
-                let datatype: Vec<u16> = "RAW".encode_utf16().chain(std::iter::once(0)).collect();
+                let mut datatype: Vec<u16> =
+                    "RAW".encode_utf16().chain(std::iter::once(0)).collect();
                 let mut output: Vec<u16> = vec![0];
                 let doc = DOC_INFO_1W {
                     pDocName: PWSTR::from_raw(doc_name.as_mut_ptr()),
