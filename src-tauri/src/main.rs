@@ -1,10 +1,10 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 /**
  * main.rs — إقلاع سيلا POS لسطح المكتب.
  *  • يفتح القاعدة وconfig في %AppData%\sela-pos.
  *  • يشغّل خطاف قارئ الباركود العام (ويندوز) — كل كود يُبثّ كحدث
  *    «scanner://barcode» للواجهة التي توجهه للشاشة النشطة.
  */
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
 
@@ -12,7 +12,7 @@ use sela_core::config::ConfigStore;
 use sela_core::db;
 use sela_core::hardware;
 use std::sync::Mutex;
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 pub struct AppState {
     pub conn: Mutex<rusqlite::Connection>,

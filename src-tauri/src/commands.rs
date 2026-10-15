@@ -6,7 +6,7 @@ use crate::AppState;
 use sela_core::backup;
 use sela_core::checkout::{self, CreateSaleInput};
 use sela_core::config::ConfigStore;
-use sela_core::escpos::{self, EscPosOp};
+use sela_core::escpos::EscPosOp;
 use sela_core::hardware::{self, PrinterChannel};
 use sela_core::invoice;
 use sela_core::models::*;
@@ -486,7 +486,7 @@ pub fn current_printer_channel(state: State<AppState>) -> CmdResult<PrinterChann
 
 /// اختيار شعار المتجر (حوار أصلي) ونسخه إلى مجلد أصول التطبيق.
 #[command]
-pub fn pick_store_logo(state: State<AppState>) -> CmdResult<Option<String>> {
+pub fn pick_store_logo(_state: State<AppState>) -> CmdResult<Option<String>> {
     let picked = rfd::FileDialog::new()
         .set_title("اختيار شعار المتجر")
         .add_filter("صور", &["png", "jpg", "jpeg", "bmp"])
