@@ -3165,6 +3165,7 @@ name = "sela-pos-desktop"
 version = "1.0.0"
 dependencies = [
  "rfd",
+ "rusqlite",
  "sela-core",
  "serde",
  "serde_json",
