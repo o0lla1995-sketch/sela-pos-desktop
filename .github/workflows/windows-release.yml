@@ -1,0 +1,89 @@
+name: Windows Release (.exe + NSIS)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows exe + Installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust (stable MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install JS deps
+        run: npm ci
+
+      - name: Core parity tests (Rust)
+        run: cargo test -p sela-core --locked
+
+      - name: Frontend checks + build
+        run: npm run build
+
+      - name: Tauri build (NSIS + exe)
+        shell: pwsh
+        run: npx tauri build
+
+      - name: Version info
+        id: version
+        shell: pwsh
+        run: |
+          $TAG = if ("$env:GITHUB_REF_NAME" -like "v*") { "$env:GITHUB_REF_NAME" } else { "dev-" + "${env:GITHUB_SHA}".Substring(0,7) }
+          "name=$TAG" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.name }}"
+          New-Item -ItemType Directory -Force -Path .\artifacts | Out-Null
+          $setup = Get-ChildItem .\src-tauri\target\release\bundle\nsis\*.exe | Select-Object -First 1
+          if ($setup) {
+            Copy-Item $setup.FullName ".\artifacts\Sela-POS-Desktop-$tag-Setup.exe"
+          }
+          $portable = ".\src-tauri\target\release\sela-pos-desktop.exe"
+          if (Test-Path $portable) {
+            Copy-Item $portable ".\artifacts\Sela-POS-Desktop-$tag.exe"
+          }
+          Get-ChildItem .\artifacts
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sela-POS-Desktop-${{ steps.version.outputs.name }}
+          path: artifacts/*
+          if-no-files-found: error
+
+      - name: Create GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.version.outputs.name }}"
+          gh release create $tag `
+            --title "سيلا POS لسطح المكتب $tag" `
+            --notes "نسخة سطح المكتب من sela — تطابق كامل لتطبيق الأندرويد (المنطق/القاعدة/الطباعة/الترخيص). الشعار، الحسابات، الجرد والنسخ الاحتياطي بصيغة v1 نفسها." `
+            --verify-tag
+          gh release upload $tag (Get-ChildItem .\artifacts\* | ForEach-Object { "$($_.FullName)#$($_.Name)" })

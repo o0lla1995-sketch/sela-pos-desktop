@@ -1,0 +1,43 @@
+name: CI (Linux fast feedback)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core-and-web:
+    name: sela-core + frontend checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: npm ci
+        run: npm ci
+
+      - name: Rust core tests (parity suite)
+        run: cargo test -p sela-core --locked
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Frontend parity tests
+        run: npx vitest run
+
+      - name: Production build
+        run: npm run build
