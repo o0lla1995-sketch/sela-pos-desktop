@@ -68,7 +68,10 @@ for px, out in jobs:
     os.makedirs(os.path.dirname(out), exist_ok=True)
     cairosvg.svg2png(bytestring=FULL.encode("utf-8"), write_to=out,
                      output_width=px, output_height=px)
-    print(f"  + {os.path.relpath(out, ROOT)} ({px}x{px})")
+    # Tauri (generate_context!) يشترط PNG بقناة ألفا RGBA — cairosvg
+    # يحوّل لـ RGB حين تكون الخلفية معتمة بالكامل، فنضطر للتحويل يدوياً.
+    Image.open(out).convert("RGBA").save(out)
+    print(f"  + {os.path.relpath(out, ROOT)} ({px}x{px}, RGBA)")
 
 # ── ICO متعدد المقاسات ──
 # PIL يبني كل مقاس بالتصغير من اللوحة الكبيرة (append_images غير
