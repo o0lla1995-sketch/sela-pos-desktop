@@ -2,8 +2,10 @@
 /**
  * spool.rs — كتابة RAW عبر مشغّل طباعة ويندوز (Winspool).
  * هذه هي القناة القياسية لطابعات USB الحرارية المثبتة بمشغّلها:
- * نفتح الطابعة بـ OpenPrinter ثم StartDoc بمُعايرة بيانات "RAW"
- * فتُكتب أوامر ESC/POS مباشرة — بلا حوار ويندوز (طباعة صامتة).
+ * نفتح الطابعة ثم StartDoc بمعايرة بيانات "RAW" فتُكتب أوامر ESC/POS
+ * مباشرة — بلا حوار ويندوز (طباعة صامتة).
+ *
+ * التوقيعات مطابقة لحزمة windows 0.58 حرفياً (استخرجت من مصدرها).
  */
 
 use crate::Result;
@@ -19,23 +21,28 @@ pub fn installed_printers() -> Vec<String> {
 #[cfg(windows)]
 mod imp {
     use super::*;
-    use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Foundation::HANDLE;
     use windows::Win32::Graphics::Printing::{
-        DocInfo1W, EndDocPrinter, EndPagePrinter, EnumPrintersW, OpenPrinter2W,
-        StartDocPrinterW, StartPagePrinter, WritePrinter, PRINTER_ENUM_CONNECTIONS,
-        PRINTER_ENUM_LOCAL, PRINTER_INFO_1W,
+        ClosePrinter, EndDocPrinter, EndPagePrinter, EnumPrintersW, OpenPrinterW,
+        StartDocPrinterW, StartPagePrinter, WritePrinter, DOC_INFO_1W,
+        PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL, PRINTER_INFO_1W,
     };
+    use windows::core::{PCWSTR, PWSTR};
 
     pub fn spool_impl(name: &str, bytes: &[u8]) -> Result<usize> {
         unsafe {
             let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
             let mut printer = HANDLE::default();
-            if OpenPrinter2W(PCWSTR(wide.as_ptr()), &mut printer, None, None).is_err() {
-                return Err(crate::SelaError::msg(format!(
+            OpenPrinterW(
+                PCWSTR(wide.as_ptr()),
+                &mut printer,
+                None,
+            )
+            .map_err(|_| {
+                crate::SelaError::msg(format!(
                     "تعذر فتح الطابعة «{name}» — تأكد من اسمها في إعدادات النظام"
-                )));
-            }
+                ))
+            })?;
             let result = (|| -> Result<usize> {
                 let doc_name: Vec<u16> = "sela receipt"
                     .encode_utf16()
@@ -43,12 +50,12 @@ mod imp {
                     .collect();
                 let datatype: Vec<u16> = "RAW".encode_utf16().chain(std::iter::once(0)).collect();
                 let mut output: Vec<u16> = vec![0];
-                let doc = DocInfo1W {
-                    pDocName: PCWSTR(doc_name.as_ptr()),
-                    pOutputFile: PCWSTR(output.as_mut_ptr()),
-                    pDatatype: PCWSTR(datatype.as_ptr()),
+                let doc = DOC_INFO_1W {
+                    pDocName: PWSTR::from_raw(doc_name.as_mut_ptr()),
+                    pOutputFile: PWSTR::from_raw(output.as_mut_ptr()),
+                    pDatatype: PWSTR::from_raw(datatype.as_mut_ptr()),
                 };
-                if StartDocPrinterW(printer, 1, &doc as *const _ as *const _).0 == 0 {
+                if StartDocPrinterW(printer, 1, &doc) == 0 {
                     return Err(crate::SelaError::msg("فشل بدء مستند الطباعة (RAW)"));
                 }
                 StartPagePrinter(printer);
@@ -58,11 +65,11 @@ mod imp {
                     let mut written: u32 = 0;
                     let w = WritePrinter(
                         printer,
-                        chunk.as_ptr() as *const _,
+                        chunk.as_ptr() as *const core::ffi::c_void,
                         chunk.len() as u32,
                         &mut written,
                     );
-                    if w.is_err() || written as usize != chunk.len() {
+                    if !w.is_ok() || written as usize != chunk.len() {
                         ok = false;
                         break;
                     }
@@ -77,7 +84,7 @@ mod imp {
                 }
                 Ok(written_total)
             })();
-            let _ = CloseHandle(printer);
+            let _ = ClosePrinter(printer);
             result
         }
     }
@@ -86,18 +93,25 @@ mod imp {
         unsafe {
             let mut needed: u32 = 0;
             let mut returned: u32 = 0;
-            let flags = PRINTER_ENUM_LOCAL.0 | PRINTER_ENUM_CONNECTIONS.0;
-            let _ = EnumPrintersW(flags, None, 1, None, 0, &mut needed, &mut returned);
+            let flags: u32 = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS;
+            // استعلامان: الأول لأخذ الأحجام، الثاني للتعبئة.
+            let _ = EnumPrintersW(
+                flags,
+                PCWSTR::null(),
+                1,
+                None,
+                &mut needed,
+                &mut returned,
+            );
             if needed == 0 {
                 return Vec::new();
             }
             let mut buffer = vec![0u8; needed as usize];
             let ok = EnumPrintersW(
                 flags,
-                None,
+                PCWSTR::null(),
                 1,
-                Some(buffer.as_mut_ptr() as *mut _),
-                needed,
+                Some(buffer.as_mut_slice()),
                 &mut needed,
                 &mut returned,
             );

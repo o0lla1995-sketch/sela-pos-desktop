@@ -137,20 +137,18 @@ mod windows_impl {
     use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, GetMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
-        KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
-    };
-    use windows::Win32::UI::WindowsAndMessaging::{
-        LLKHF_INJECTED, WM_KEYDOWN, WM_SYSKEYDOWN,
+        KBDLLHOOKSTRUCT, LLKHF_INJECTED, WH_KEYBOARD_LL, HOOKPROC, MSG,
+        WM_KEYDOWN, WM_SYSKEYDOWN,
     };
 
     pub fn run_message_loop() {
         unsafe {
-            let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(low_level_proc), None, 0);
-            if hook.is_invalid() {
-                return;
-            }
+            let hook = match SetWindowsHookExW(WH_KEYBOARD_LL, Some(low_level_proc), None, 0) {
+                Ok(h) => h,
+                Err(_) => return,
+            };
             let mut msg = MSG::default();
-            // حلقة رسائل قياسية — تظل حية حتى PostThreadMessage بالخروج.
+            // حلقة رسائل قياسية — تظل حية حتى إلغاء الخطاف.
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {}
             let _ = UnhookWindowsHookEx(hook);
         }
@@ -163,7 +161,7 @@ mod windows_impl {
     ) -> LRESULT {
         if code >= 0 {
             let kb = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
-            let injected = (kb.flags & LLKHF_INJECTED.0) != 0;
+            let injected = kb.flags.contains(LLKHF_INJECTED);
             if !injected {
                 let is_down = wparam.0 as u32 == WM_KEYDOWN || wparam.0 as u32 == WM_SYSKEYDOWN;
                 if is_down {

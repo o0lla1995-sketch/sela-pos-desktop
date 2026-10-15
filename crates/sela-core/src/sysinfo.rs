@@ -139,6 +139,7 @@ fn chrono_like_now() -> u128 {
 
 #[cfg(windows)]
 fn platform_device_id() -> Result<String> {
+    use windows::Win32::Foundation::ERROR_SUCCESS;
     use windows::Win32::System::Registry::{
         RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ,
     };
@@ -150,7 +151,7 @@ fn platform_device_id() -> Result<String> {
         let value: Vec<u16> = "MachineGuid".encode_utf16().chain(std::iter::once(0)).collect();
         let mut buf = [0u16; 128];
         let mut size = (std::mem::size_of_val(&buf)) as u32;
-        let ok = RegGetValueW(
+        let status = RegGetValueW(
             HKEY_LOCAL_MACHINE,
             windows::core::PCWSTR(subkey.as_ptr()),
             windows::core::PCWSTR(value.as_ptr()),
@@ -159,7 +160,7 @@ fn platform_device_id() -> Result<String> {
             Some(buf.as_mut_ptr() as *mut _),
             Some(&mut size),
         );
-        if ok.is_err() {
+        if status != ERROR_SUCCESS {
             return Ok(String::new());
         }
         let len = (size as usize) / 2;
