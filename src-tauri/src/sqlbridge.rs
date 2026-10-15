@@ -8,7 +8,7 @@ use crate::AppState;
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use tauri::command;
+use tauri::{command, State};
 
 type CmdResult<T> = Result<T, String>;
 
