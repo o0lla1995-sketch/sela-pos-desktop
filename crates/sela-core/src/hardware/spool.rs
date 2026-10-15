@@ -69,7 +69,7 @@ mod imp {
                         chunk.len() as u32,
                         &mut written,
                     );
-                    if !w.is_ok() || written as usize != chunk.len() {
+                    if !w.as_bool() || written as usize != chunk.len() {
                         ok = false;
                         break;
                     }

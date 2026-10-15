@@ -186,7 +186,7 @@ fn platform_device_id() -> Result<String> {
 
 #[cfg(windows)]
 fn platform_uptime_ms() -> Result<u64> {
-    Ok(windows::Win32::System::SystemInformation::GetTickCount64())
+    Ok(unsafe { windows::Win32::System::SystemInformation::GetTickCount64() })
 }
 
 #[cfg(not(windows))]
