@@ -222,7 +222,7 @@ export function harnessInvoke(
       return {
         dataDir: '/tmp/sela-test',
         deviceId: 'test-device-1',
-        coreVersion: '57.0.0',
+        coreVersion: '57.1.0',
         printer: null,
       };
     case 'device_id':
