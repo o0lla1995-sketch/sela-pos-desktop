@@ -1,60 +1,107 @@
 /**
- * NotificationsScreen.tsx — مركز الإشعارات داخل التطبيق (§ شجرة 9).
+ * screens/NotificationsScreen.tsx — مركز الإشعارات (UI-7 — مطابق لمخزن
+ * الإشعارات v57): items/unreadCount/markAllRead/markRead/clearAll —
+ * صفوف برقائق النوع، تعليم الكل كمقروء، تعليم صف بالفتح، وحالة فراغ.
  */
-import React from 'react';
+import React, {useCallback} from 'react';
 import {useNotificationsStore} from '../state/appStores';
-import {formatDateTime} from '../core/format';
+import {relativeTime} from '../core/format';
+import type {NotificationKind} from '../core/types';
+import './settingsv57.css';
 
-const KIND_META: Record<string, {label: string; chip: string; icon: string}> = {
+/** رقائق النوع — تغطي كل أنواع NotificationKind في v57. */
+const KIND_META: Record<NotificationKind, {label: string; chip: string; icon: string}> = {
   out_of_stock: {label: 'نفاد مخزون', chip: 'danger', icon: '📦'},
   low_stock: {label: 'مخزون منخفض', chip: 'warn', icon: '📉'},
+  expiry: {label: 'صلاحية', chip: 'warn', icon: '⏳'},
   info: {label: 'معلومة', chip: 'muted', icon: 'ℹ️'},
   printer: {label: 'الطابعة', chip: 'danger', icon: '🖨️'},
   sale: {label: 'بيع', chip: 'brand', icon: '🧾'},
   stocktake: {label: 'جرد', chip: 'ok', icon: '📋'},
+  online_order: {label: 'طلب أونلاين', chip: 'brand', icon: '🛍️'},
+  license: {label: 'الاشتراك', chip: 'warn', icon: '🔑'},
+  sila_debt: {label: 'دين صِلة', chip: 'danger', icon: '🔗'},
+  sila_payment: {label: 'سداد صِلة', chip: 'ok', icon: '🔗'},
+  sila_collection: {label: 'تحصيل صِلة', chip: 'ok', icon: '🔗'},
+  sila_voucher: {label: 'قسائم', chip: 'brand', icon: '🎟️'},
+  sila_campaign: {label: 'تسوية حملة', chip: 'ok', icon: '🏛️'},
 };
 
 export function NotificationsScreen() {
   const items = useNotificationsStore(s => s.items);
+  const unreadCount = useNotificationsStore(s => s.unreadCount);
   const markAllRead = useNotificationsStore(s => s.markAllRead);
+  const markRead = useNotificationsStore(s => s.markRead);
+  const clearAll = useNotificationsStore(s => s.clearAll);
+
+  const onRowClick = useCallback(
+    (id: string, read: boolean) => {
+      if (!read) {
+        markRead(id);
+      }
+    },
+    [markRead],
+  );
 
   return (
     <div className="screen">
       <h1>مركز الإشعارات</h1>
       <div className="subtitle">
-        تنبيهات النقص والطابعة والعمليات — {items.filter(n => !n.read).length} غير مقروء
+        تنبيهات المخزون والصلاحية والصِلة والبيع أونلاين — {unreadCount} غير
+        مقروء من أصل {items.length}
       </div>
+
       <div className="toolbar">
-        <button className="btn" onClick={markAllRead}>تعليم الكل كمقروء</button>
+        <button className="btn" onClick={markAllRead} disabled={unreadCount === 0}>
+          تعليم الكل كمقروء
+        </button>
+        <button
+          className="btn danger"
+          onClick={() => {
+            if (items.length > 0 && window.confirm('مسح كل الإشعارات؟')) {
+              clearAll();
+            }
+          }}
+          disabled={items.length === 0}>
+          مسح الكل
+        </button>
       </div>
-      <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
-        {[...items].reverse().map(n => {
-          const meta = KIND_META[n.kind] ?? KIND_META.info!;
-          return (
-            <div key={n.id} className="card" style={{display: 'flex', gap: 12, alignItems: 'center'}}>
-              <span style={{fontSize: 22}}>{meta.icon}</span>
-              <div style={{flex: 1}}>
-                <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
-                  <b style={{fontSize: 13.5}}>{n.title}</b>
-                  <span className={`chip ${meta.chip}`}>{meta.label}</span>
-                  {!n.read && <span className="chip brand">جديد</span>}
-                </div>
-                <div style={{color: 'var(--ink-soft)', fontSize: 12.5, marginTop: 4}}>
-                  {n.body}
-                </div>
-                <div style={{color: 'var(--muted)', fontSize: 11, marginTop: 4}} dir="ltr">
-                  {formatDateTime(n.createdAt)}
+
+      {items.length === 0 ? (
+        <div className="card">
+          <div className="sv57-empty">
+            <div className="icon">🔔</div>
+            لا إشعارات بعد — ستظهر هنا تنبيهات النفاد والصلاحية والصِلة
+            والطلبات أونلاين
+          </div>
+        </div>
+      ) : (
+        <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
+          {items.map(n => {
+            const meta = KIND_META[n.kind] ?? KIND_META.info;
+            return (
+              <div
+                key={n.id}
+                className={`sv57-notif-row ${n.read ? '' : 'unread'}`}
+                onClick={() => onRowClick(n.id, n.read)}>
+                <span className="icon">{meta.icon}</span>
+                <div className="texts">
+                  <div className="title-line">
+                    <b>{n.title}</b>
+                    <span className={`chip ${meta.chip}`}>{meta.label}</span>
+                    {!n.read && <span className="chip brand">جديد</span>}
+                  </div>
+                  <div className="body">{n.body}</div>
+                  <div className="when">{relativeTime(n.createdAt)}</div>
                 </div>
               </div>
-            </div>
-          );
-        })}
-        {items.length === 0 && (
-          <div className="empty">
-            <div className="icon">🔔</div>
-            لا إشعارات بعد
-          </div>
-        )}
+            );
+          })}
+        </div>
+      )}
+
+      <div className="sv57-chart-hint" style={{marginTop: 10}}>
+        يُحتفظ بآخر 100 إشعار — الضغط على إشعار جديد يعلّمه مقروءاً.
       </div>
     </div>
   );

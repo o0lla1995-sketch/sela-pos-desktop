@@ -1,8 +1,9 @@
 /**
- * printing/escpos.ts — بانية العمليات منقولة حرفياً من
- * services/printer/escpos.ts الأندرويد. الترميز إلى بايتات يقع في نواة
- * Rust (escpos.rs) بنفس متتاليات ThermalPrinterModule.kt — الواجهة تبني
- * «العمليات» فقط.
+ * printing/escpos.ts — تعريف عملية ESC/POS (الشكل النهائي أندرويد v57).
+ * ─────────────────────────────────────────────────────────────────
+ * البانية الحية (ReceiptBuilder) في services/printer/escpos.ts — المنقولة
+ * حرفياً من v57. هذا الملف يحمل نوع العملية الذي يمر للنواة (Rust)
+ * للترميز إلى بايتات بنفس متتاليات ThermalPrinterModule.kt.
  */
 export interface EscPosOp {
   op:
@@ -17,131 +18,29 @@ export interface EscPosOp {
     | 'rawBase64'
     | 'qr'
     | 'barcode128'
+    | 'barcode'
     | 'image';
+  /** Text payload for op:'text' / op:'rawBase64'. */
   value?: string;
+  /** Barcode system for op:'barcode' (v9.1 label printing). */
+  system?: 'EAN13' | 'CODE128';
+  /** Image file path for op:'image'. */
   path?: string;
+  /** Max raster width in dots for op:'image' (58mm=384, 80mm=576). */
   maxWidth?: number;
+  /** Center the raster for op:'image'. */
   center?: boolean;
+  /** Code page number for op:'codepage'. */
   page?: number;
+  /** 0=left 1=center 2=right for op:'align'. */
   align?: number;
+  /** Bold flag for op:'bold'. */
   on?: boolean;
+  /** Double-size flags for op:'size'; barcode module width for op:'barcode'. */
   width?: number;
   height?: number;
+  /** Feed line count for op:'feed'. */
   lines?: number;
+  /** QR module size for op:'qr'. */
   moduleSize?: number;
-}
-
-import {formatAmount} from '../core/format';
-
-export class ReceiptBuilder {
-  private ops: EscPosOp[] = [];
-
-  static create(): ReceiptBuilder {
-    const builder = new ReceiptBuilder();
-    builder.ops.push({op: 'init'});
-    return builder;
-  }
-
-  codepage(page: number): this {
-    this.ops.push({op: 'codepage', page});
-    return this;
-  }
-
-  /** 0 = left, 1 = center, 2 = right */
-  align(value: 0 | 1 | 2): this {
-    this.ops.push({op: 'align', align: value});
-    return this;
-  }
-
-  bold(on: boolean): this {
-    this.ops.push({op: 'bold', on});
-    return this;
-  }
-
-  /** Double width/height flags for headers and totals. */
-  size(width: 0 | 1, height: 0 | 1): this {
-    this.ops.push({op: 'size', width, height});
-    return this;
-  }
-
-  text(value: string): this {
-    this.ops.push({op: 'text', value});
-    return this;
-  }
-
-  textLine(value: string): this {
-    this.ops.push({op: 'text', value: `${value}\n`});
-    return this;
-  }
-
-  feed(lines = 1): this {
-    this.ops.push({op: 'feed', lines});
-    return this;
-  }
-
-  cut(): this {
-    this.ops.push({op: 'cut'});
-    return this;
-  }
-
-  /** Raster image (store logo): GS v 0, centered, dithered natively. */
-  image(path: string, maxWidth: number): this {
-    this.ops.push({op: 'image', path, maxWidth, center: true});
-    return this;
-  }
-
-  /** A dashed separator across the paper width. */
-  separator(width: number, char = '-'): this {
-    return this.textLine(char.repeat(Math.max(8, width)));
-  }
-
-  /** Blank spacing line. */
-  blank(): this {
-    return this.textLine('');
-  }
-
-  /**
-   * Two-column money line — ASCII label + dotted leaders + amount
-   * (bidi-safe on any printer firmware).
-   */
-  twoColumns(label: string, amount: number | string, width: number): this {
-    const amountText =
-      typeof amount === 'number' ? formatAmount(amount) : amount;
-    const labelPart =
-      label.length <= width - 4
-        ? label
-        : label.slice(0, Math.max(4, width - 4));
-    const dots = Math.max(1, width - labelPart.length - amountText.length - 1);
-    return this.textLine(`${labelPart} ${'.'.repeat(dots)} ${amountText}`);
-  }
-
-  /** Product line: "2 x 4.50 = 9.00" (pure ASCII, right-aligned). */
-  qtyPriceLine(quantity: number, unitPrice: number, total: number): this {
-    return this.textLine(
-      `${quantity} x ${formatAmount(unitPrice)} = ${formatAmount(total)}`,
-    );
-  }
-
-  /** Truncates by code points, safe for Arabic. */
-  truncate(value: string, max: number): this {
-    return this.textLine(
-      value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`,
-    );
-  }
-
-  /** إضافة اختيارية (المهمة §2.ب): رمز QR حراري بالفاتورة. */
-  qr(data: string, moduleSize = 6): this {
-    this.ops.push({op: 'qr', value: data, moduleSize});
-    return this;
-  }
-
-  /** ملصق باركود CODE128 (§3.3 إضافة مكتبية). */
-  barcode128(data: string, height = 60): this {
-    this.ops.push({op: 'barcode128', value: data, height});
-    return this;
-  }
-
-  build(): EscPosOp[] {
-    return [...this.ops];
-  }
 }

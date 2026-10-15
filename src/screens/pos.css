@@ -1,0 +1,423 @@
+/**
+ * pos.css — شاشة نقطة البيع v57 (سطح المكتب).
+ */
+.pos-root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 14px;
+  gap: 10px;
+}
+
+.pos-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pos-search {
+  flex: 1;
+  min-width: 220px;
+  max-width: 480px;
+}
+
+.pos-category {
+  min-width: 150px;
+}
+
+.pos-scanhint {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-inline-start: auto;
+}
+
+.pos-body {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  min-height: 0;
+}
+
+.pos-grid-wrap {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: var(--surface-2, var(--card, transparent));
+}
+
+.pos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 10px;
+}
+
+.pos-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  text-align: start;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--card, var(--surface));
+  cursor: pointer;
+  transition: transform 0.06s ease, border-color 0.12s ease;
+  min-height: 118px;
+}
+
+.pos-tile:hover:not(:disabled) {
+  border-color: var(--brand, #f97316);
+  transform: translateY(-1px);
+}
+
+.pos-tile.out {
+  opacity: 0.55;
+}
+
+.pos-tile-name {
+  font-weight: 700;
+  font-size: 13.5px;
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.pos-tile-prices {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pos-old-price {
+  text-decoration: line-through;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.pos-price {
+  font-weight: 800;
+  color: var(--brand-ink, #f97316);
+  font-size: 15px;
+}
+
+.pos-tile-stock {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ── السلة ── */
+.pos-cart {
+  width: 400px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  gap: 10px;
+  min-height: 0;
+  background: var(--card, var(--surface));
+}
+
+.pos-cart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pos-cart-lines {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pos-line {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pos-line-main {
+  min-width: 0;
+}
+
+.pos-line-name {
+  font-weight: 700;
+  font-size: 13px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.pos-line-math {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.pos-line-ctrl {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.pos-cart-math {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pos-discount-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.pos-discount-row input {
+  width: 110px;
+}
+
+.pos-math-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13.5px;
+}
+
+.pos-math-row.total {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--brand-ink, #f97316);
+}
+
+.pos-cart-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pos-pay-row {
+  display: flex;
+  gap: 8px;
+}
+
+.pos-pay-row .btn {
+  flex: 1;
+  font-size: 12.5px;
+}
+
+.btn.primary.big {
+  font-size: 16px;
+  padding: 13px;
+}
+
+/* ── لوحات الدفع ── */
+.pos-pay {
+  width: min(420px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pos-pay-total {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--brand-ink, #f97316);
+  text-align: center;
+}
+
+.pos-amount-display {
+  font-size: 22px;
+  font-weight: 700;
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pos-amount-keys {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.pos-amount-keys .pin-key {
+  height: 54px;
+  font-size: 20px;
+  font-weight: 700;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2, var(--card));
+  cursor: pointer;
+}
+
+.pos-change {
+  text-align: center;
+  font-size: 16px;
+}
+
+.pos-pay-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pos-pay-buttons .btn {
+  flex: 1;
+  min-width: 120px;
+}
+
+.pos-quickweights {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.pos-debt-customer {
+  font-size: 15px;
+  text-align: center;
+}
+
+/* ── لوحات الاختيار ── */
+.pos-picker {
+  width: min(560px, 94vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pos-picker-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 120px;
+}
+
+.pos-picker-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2, var(--card));
+  cursor: pointer;
+  text-align: start;
+}
+
+.pos-picker-row:hover {
+  border-color: var(--brand, #f97316);
+}
+
+.pos-picker-side {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.pos-local-create {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── اختيار المتغيرات ── */
+.pos-variant {
+  width: min(520px, 94vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pos-variant-colors {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chip-toggle-btn {
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2, var(--card));
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.chip-toggle-btn.on {
+  background: var(--brand, #f97316);
+  color: #fff;
+  border-color: var(--brand, #f97316);
+}
+
+.pos-variant-sizes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pos-variant-size {
+  min-width: 96px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2, var(--card));
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+}
+
+.pos-variant-size:hover {
+  border-color: var(--brand, #f97316);
+}
+
+.pos-bundle {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.pos-bundle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pos-bundle-row input {
+  width: 90px;
+}
+
+.btn.danger-ghost {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.4);
+}

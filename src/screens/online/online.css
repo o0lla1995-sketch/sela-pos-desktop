@@ -1,0 +1,331 @@
+/* online.css — شاشات البيع أونلاين (متجر سيلا ماركت) UI-4.
+ * طبقة خاصة بالشاشات الثلاث: الطلبات أونلاين، منتجات النقطة، إعدادات
+ * البيع أونلاين. تبني على styles.css (الهوية الداكنة/الفاتحة + RTL)
+ * ولا تكرر أي صنف منها — كل الأصناف الجديدة ببادئة olo- منعاً للتعارض. */
+
+/* ── مفتاح تشغيل/إيقاف (بديل Switch الرِداكت نيتف) ── */
+.olo-switch {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.olo-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.olo-switch .track {
+  position: absolute; inset: 0;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  transition: background 0.15s, border-color 0.15s;
+  cursor: pointer;
+}
+.olo-switch .track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  inset-inline-start: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transition: transform 0.15s;
+}
+.olo-switch input:checked + .track {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+.olo-switch input:checked + .track::after { transform: translateX(-18px); }
+.olo-switch input:disabled + .track { opacity: 0.45; cursor: not-allowed; }
+
+/* ── رقائق فلاتر الحالة مع شارة العدد ── */
+.olo-filter { display: inline-flex; align-items: center; gap: 7px; }
+.olo-filter .count {
+  min-width: 20px;
+  text-align: center;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 10.5px;
+  font-weight: 800;
+  background: var(--surface-2);
+  color: var(--ink-soft);
+}
+.olo-filter .count.alert { background: var(--brand); color: #fff; }
+.olo-filter.on .count { background: rgba(255, 255, 255, 0.22); color: #fff; }
+.olo-filter.on .count.alert { background: #fff; color: var(--brand); }
+
+/* ── رقاقة حالة الطلب (ألوان الحالات السبع) ── */
+.olo-st {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.olo-st-new { background: var(--brand-soft); color: var(--brand-ink); }
+.olo-st-accepted { background: rgba(59, 130, 246, 0.15); color: #7cb0f8; }
+.olo-st-sent { background: var(--warn-soft); color: var(--warn); }
+.olo-st-delivered { background: var(--ok-soft); color: var(--ok); }
+.olo-st-rejected,
+.olo-st-cancelled,
+.olo-st-returned { background: var(--danger-soft); color: var(--danger); }
+:root[data-theme='light'] .olo-st-accepted { color: #2563eb; }
+
+/* ── تفاصيل الطلب داخل النافذة ── */
+.olo-head-sub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  flex-wrap: wrap;
+}
+.olo-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px 16px;
+  font-size: 13px;
+}
+.olo-info-grid > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  min-width: 0;
+}
+.olo-info-grid a {
+  color: var(--brand-ink);
+  text-decoration: none;
+  font-weight: 700;
+}
+.olo-info-grid a:hover { text-decoration: underline; }
+.olo-note {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 12.5px;
+  line-height: 1.8;
+}
+.olo-variant { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+.olo-totals {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  padding: 2px 2px 0;
+}
+.olo-totals .row { display: flex; justify-content: space-between; }
+.olo-totals .grand {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--ink);
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.olo-totals .grand b { color: var(--brand-ink); }
+.olo-totals .returned { color: var(--danger); }
+
+.olo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.olo-hint {
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.8;
+  flex-basis: 100%;
+}
+.olo-busy { font-size: 12px; color: var(--brand-ink); font-weight: 700; }
+
+.olo-reason-box { display: flex; flex-direction: column; gap: 8px; flex-basis: 100%; }
+.olo-reason-box textarea {
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  min-height: 74px;
+  resize: vertical;
+}
+
+/* ── حقل بحث عام (منتجات النقطة / منتقي الإدراج) ── */
+.olo-search {
+  padding: 9px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  width: 100%;
+}
+.olo-search:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
+
+/* ── قائمة منتجات النقطة ── */
+.olo-prod-list { display: flex; flex-direction: column; gap: 8px; }
+.olo-prod-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.olo-prod-row:hover { border-color: var(--brand); }
+.olo-prod-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  display: grid;
+  place-items: center;
+  font-size: 19px;
+  flex-shrink: 0;
+}
+.olo-prod-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.olo-prod-name {
+  font-weight: 700;
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.olo-prod-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  flex-wrap: wrap;
+}
+.olo-price-old { text-decoration: line-through; color: var(--muted); font-size: 11px; }
+.olo-price-new { font-weight: 800; color: var(--brand-ink); font-size: 13px; }
+.olo-prod-side { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+/* ── منتقي الإدراج (بحث + انتقاء متعدد) ── */
+.olo-picker-list {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.olo-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  cursor: pointer;
+}
+.olo-pick-row.on { background: var(--brand-soft); border-color: var(--brand); }
+.olo-checkbox {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 2px solid var(--line);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #fff;
+  font-weight: 900;
+}
+.olo-pick-row.on .olo-checkbox { background: var(--brand); border-color: var(--brand); }
+
+/* ── زر منقّط (إضافة منطقة / إدراج منتجات) ── */
+.olo-dashed-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px;
+  border: 1.5px dashed var(--brand);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--brand-ink);
+  font-weight: 700;
+  font-size: 13px;
+}
+.olo-dashed-btn:hover { background: var(--brand-soft); }
+
+/* ── إعدادات البيع أونلاين ── */
+.olo-card-title { font-weight: 800; font-size: 14px; }
+.olo-card-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 2px;
+  margin-bottom: 12px;
+  line-height: 1.7;
+}
+.olo-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--brand);
+  background: var(--brand-soft);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  cursor: pointer;
+  width: 100%;
+  text-align: start;
+  color: var(--ink);
+}
+.olo-entry:hover { filter: brightness(1.08); }
+.olo-entry-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.olo-entry-title { font-weight: 800; font-size: 13.5px; }
+.olo-entry-hint { font-size: 11.5px; color: var(--ink-soft); line-height: 1.7; }
+
+.olo-region-row { display: flex; align-items: center; gap: 8px; }
+.olo-region-row .field { flex: 1; }
+.olo-fee-wrap { display: flex; align-items: flex-end; gap: 6px; }
+.olo-fee-wrap .field { width: 110px; }
+.olo-fee-suffix { font-weight: 800; color: var(--ink-soft); font-size: 13px; padding-bottom: 10px; }
+
+.olo-sync-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+.olo-footer-hint {
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.9;
+  padding: 4px 10px 10px;
+}
+
+/* ── بطاقة تحذير (البيع أونلاين معطّل) ── */
+.olo-warn-card {
+  border-inline-start: 4px solid var(--warn);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 1.8;
+}

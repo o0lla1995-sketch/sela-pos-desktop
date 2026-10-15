@@ -1,400 +1,934 @@
 /**
- * InventoryScreen.tsx — المخزون والكتالوج (§3.3): جدول قابل للتصفية
- * + نموذج منتج + إدارة التصنيفات والوحدات + طباعة ملصق باركود.
+ * screens/InventoryScreen.tsx — المخزون والكتالوج v57 (UI-6).
+ * ─────────────────────────────────────────────────────────────────
+ * منقول من InventoryScreen الأندرويد (v57) إلى جدول مكتبكي كامل:
+ *
+ *  • جدول المنتجات: الاسم والباركود، التصنيف، التكلفة/المفرق/الجملة،
+ *    المخزون بحالته (نفد/منخفض/بلا تتبع) مع وحدته، الصلاحية
+ *    (منتهي/قرب الانتهاء بألوان v32)، الخصم v51 (السعر القديم مشطوباً
+ *    والجديد ملوّناً)، متغيرات v35 («متغيرات N»)، والمؤرشفون (v23).
+ *  • فلاتر: الكل + تصنيفات نمط المتجر الحالي (بعدّادات) + «المؤرشفة»
+ *    + «الصلاحية» + بحث بالاسم أو الباركود.
+ *  • الإدراج الانتقائي أونلاين v55: مفتاح بجانب كل منتج —
+ *    ProductRepo.setOnlineListed + مزامنة فورية notifyCatalogChanged،
+ *    وزر «مزامنة الكتالوج» اليدوي عند تغيّر الإدراج.
+ *  • ملصق باركود لكل منتج (v9.1): باركود المصنّع أو توليد EAN-13
+ *    داخلي فريد (بادئة 20…) يُحفظ على المنتج ثم يُطبع حرارياً
+ *    (buildLabelJob) — السعر على الملصق بعد الخصم.
+ *  • حذف v23: منتج له سجل مبيعات/جرد يُؤرشف (يبقى للتقارير
+ *    والمرتجعات) ومنتج بلا سجل يُحذف نهائياً — نفس رسائل الأندرويد.
+ *  • إدارة التصنيفات: إضافة/تسمية/حذف داخل نطاق نمط المتجر.
  */
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {api} from '../lib/tauri';
+import {ProductRepo, type ProductInput} from '../database/repositories/ProductRepo';
+import {CategoryRepo} from '../database/repositories/CategoryRepo';
+import {UnitRepo} from '../database/repositories/UnitRepo';
 import {useCatalogStore, useToastStore} from '../state/appStores';
-import {useSettingsStore} from '../state/settingsStore';
-import {formatMoney} from '../core/format';
+import {useSettingsStore, getPrinter} from '../stores/settingsStore';
+import {formatMoney, formatQty} from '../core/format';
+import {BASE_UNIT_NAME} from '../core/config';
+import {
+  baseUnitLabelOf,
+  daysUntilExpiry,
+  expiryStateOf,
+  stockStateOf,
+} from '../core/types';
+import type {Category, Product} from '../core/types';
+import {generateInternalEan13} from '../services/BarcodeService';
+import {buildLabelJob} from '../services/printer/label';
+import {ThermalPrinterService} from '../services/printer/ThermalPrinterService';
+import {
+  notifyCatalogChanged,
+  syncProducts,
+} from '../services/online/OnlineStoreService';
 import {ProductFormModal} from './ProductFormModal';
-import {buildBarcodeLabel} from '../printing/receipt';
-import {printJob} from '../printing/dispatch';
-import type {Category, Product, Unit} from '../core/types';
+import './inventoryv57.css';
+
+type CategoryFilter = number | 'all';
+
+/** v51: السعر النهائي بعد خصم المنتج (0–95). */
+function finalPriceOf(product: Product): number {
+  const pct = Math.max(0, Math.min(95, product.discount_pct ?? 0));
+  if (pct <= 0) {
+    return product.retail_price;
+  }
+  return Math.round(product.retail_price * (1 - pct / 100) * 100) / 100;
+}
+
+/** تحويل منتج محمّل إلى ProductInput كامل (لحفظ باركود مولّد). */
+function productToInput(product: Product): ProductInput {
+  return {
+    name: product.name,
+    cost_price: product.cost_price,
+    retail_price: product.retail_price,
+    wholesale_price: product.wholesale_price,
+    discount_pct: product.discount_pct,
+    online_listed: product.online_listed,
+    stock_quantity: product.stock_quantity,
+    category_id: product.category_id,
+    image_uri: product.image_uri,
+    low_stock_threshold: product.low_stock_threshold,
+    barcode: product.barcode,
+    sold_by_weight: product.sold_by_weight,
+    expiry_date: product.expiry_date,
+    style_group: product.style_group,
+    variant_size: product.variant_size,
+    variant_color: product.variant_color,
+    has_variants: product.has_variants,
+    base_unit_name: product.base_unit_name,
+    stock_untracked: product.stock_untracked,
+    sizes_count: product.sizes_count,
+  };
+}
 
 export function InventoryScreen() {
   const toast = useToastStore(s => s.show);
   const products = useCatalogStore(s => s.products);
+  const categories = useCatalogStore(s => s.categories);
   const refresh = useCatalogStore(s => s.refresh);
   const settings = useSettingsStore(s => s.settings);
 
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [units, setUnits] = useState<Unit[]>([]);
-  const [catFilter, setCatFilter] = useState<number | 'all'>('all');
+  // ── الفلاتر ──────────────────────────────────────────────────
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<'name' | 'stock' | 'retail'>('name');
-  const [editing, setEditing] = useState<number | null>(null);
-  const [formOpen, setFormOpen] = useState(false);
-  const [tab, setTab] = useState<'products' | 'categories' | 'units'>('products');
+  const [filter, setFilter] = useState<CategoryFilter>('all');
+  /** v23: عرض «المؤرشفة» — المحذوفون ذوو السجل. */
+  const [showArchived, setShowArchived] = useState(false);
+  /** v32: شريحة «الصلاحية» — قرب الانتهاء/منتهي. */
+  const [showExpiring, setShowExpiring] = useState(false);
 
-  const reloadMeta = useCallback(async () => {
+  // ── البيانات ─────────────────────────────────────────────────
+  const [archivedProducts, setArchivedProducts] = useState<Product[]>([]);
+  const [loadingArchived, setLoadingArchived] = useState(true);
+
+  // ── النموذج ──────────────────────────────────────────────────
+  /** undefined = مغلق · null = منتج جديد · Product = تعديل. */
+  const [editing, setEditing] = useState<Product | null | undefined>(undefined);
+
+  // ── إدارة التصنيفات ──────────────────────────────────────────
+  const [catsOpen, setCatsOpen] = useState(false);
+  const [catRows, setCatRows] = useState<Category[]>([]);
+  const [newCatName, setNewCatName] = useState('');
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameText, setRenameText] = useState('');
+
+  // ── الحالة التشغيلية ─────────────────────────────────────────
+  const [printBusyId, setPrintBusyId] = useState<number | null>(null);
+  const [toggleBusyId, setToggleBusyId] = useState<number | null>(null);
+  const [deleteBusyId, setDeleteBusyId] = useState<number | null>(null);
+  /** v55: تغيّر الإدراج أونلاين — يُظهر زر «مزامنة الكتالوج». */
+  const [catalogDirty, setCatalogDirty] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const loadArchived = useCallback(async () => {
+    setLoadingArchived(true);
     try {
-      const [cats, unitList] = await Promise.all([api.listCategories(), api.listUnits()]);
-      setCategories(cats);
-      setUnits(unitList);
-    } catch (e) {
-      toast(e instanceof Error ? e.message : String(e), 'error');
+      setArchivedProducts(await ProductRepo.list({archival: 'archived'}));
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : 'تعذر تحميل المؤرشفة',
+        'error',
+      );
+    } finally {
+      setLoadingArchived(false);
     }
   }, [toast]);
 
+  const reloadCats = useCallback(async () => {
+    try {
+      setCatRows(await CategoryRepo.listWithCounts(settings.storeMode));
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : 'تعذر تحميل التصنيفات',
+        'error',
+      );
+    }
+  }, [settings.storeMode, toast]);
+
   useEffect(() => {
     void refresh();
-    void reloadMeta();
+    void loadArchived();
+    void reloadCats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const visible = useMemo(() => {
-    let list = products;
-    if (catFilter !== 'all') list = list.filter(p => p.category_id === catFilter);
-    const q = search.trim();
-    if (q) list = list.filter(p => p.name.includes(q) || p.barcode === q);
-    const sorted = [...list];
-    sorted.sort((a, b) => {
-      if (sort === 'stock') return b.stock_quantity - a.stock_quantity;
-      if (sort === 'retail') return b.retail_price - a.retail_price;
-      return a.name.localeCompare(b.name, 'ar');
+  /* ── القوائم المشتقة ───────────────────────────────────────── */
+
+  /** المنتجات قرب الانتهاء أو المنتهية — الأقرب انتهاءً أولاً (v32). */
+  const expiringProducts = useMemo(
+    () =>
+      products
+        .filter(
+          product =>
+            expiryStateOf(product.expiry_date, settings.expiryAlertDays) !==
+            'ok',
+        )
+        .sort(
+          (a, b) =>
+            daysUntilExpiry(a.expiry_date!) - daysUntilExpiry(b.expiry_date!),
+        ),
+    [products, settings.expiryAlertDays],
+  );
+
+  /** نتائج الفلترة للعرض النشط (بلا المؤرشفين) — في وضع «الصلاحية»
+   *  يرتّب الأقرب انتهاءً أولاً (نفس سلوك v32). */
+  const expiringIds = useMemo(
+    () => new Set(expiringProducts.map(product => product.id)),
+    [expiringProducts],
+  );
+
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const rows = products.filter(product => {
+      if (filter !== 'all' && product.category_id !== filter) {
+        return false;
+      }
+      if (showExpiring && !expiringIds.has(product.id)) {
+        return false;
+      }
+      if (
+        query &&
+        !product.name.toLowerCase().includes(query) &&
+        !(product.barcode ?? '').toLowerCase().includes(query)
+      ) {
+        return false;
+      }
+      return true;
     });
-    return sorted;
-  }, [products, catFilter, search, sort]);
-
-  const printLabel = async (product: Product) => {
-    try {
-      await printJob(
-        buildBarcodeLabel(product, settings.paperWidth, settings.codepage),
+    if (showExpiring) {
+      rows.sort(
+        (a, b) =>
+          daysUntilExpiry(a.expiry_date!) - daysUntilExpiry(b.expiry_date!),
       );
-      toast(`طُبع ملصق ${product.name}`, 'success');
-    } catch (e) {
-      toast(e instanceof Error ? e.message : String(e), 'error');
     }
-  };
+    return rows;
+  }, [products, search, filter, showExpiring, expiringIds]);
 
+  /** عرض «المؤرشفة»: نفس البحث، بلا فلاتر التصنيف/الصلاحية. */
+  const archivedFiltered = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) {
+      return archivedProducts;
+    }
+    return archivedProducts.filter(
+      product =>
+        product.name.toLowerCase().includes(query) ||
+        (product.barcode ?? '').toLowerCase().includes(query),
+    );
+  }, [archivedProducts, search]);
+
+  const visible = showArchived ? archivedFiltered : filtered;
+
+  const countFor = useCallback(
+    (categoryId: CategoryFilter) =>
+      categoryId === 'all'
+        ? products.length
+        : products.filter(product => product.category_id === categoryId).length,
+    [products],
+  );
+
+  const lowCount = useMemo(
+    () =>
+      products.filter(product => {
+        // v38: بلا تتبع ليس حالة تنبيه — الكمية مرجعية.
+        const state = stockStateOf(product, settings.lowStockDefaultThreshold);
+        return state === 'low' || state === 'out';
+      }).length,
+    [products, settings.lowStockDefaultThreshold],
+  );
+
+  const categoryNameById = useMemo(
+    () => new Map(categories.map(c => [c.id, c.name] as const)),
+    [categories],
+  );
+
+  /* ── الملصق (v9.1): باركود أو توليد داخلي ثم طباعة ─────────── */
+  const printLabel = useCallback(
+    async (product: Product) => {
+      if (printBusyId != null) {
+        return;
+      }
+      if (getPrinter().channel === 'none') {
+        toast('لا توجد طابعة مضبوطة — اضبط قناة الطابعة من الإعدادات', 'error');
+        return;
+      }
+      setPrintBusyId(product.id);
+      try {
+        let code = product.barcode?.trim() ?? '';
+        if (code.length === 0) {
+          // منتج بلا باركود → EAN-13 داخلي فريد يُحفظ عليه فوراً.
+          code = await generateInternalEan13(async candidate => {
+            const productHit = await ProductRepo.findByBarcode(candidate);
+            if (productHit != null) {
+              return true;
+            }
+            const unitHit = await UnitRepo.findByBarcode(candidate);
+            return unitHit != null;
+          });
+          await ProductRepo.update(product.id, {
+            ...productToInput(product),
+            barcode: code,
+          });
+          await refresh();
+          toast(`وُلّد باركود داخلي لـ${product.name}: ${code}`, 'success');
+        }
+        const pct = Math.max(0, Math.min(95, product.discount_pct ?? 0));
+        const price = finalPriceOf(product);
+        const job = buildLabelJob(
+          {
+            productName: product.name,
+            price,
+            priceNote:
+              pct > 0
+                ? `خصم ${Math.round(pct)}% — بدلاً من ${formatMoney(
+                    product.retail_price,
+                  )}`
+                : product.sold_by_weight === 1
+                ? `سعر الكيلو ${formatMoney(price)}`
+                : null,
+            barcode: code,
+            copies: 1,
+          },
+          {paperWidth: settings.paperWidth, codepage: settings.codepage},
+        );
+        await ThermalPrinterService.printJob(job);
+        toast(`طُبع ملصق ${product.name}`, 'success');
+      } catch (error) {
+        toast(
+          error instanceof Error ? error.message : 'فشل طباعة الملصق',
+          'error',
+        );
+      } finally {
+        setPrintBusyId(null);
+      }
+    },
+    [printBusyId, refresh, settings.paperWidth, settings.codepage, toast],
+  );
+
+  /* ── v55: تبديل الإدراج أونلاين ────────────────────────────── */
+  const toggleOnlineListed = useCallback(
+    async (product: Product) => {
+      if (toggleBusyId != null) {
+        return;
+      }
+      const target = product.online_listed !== 1;
+      setToggleBusyId(product.id);
+      try {
+        const done = await ProductRepo.setOnlineListed(product.id, target);
+        if (!done) {
+          toast('لا يمكن إدراج منتج مؤرشف', 'error');
+          return;
+        }
+        await refresh();
+        notifyCatalogChanged();
+        setCatalogDirty(true);
+        toast(
+          target
+            ? `«${product.name}» معروض الآن في متجر سيلا — يتحدث خلال ثوانٍ`
+            : `أُوقف عرض «${product.name}» — يختفي من المتجر خلال ثوانٍ`,
+          'success',
+        );
+      } catch (error) {
+        toast(
+          error instanceof Error ? error.message : 'تعذر تغيير الإدراج',
+          'error',
+        );
+      } finally {
+        setToggleBusyId(null);
+      }
+    },
+    [toggleBusyId, refresh, toast],
+  );
+
+  /** «مزامنة الكتالوج» اليدوية بعد تغييرات الإدراج. */
+  const syncCatalogNow = useCallback(async () => {
+    if (syncing) {
+      return;
+    }
+    setSyncing(true);
+    try {
+      const saved = await syncProducts();
+      setCatalogDirty(false);
+      toast(
+        saved > 0
+          ? `زُامن ${saved} منتجاً مع المتجر الأونلاين`
+          : 'المتجر الأونلاين معطّل أو لا تغييرات جديدة للمزامنة',
+        saved > 0 ? 'success' : 'info',
+      );
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : 'تعذرت مزامنة الكتالوج',
+        'error',
+      );
+    } finally {
+      setSyncing(false);
+    }
+  }, [syncing, toast]);
+
+  /* ── الحذف/الأرشفة/الاسترجاع (v23) ─────────────────────────── */
+  const removeProduct = useCallback(
+    async (product: Product) => {
+      if (deleteBusyId != null) {
+        return;
+      }
+      let hasHistory = false;
+      try {
+        hasHistory = await ProductRepo.hasHistory(product.id);
+      } catch {
+        hasHistory = true; // عند الشك نأرشف لا نحذف — سلامة السجل.
+      }
+      const message = hasHistory
+        ? 'هذا المنتج له سجل مبيعات أو جرد يمنع حذفه نهائياً. سيُؤرشف: يختفي من البيع والمخزن والتنبيهات ويبقى سجله كاملاً للفواتير والتقارير والمرتجعات، ويمكن استرجاعه في أي وقت.'
+        : 'لا سجل لهذا المنتج — سيُحذف نهائياً مع وحداته. لا يمكن التراجع.';
+      const confirmed = window.confirm(
+        `${hasHistory ? 'أرشفة المنتج؟' : 'حذف المنتج نهائياً؟'}\n\n${message}`,
+      );
+      if (!confirmed) {
+        return;
+      }
+      setDeleteBusyId(product.id);
+      try {
+        const outcome = await ProductRepo.remove(product.id);
+        await refresh();
+        await loadArchived();
+        if (outcome === 'archived') {
+          toast(
+            'أُرشف المنتج — اختفى من البيع والمخزن وبقي سجله للتقارير والمرتجعات (يمكن استرجاعه)',
+            'success',
+            6000,
+          );
+        } else {
+          toast('تم حذف المنتج نهائياً', 'success');
+        }
+      } catch (error) {
+        toast(
+          error instanceof Error ? error.message : 'فشل حذف المنتج',
+          'error',
+        );
+      } finally {
+        setDeleteBusyId(null);
+      }
+    },
+    [deleteBusyId, refresh, loadArchived, toast],
+  );
+
+  const unarchiveProduct = useCallback(
+    async (product: Product) => {
+      if (deleteBusyId != null) {
+        return;
+      }
+      setDeleteBusyId(product.id);
+      try {
+        await ProductRepo.unarchive(product.id);
+        await refresh();
+        await loadArchived();
+        setShowArchived(true);
+        toast('استُرجع المنتج — عاد للعرض والبيع', 'success');
+      } catch (error) {
+        toast(
+          error instanceof Error ? error.message : 'فشل استرجاع المنتج',
+          'error',
+        );
+      } finally {
+        setDeleteBusyId(null);
+      }
+    },
+    [deleteBusyId, refresh, loadArchived, toast],
+  );
+
+  /* ── إدارة التصنيفات ───────────────────────────────────────── */
+  const addCategory = useCallback(async () => {
+    const trimmed = newCatName.trim();
+    if (!trimmed) {
+      return;
+    }
+    try {
+      await CategoryRepo.create(trimmed, settings.storeMode);
+      setNewCatName('');
+      await reloadCats();
+      await refresh();
+      toast(`أُضيف تصنيف «${trimmed}»`, 'success');
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : 'تعذر إضافة التصنيف',
+        'error',
+      );
+    }
+  }, [newCatName, settings.storeMode, reloadCats, refresh, toast]);
+
+  const commitRename = useCallback(
+    async (category: Category) => {
+      const trimmed = renameText.trim();
+      setRenamingId(null);
+      if (!trimmed || trimmed === category.name) {
+        return;
+      }
+      try {
+        await CategoryRepo.rename(category.id, trimmed);
+        await reloadCats();
+        await refresh();
+        toast(`أُعيد تسمية التصنيف إلى «${trimmed}»`, 'success');
+      } catch (error) {
+        toast(
+          error instanceof Error ? error.message : 'تعذرت إعادة التسمية',
+          'error',
+        );
+      }
+    },
+    [renameText, reloadCats, refresh, toast],
+  );
+
+  const deleteCategory = useCallback(
+    async (category: Category) => {
+      const confirmed = window.confirm(
+        `حذف تصنيف «${category.name}»؟\n\nالمنتجات (${
+          category.productCount ?? 0
+        }) تبقى موجودة لكن بلا تصنيف — نفس سلوك أنظمة POS العالمية.`,
+      );
+      if (!confirmed) {
+        return;
+      }
+      try {
+        await CategoryRepo.remove(category.id);
+        if (filter === category.id) {
+          setFilter('all');
+        }
+        await reloadCats();
+        await refresh();
+        toast(`حُذف تصنيف «${category.name}»`, 'info');
+      } catch (error) {
+        toast(
+          error instanceof Error ? error.message : 'تعذر حذف التصنيف',
+          'error',
+        );
+      }
+    },
+    [filter, reloadCats, refresh, toast],
+  );
+
+  /* ── العرض ─────────────────────────────────────────────────── */
   return (
     <div className="screen">
       <h1>المخزون والكتالوج</h1>
       <div className="subtitle">
-        {products.length} منتجاً · إدارة الأسعار والمخزون والوحدات والملصقات
+        {products.length} منتجاً نشطاً
+        {lowCount > 0 ? ` · ${lowCount} يحتاج انتباهاً` : ''}
+        {expiringProducts.length > 0
+          ? ` · ${expiringProducts.length} صلاحيته قريبة أو منتهية`
+          : ''}
+        {archivedProducts.length > 0 ? ` · ${archivedProducts.length} مؤرشفاً` : ''}
+        {' — '}الأسعار والمخزون والوحدات والملصقات والإدراج أونلاين
       </div>
 
-      <div className="toolbar">
+      {/* ملخص سريع */}
+      <div className="grid-4">
+        <div className="card kpi">
+          <span className="label">منتجات نشطة</span>
+          <span className="value brand">{products.length}</span>
+          <span className="label">{categories.length} تصنيفاً بنمط المتجر</span>
+        </div>
+        <div className="card kpi">
+          <span className="label">يحتاج انتباهاً</span>
+          <span className="value" style={{color: 'var(--warn)'}}>
+            {lowCount}
+          </span>
+          <span className="label">نفد أو تحت حد التنبيه</span>
+        </div>
+        <div className="card kpi">
+          <span className="label">صلاحية قريبة/منتهية</span>
+          <span className="value" style={{color: 'var(--danger)'}}>
+            {expiringProducts.length}
+          </span>
+          <span className="label">نافذة التنبيه {settings.expiryAlertDays} يوم</span>
+        </div>
+        <div className="card kpi">
+          <span className="label">مدرج أونلاين (سيلا)</span>
+          <span className="value ok">
+            {products.filter(p => p.online_listed === 1).length}
+          </span>
+          <span className="label">
+            {catalogDirty ? 'تغييرات بانتظار المزامنة…' : 'المزامنة ترسل المدرج فقط'}
+          </span>
+        </div>
+      </div>
+
+      {/* شريط الأدوات والفلاتر */}
+      <div className="toolbar" style={{marginTop: 14}}>
+        <div className="inv-search">
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="ابحث بالاسم أو الباركود…"
+            aria-label="بحث في المنتجات"
+          />
+        </div>
         <button
-          className={`chip-toggle ${tab === 'products' ? 'on' : ''}`}
-          onClick={() => setTab('products')}>
-          المنتجات
+          className="btn primary"
+          onClick={() => setEditing(null)}>
+          + منتج جديد
         </button>
         <button
-          className={`chip-toggle ${tab === 'categories' ? 'on' : ''}`}
-          onClick={() => setTab('categories')}>
+          className={`btn ${catsOpen ? '' : 'ghost'}`}
+          onClick={() => {
+            setCatsOpen(prev => !prev);
+            if (!catsOpen) {
+              void reloadCats();
+            }
+          }}>
           التصنيفات
         </button>
-        <button
-          className={`chip-toggle ${tab === 'units' ? 'on' : ''}`}
-          onClick={() => setTab('units')}>
-          الوحدات
-        </button>
-        <span className="grow" />
-        {tab === 'products' && (
+        {catalogDirty && (
           <button
-            className="btn primary"
-            onClick={() => {
-              setEditing(null);
-              setFormOpen(true);
-            }}>
-            + منتج جديد
+            className="btn"
+            disabled={syncing}
+            onClick={() => void syncCatalogNow()}>
+            {syncing ? 'جارٍ الآن…' : '🔄 مزامنة الكتالوج'}
           </button>
         )}
       </div>
 
-      {tab === 'products' && (
-        <>
-          <div className="toolbar">
-            <select
-              value={catFilter}
-              onChange={e =>
-                setCatFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))
-              }
-              className="btn"
-              style={{padding: '8px 12px'}}>
-              <option value="all">كل التصنيفات</option>
-              {categories.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.productCount ?? 0})
-                </option>
-              ))}
-            </select>
+      {/* رقائق الفلترة — الكل + التصنيفات + المؤرشفة + الصلاحية */}
+      <div className="iv57-chips" style={{marginBottom: 14}}>
+        <button
+          className={`iv57-chip ${
+            filter === 'all' && !showArchived && !showExpiring ? 'on' : ''
+          }`}
+          onClick={() => {
+            setShowArchived(false);
+            setShowExpiring(false);
+            setFilter('all');
+          }}>
+          الكل <span className="cnt">{products.length}</span>
+        </button>
+        {categories.map(category => (
+          <button
+            key={category.id}
+            className={`iv57-chip ${
+              filter === category.id && !showArchived && !showExpiring ? 'on' : ''
+            }`}
+            onClick={() => {
+              setShowArchived(false);
+              setShowExpiring(false);
+              setFilter(category.id);
+            }}>
+            {category.name} <span className="cnt">{countFor(category.id)}</span>
+          </button>
+        ))}
+        {archivedProducts.length > 0 && (
+          <button
+            className={`iv57-chip ${showArchived ? 'on' : ''}`}
+            onClick={() => {
+              setShowExpiring(false);
+              setShowArchived(!showArchived);
+            }}>
+            المؤرشفة <span className="cnt">{archivedProducts.length}</span>
+          </button>
+        )}
+        {expiringProducts.length > 0 && (
+          <button
+            className={`iv57-chip ${showExpiring ? 'on' : ''}`}
+            onClick={() => {
+              setShowArchived(false);
+              setShowExpiring(!showExpiring);
+            }}>
+            الصلاحية <span className="cnt">{expiringProducts.length}</span>
+          </button>
+        )}
+      </div>
+
+      {/* إدارة التصنيفات */}
+      {catsOpen && (
+        <div className="card" style={{marginBottom: 14}}>
+          <div className="pf-sec-h" style={{marginBottom: 10}}>
+            <b>إدارة التصنيفات</b>
+            <span className="pf-sec-sub">
+              داخل نطاق «{settings.storeMode}» — التبديل بين الأنماط لا يحذف
+              تصنيفات غيره
+            </span>
+          </div>
+          <div className="catman-form">
             <input
-              placeholder="بحث بالاسم أو الباركود…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              style={{
-                padding: '8px 12px', background: 'var(--bg)',
-                border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)', minWidth: 220,
+              value={newCatName}
+              onChange={e => setNewCatName(e.target.value)}
+              placeholder="اسم تصنيف جديد… (مثال: مشروبات غازية)"
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void addCategory();
+                }
               }}
             />
-            <select
-              value={sort}
-              onChange={e => setSort(e.target.value as typeof sort)}
-              className="btn"
-              style={{padding: '8px 12px'}}>
-              <option value="name">ترتيب: الاسم</option>
-              <option value="stock">ترتيب: المخزون</option>
-              <option value="retail">ترتيب: سعر المفرق</option>
-            </select>
+            <button className="btn" onClick={() => void addCategory()}>
+              + إضافة تصنيف
+            </button>
           </div>
+          <div className="catman-rows">
+            {catRows.length === 0 && (
+              <div className="catman-empty">لا تصنيفات بعد — أضف أول تصنيف أعلاه.</div>
+            )}
+            {catRows.map(category =>
+              renamingId === category.id ? (
+                <div key={category.id} className="catman-row">
+                  <input
+                    value={renameText}
+                    autoFocus
+                    onChange={e => setRenameText(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void commitRename(category);
+                      } else if (e.key === 'Escape') {
+                        setRenamingId(null);
+                      }
+                    }}
+                  />
+                  <button
+                    className="btn sm"
+                    onClick={() => void commitRename(category)}>
+                    حفظ
+                  </button>
+                  <button
+                    className="btn sm ghost"
+                    onClick={() => setRenamingId(null)}>
+                    إلغاء
+                  </button>
+                </div>
+              ) : (
+                <div key={category.id} className="catman-row">
+                  <span className="nm">{category.name}</span>
+                  <span className="cnt">{category.productCount ?? 0} منتجاً</span>
+                  <button
+                    className="btn sm ghost"
+                    onClick={() => {
+                      setRenamingId(category.id);
+                      setRenameText(category.name);
+                    }}>
+                    تسمية
+                  </button>
+                  <button
+                    className="btn sm danger"
+                    onClick={() => void deleteCategory(category)}>
+                    حذف
+                  </button>
+                </div>
+              ),
+            )}
+          </div>
+        </div>
+      )}
 
-          <table className="data">
-            <thead>
-              <tr>
-                <th>المنتج</th>
-                <th>التصنيف</th>
-                <th>شراء</th>
-                <th>مفرق</th>
-                <th>جملة</th>
-                <th>المخزون</th>
-                <th>الوحدات</th>
-                <th>الباركود</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map(product => (
-                <tr key={product.id}>
-                  <td>
+      {/* جدول المنتجات */}
+      <table className="inv-table">
+        <thead>
+          <tr>
+            <th>المنتج</th>
+            <th>التصنيف</th>
+            <th>التكلفة</th>
+            <th>البيع</th>
+            <th>الجملة</th>
+            <th>المخزون</th>
+            <th>الوحدة</th>
+            <th>الصلاحية</th>
+            <th>أونلاين</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {visible.length === 0 && (
+            <tr>
+              <td colSpan={10}>
+                <div className="empty" style={{padding: '28px 16px'}}>
+                  <div className="icon">
+                    {showArchived ? '🗄' : showExpiring ? '⏰' : '📦'}
+                  </div>
+                  {loadingArchived && showArchived
+                    ? 'جارٍ تحميل المؤرشفة…'
+                    : showArchived
+                    ? 'لا منتجات مؤرشفة — المنتجات المحذوفة ذات سجل تُؤرشف هنا بدل حذفها نهائياً'
+                    : showExpiring
+                    ? 'لا منتجات قرب انتهاء الصلاحية — حدّد تاريخ انتهاء للمنتجات ذات الصلاحية لتظهر هنا'
+                    : products.length === 0
+                    ? 'المخزون فارغ — أضف أول منتج بزر «+ منتج جديد»'
+                    : 'لا نتائج — جرّب كلمة بحث أو تصنيفاً آخر'}
+                </div>
+              </td>
+            </tr>
+          )}
+          {visible.map(product => {
+            const state = stockStateOf(
+              product,
+              settings.lowStockDefaultThreshold,
+            );
+            const expiry = expiryStateOf(
+              product.expiry_date,
+              settings.expiryAlertDays,
+            );
+            const variantCount = product.variants?.length ?? 0;
+            const pct = Math.max(0, Math.min(95, product.discount_pct ?? 0));
+            return (
+              <tr
+                key={product.id}
+                className={product.is_archived === 1 ? 'archived' : ''}>
+                <td>
+                  <div className="inv-name">
                     <b>{product.name}</b>
-                    {product.stock_quantity <= 0 && (
-                      <span className="chip danger" style={{marginInlineStart: 8}}>نفد</span>
+                    <span className="barcode">{product.barcode ?? '—'}</span>
+                    <span className="inv-tags">
+                      {(product.has_variants === 1 || variantCount > 0) && (
+                        <span className="iv57-mini-chip brand">
+                          متغيرات{variantCount > 0 ? ` ${variantCount}` : ''}
+                        </span>
+                      )}
+                      {product.sold_by_weight === 1 && (
+                        <span className="iv57-mini-chip">وزن · كغ</span>
+                      )}
+                      {product.stock_untracked === 1 && (
+                        <span className="iv57-mini-chip">بلا تتبع</span>
+                      )}
+                      {product.is_archived === 1 && (
+                        <span className="iv57-mini-chip warn">مؤرشف</span>
+                      )}
+                    </span>
+                  </div>
+                </td>
+                <td>{categoryNameById.get(product.category_id ?? -1) ?? '—'}</td>
+                <td className="iv57-num">{formatMoney(product.cost_price)}</td>
+                <td>
+                  <div className="inv-price-cell">
+                    {pct > 0 ? (
+                      <>
+                        <span className="old">
+                          {formatMoney(product.retail_price)}
+                        </span>
+                        <span className="new">{formatMoney(finalPriceOf(product))}</span>
+                        <span className="iv57-mini-chip danger">
+                          −{Math.round(pct)}%
+                        </span>
+                      </>
+                    ) : (
+                      <b>{formatMoney(product.retail_price)}</b>
                     )}
-                  </td>
-                  <td>{categories.find(c => c.id === product.category_id)?.name ?? '—'}</td>
-                  <td>{formatMoney(product.cost_price)}</td>
-                  <td>{formatMoney(product.retail_price)}</td>
-                  <td>{formatMoney(product.wholesale_price)}</td>
-                  <td>{product.stock_quantity}</td>
-                  <td>
-                    {(product.units ?? []).map(u => u.unitShort).join(' · ') || 'قطعة'}
-                  </td>
-                  <td dir="ltr" style={{fontSize: 11.5, color: 'var(--muted)'}}>
-                    {product.barcode ?? '—'}
-                  </td>
-                  <td className="row-actions">
-                    {product.barcode && (
-                      <button className="btn sm" onClick={() => void printLabel(product)} title="ملصق باركود">
-                        🏷️
-                      </button>
-                    )}
+                  </div>
+                </td>
+                <td className="iv57-num">
+                  {formatMoney(product.wholesale_price)}
+                </td>
+                <td>
+                  <span
+                    className={`inv-stock-badge ${
+                      state === 'out'
+                        ? 'out'
+                        : state === 'low'
+                        ? 'low'
+                        : state === 'untracked'
+                        ? 'untracked'
+                        : 'ok'
+                    }`}>
+                    {state === 'out'
+                      ? 'نفد'
+                      : state === 'untracked'
+                      ? 'بلا تتبع'
+                      : `${formatQty(product.stock_quantity)} ${baseUnitLabelOf(
+                          product,
+                          BASE_UNIT_NAME,
+                        )}`}
+                  </span>
+                </td>
+                <td>{baseUnitLabelOf(product, BASE_UNIT_NAME)}</td>
+                <td>
+                  {product.expiry_date != null && expiry !== 'ok' ? (
+                    <span
+                      className={`iv57-mini-chip ${
+                        expiry === 'expired' ? 'danger' : 'warn'
+                      }`}>
+                      {expiry === 'expired' ? 'منتهي' : 'قرب الانتهاء'}
+                      {' · '}
+                      {product.expiry_date.replace(/-/g, '/')}
+                    </span>
+                  ) : product.expiry_date != null ? (
+                    <span className="iv57-hint">
+                      {product.expiry_date.replace(/-/g, '/')}
+                    </span>
+                  ) : (
+                    <span className="iv57-hint">—</span>
+                  )}
+                </td>
+                <td>
+                  <label className="iv57-switch">
+                    <input
+                      type="checkbox"
+                      checked={product.online_listed === 1}
+                      disabled={
+                        product.is_archived === 1 || toggleBusyId === product.id
+                      }
+                      onChange={() => void toggleOnlineListed(product)}
+                      title={
+                        product.is_archived === 1
+                          ? 'المؤرشف لا يُدرج — استرجعه أولاً'
+                          : 'الإدراج الانتقائي في متجر سيلا ماركت'
+                      }
+                    />
+                    <span className="track" />
+                  </label>
+                </td>
+                <td>
+                  <div className="inv-actions">
                     <button
-                      className="btn sm"
-                      onClick={() => {
-                        setEditing(product.id);
-                        setFormOpen(true);
-                      }}>
+                      className="btn sm ghost"
+                      title={`تعديل ${product.name}`}
+                      onClick={() => setEditing(product)}>
                       تعديل
                     </button>
                     <button
-                      className="btn sm danger"
-                      onClick={() => {
-                        if (window.confirm(`حذف «${product.name}» نهائياً؟`)) {
-                          void api
-                            .deleteProduct(product.id)
-                            .then(() => {
-                              toast('حُذف المنتج', 'info');
-                              void refresh();
-                            })
-                            .catch(e => toast(String(e), 'error'));
-                        }
-                      }}>
-                      حذف
+                      className="btn sm ghost"
+                      title="طباعة ملصق باركود (يولّد باركوداً داخلياً إن لم يوجد)"
+                      disabled={printBusyId === product.id}
+                      onClick={() => void printLabel(product)}>
+                      {printBusyId === product.id ? '…' : '🖨'}
                     </button>
+                    {product.is_archived === 1 ? (
+                      <button
+                        className="btn sm ghost"
+                        title="استرجاع للرف"
+                        disabled={deleteBusyId === product.id}
+                        onClick={() => void unarchiveProduct(product)}>
+                        ↩
+                      </button>
+                    ) : (
+                      <button
+                        className="btn sm ghost"
+                        title="حذف — يؤرشف إن كان له سجل"
+                        disabled={deleteBusyId === product.id}
+                        onClick={() => void removeProduct(product)}>
+                        {deleteBusyId === product.id ? '…' : '🗑'}
+                      </button>
+                    )}
+                  </div>
                 </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="inv-count-row">
+        {visible.length} منتجاً معروضاً
+        {showArchived ? ' (المؤرشفة)' : ''}
+        {showExpiring ? ' (الصلاحية — الأقرب انتهاءً أولاً)' : ''}
+        {' — '}عند التعديل تفتح نافذة ملف المنتج بكامل قدراتها (خصم،
+        متغيرات، وحدات، استلام بضاعة).
+      </div>
 
-      {tab === 'categories' && (
-        <CategoriesManager
-          categories={categories}
-          reload={reloadMeta}
-          toast={toast}
-        />
-      )}
-      {tab === 'units' && (
-        <UnitsManager units={units} reload={reloadMeta} toast={toast} />
-      )}
-
-      {formOpen && (
+      {/* نافذة ملف المنتج */}
+      {editing !== undefined && (
         <ProductFormModal
-          productId={editing ?? undefined}
-          onClose={() => setFormOpen(false)}
+          product={editing}
+          onClose={() => setEditing(undefined)}
           onSaved={() => {
-            setFormOpen(false);
             void refresh();
-            void reloadMeta();
+            void loadArchived();
+            void reloadCats();
           }}
         />
       )}
-    </div>
-  );
-}
-
-function CategoriesManager({
-  categories,
-  reload,
-  toast,
-}: {
-  categories: Category[];
-  reload: () => Promise<void>;
-  toast: (m: string, k?: 'success' | 'error' | 'info') => void;
-}) {
-  const [name, setName] = useState('');
-  const [editingId, setEditingId] = useState<number | null>(null);
-  return (
-    <div className="card" style={{maxWidth: 620}}>
-      <div className="toolbar" style={{marginBottom: 10}}>
-        <input
-          placeholder={editingId ? 'اسم جديد للتصنيف…' : 'تصنيف جديد…'}
-          value={name}
-          onChange={e => setName(e.target.value)}
-          style={{
-            flex: 1, padding: '10px 12px', background: 'var(--bg)',
-            border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)',
-          }}
-        />
-        <button
-          className="btn primary"
-          onClick={() => {
-            if (!name.trim()) return;
-            void api
-              .upsertCategory(editingId, name.trim())
-              .then(() => {
-                toast(editingId ? 'عُدّل التصنيف' : 'أُضيف التصنيف', 'success');
-                setName('');
-                setEditingId(null);
-                void reload();
-              })
-              .catch(e => toast(String(e), 'error'));
-          }}>
-          {editingId ? 'حفظ' : 'إضافة'}
-        </button>
-        {editingId && (
-          <button className="btn" onClick={() => {setEditingId(null); setName('');}}>
-            إلغاء
-          </button>
-        )}
-      </div>
-      {categories.map(c => (
-        <div
-          key={c.id}
-          style={{
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            padding: '9px 0', borderBottom: '1px solid var(--line)',
-          }}>
-          <span>
-            {c.name}{' '}
-            <span className="chip muted" style={{marginInlineStart: 6}}>
-              {c.productCount ?? 0} منتجاً
-            </span>
-          </span>
-          <span style={{display: 'flex', gap: 6}}>
-            <button className="btn sm" onClick={() => {setEditingId(c.id); setName(c.name);}}>
-              تعديل
-            </button>
-            <button
-              className="btn sm danger"
-              onClick={() => {
-                if ((c.productCount ?? 0) > 0) {
-                  toast('لا يمكن حذف تصنيف يحوي منتجات — انقلها أولاً', 'error');
-                  return;
-                }
-                if (window.confirm(`حذف «${c.name}»؟`)) {
-                  void api
-                    .deleteCategory(c.id)
-                    .then(() => void reload())
-                    .catch(e => toast(String(e), 'error'));
-                }
-              }}>
-              حذف
-            </button>
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function UnitsManager({
-  units,
-  reload,
-  toast,
-}: {
-  units: Unit[];
-  reload: () => Promise<void>;
-  toast: (m: string, k?: 'success' | 'error' | 'info') => void;
-}) {
-  const [name, setName] = useState('');
-  const [short, setShort] = useState('');
-  return (
-    <div className="card" style={{maxWidth: 620}}>
-      <div className="toolbar" style={{marginBottom: 10}}>
-        <input
-          placeholder="اسم الوحدة (كرتونة…)"
-          value={name}
-          onChange={e => setName(e.target.value)}
-          style={{flex: 1, padding: '10px 12px', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)'}}
-        />
-        <input
-          placeholder="اختصار"
-          value={short}
-          onChange={e => setShort(e.target.value)}
-          style={{width: 110, padding: '10px 12px', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)'}}
-        />
-        <button
-          className="btn primary"
-          onClick={() => {
-            if (!name.trim() || !short.trim()) return;
-            void api
-              .upsertUnit({
-                id: 0,
-                name,
-                short_name: short,
-                sort_order: units.length,
-              })
-              .then(() => {
-                toast('أُضيفت الوحدة', 'success');
-                setName('');
-                setShort('');
-                void reload();
-              })
-              .catch(e => toast(String(e), 'error'));
-          }}>
-          إضافة
-        </button>
-      </div>
-      {units.map(u => (
-        <div
-          key={u.id}
-          style={{
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            padding: '9px 0', borderBottom: '1px solid var(--line)',
-          }}>
-          <span>
-            {u.name} — <span style={{color: 'var(--muted)'}}>{u.short_name}</span>
-          </span>
-          <button
-            className="btn sm danger"
-            onClick={() => {
-              if (window.confirm(`حذف وحدة «${u.name}»؟`)) {
-                void api
-                  .deleteUnit(u.id)
-                  .then(() => void reload())
-                  .catch(e => toast(String(e), 'error'));
-              }
-            }}>
-            حذف
-          </button>
-        </div>
-      ))}
     </div>
   );
 }

@@ -1,10 +1,11 @@
 /**
- * sela-core — نواة تطبيق sela لسطح المكتب (v1.0.0).
- * ─────────────────────────────────────────────────────────────────
- *  كل المنطق هنا مطابق حرفياً لتطبيق الأندرويد v6.0.0:
- *   • DDL/بذور/ترحيلات — من connection.ts كما هي.
- *   • معاملة البيع وحرس البيع الزائد — من SaleRepo.createSale كما هي.
- *   • تقارير/جرد/نسخ احتياطي JSON v1 — من المستودعات الأصلية كما هي.
+ * sela-core — نواة تطبيق sela لسطح المكتب (v57.0.0).
+ * ────────────────────────────────────────────────────────────────
+ *  المنطق هنا مطابق حرفياً لتطبيق الأندرويد v57.0.0:
+ *   • DDL/بذور/ترحيلات — من connection.ts (كل الترحيلات مدمجة).
+ *   • جسر SQL بنفس شكل op-sqlite (rows/insertId/rowsAffected)
+ *     — تُبنى عليه خدمات TS المنقولة حرفياً.
+ *   • تقارير/جرد/نسخ احتياطي JSON — من المستودعات الأصلية.
  *   • ترميز ESC/POS — بايتاً ببايت من ThermalPrinterModule.kt.
  *  لا تعتمد النواة على tauri إطلاقاً — قابلة للاختبار الكامل على لينكس.
  */
@@ -14,12 +15,15 @@ pub mod codepages;
 pub mod config;
 pub mod db;
 pub mod escpos;
+pub mod fsops;
 pub mod hardware;
+pub mod images;
 pub mod invoice;
 pub mod models;
 pub mod paths;
 pub mod reports;
 pub mod repos;
+pub mod sqlbridge;
 pub mod sysinfo;
 
 use thiserror::Error;

@@ -1,66 +1,224 @@
 /**
- * HomeScreen.tsx — لوحة اليوم (منقولة من HomeScreen الأندرويد):
- * مؤشرات اليوم، تنبيهات النقص، أحدث الفواتير، إجراءات سريعة.
+ * screens/HomeScreen.tsx — لوحة المتجر (UI-5 — سطح المكتب).
+ * ─────────────────────────────────────────────────────────────────
+ * منطق HomeScreen الأندرويد v57 منقولاً إلى React DOM:
+ *
+ *  • مؤشرات اليوم (ReportService.loadBundle('today')): الإيراد، صافي
+ *    الربح، عدد الفواتير (+ المتوسط)، عدد الأصناف (+ الخصومات) —
+ *    الإرجاعات تُخصم من يوم الفاتورة الأصلية تلقائياً.
+ *  • بطاقات v57: النقد المتوقع بالخزينة الآن (CashService
+ *    .drawerNowMinor)، ديون المتجر المحلية القائمة (LocalDebtsRepo
+ *    .totals)، ديون صِلة من دفاتر هذا المتجر (SilaRepo
+ *    .storeOwnOutstandingTotal — لا أرصدة الخادم المختلطة) + بانتظار
+ *    المزامنة، وطلبات البيع أونلاين الجديدة (OnlineRepo
+ *    .newOrdersCount + outstandingTotals).
+ *  • تنبيهات المخزون والصلاحية (StockAlertsService): نفد/منخفض/
+ *    منتهي/قرب الانتهاء مع زر «كل التنبيهات» → المخزون.
+ *  • آخر الفواتير + إجراءات سريعة (بيع جديد / جرد / تقارير /
+ *    طلبات أونلاين) + تحديث دوري كل 30 ثانية.
  */
-import React, {useCallback, useEffect, useState} from 'react';
-import {api} from '../lib/tauri';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   useCatalogStore,
-  useToastStore,
   StockAlertsService,
 } from '../state/appStores';
-import {useSettingsStore} from '../state/settingsStore';
-import {formatMoney, localToday, localDateShift, localMonthStart, relativeTime} from '../core/format';
+import {useSettingsStore} from '../stores/settingsStore';
+import {useSilaStore} from '../stores/silaStore';
+import {ReportService} from '../services/ReportService';
+import {CashService} from '../services/CashService';
+import {SaleRepo} from '../database/repositories/SaleRepo';
+import {LocalDebtsRepo} from '../database/repositories/LocalDebtsRepo';
+import {SilaRepo} from '../services/sila/SilaRepo';
+import {OnlineRepo} from '../database/repositories/OnlineRepo';
+import {
+  APP_NAME_AR,
+  APP_VERSION_LABEL,
+  BASE_UNIT_NAME,
+} from '../core/config';
+import {formatMoney, formatQty, relativeTime} from '../core/format';
 import type {ReportSummary, SaleRecord} from '../core/types';
+import './invoiceshome.css';
+
+/** تسمية حالة التنبيه (مخزون وصلاحية) — نفس نصوص الأندرويد v32. */
+function alertText(alert: {
+  state: string;
+  days?: number;
+  stock: number;
+  byWeight: boolean;
+}): {label: string; tone: 'danger' | 'warn'} {
+  switch (alert.state) {
+    case 'out':
+      return {label: 'نفد المخزون', tone: 'danger'};
+    case 'expired':
+      return {
+        label:
+          alert.days === 0
+            ? 'تنتهي صلاحيته اليوم'
+            : `منتهي الصلاحية منذ ${Math.abs(alert.days ?? 0)} يوم`,
+        tone: 'danger',
+      };
+    case 'expiring':
+      return {
+        label: `قرب انتهاء الصلاحية — باقي ${alert.days ?? 0} يوم`,
+        tone: 'warn',
+      };
+    default:
+      return {
+        label: `مخزون منخفض — بقي ${formatQty(alert.stock)} ${
+          alert.byWeight ? 'كغ' : BASE_UNIT_NAME
+        }`,
+        tone: 'warn',
+      };
+  }
+}
 
 export function HomeScreen({goTo}: {goTo: (screen: string) => void}) {
   const settings = useSettingsStore(s => s.settings);
   const products = useCatalogStore(s => s.products);
   const refreshCatalog = useCatalogStore(s => s.refresh);
-  const toast = useToastStore(s => s.show);
+  const silaPairing = useSilaStore(s => s.pairing);
+  const paired = silaPairing != null;
+
+  // ── البيانات ─────────────────────────────────────────────────
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [recent, setRecent] = useState<SaleRecord[]>([]);
+  const [drawerMinor, setDrawerMinor] = useState<number | null>(null);
+  const [localBook, setLocalBook] = useState<{
+    outstandingMinor: number;
+    debtorsCount: number;
+  } | null>(null);
+  // صِلة — أرقام هذا المتجر من الدفاتر المحلية (لا أرصدة الخادم).
+  const [silaDebt, setSilaDebt] = useState<{
+    outstandingMinor: number;
+    debtorsCount: number;
+    lastSyncedAt: string | null;
+  } | null>(null);
+  const [silaPendingTotals, setSilaPendingTotals] = useState<{
+    count: number;
+    minor: number;
+  } | null>(null);
+  // البيع أونلاين — التفعيل + الطلبات الجديدة + الدين المؤقت.
+  const [online, setOnline] = useState<{
+    enabled: boolean;
+    newCount: number;
+    outstandingMinor: number;
+    outstandingCount: number;
+  } | null>(null);
+  // يُرفع بعد كل evaluate كي تُقرأ التنبيهات من نسخة الكتالوج الجديدة.
+  const [alertsTick, setAlertsTick] = useState(0);
 
   const load = useCallback(async () => {
+    // البيع أونلاين — أفضل جهد كامل: لا يعطّل تحميل الرئيسية أبداً.
     try {
-      const today = localToday();
-      const [s, latest] = await Promise.all([
-        api.reportsSummary(today, today),
-        api.listRecentSales(8),
+      const {loadOnlineSettings} = await import(
+        '../services/online/OnlineStoreService'
+      );
+      const [newCount, outstanding] = await Promise.all([
+        OnlineRepo.newOrdersCount(),
+        OnlineRepo.outstandingTotals(),
       ]);
-      setSummary(s);
-      setRecent(latest);
-      StockAlertsService.evaluate();
-    } catch (e) {
-      toast(e instanceof Error ? e.message : String(e), 'error');
+      setOnline({
+        enabled: loadOnlineSettings().enabled,
+        newCount,
+        outstandingMinor: outstanding.minor,
+        outstandingCount: outstanding.count,
+      });
+    } catch {
+      // Online best-effort only.
     }
-  }, [toast]);
+    try {
+      const [todayBundle, latest, drawer, localTotals] = await Promise.all([
+        ReportService.loadBundle('today'),
+        SaleRepo.listRecent(8),
+        CashService.drawerNowMinor(),
+        LocalDebtsRepo.totals(),
+      ]);
+      setSummary(todayBundle.summary);
+      setRecent(latest);
+      setDrawerMinor(drawer);
+      setLocalBook({
+        outstandingMinor: localTotals.outstandingMinor,
+        debtorsCount: localTotals.debtorsCount,
+      });
+      // صِلة: الدين القائم من دفاتر هذا المتجر تحديداً — فواتير
+      // المتجر مطروحاً منها سدادّاته وتحصيلات التطبيق وعكس
+      // المرتجعات (v32) — تُقرأ عند الاقتران فقط.
+      const [silaTotals, ownTotals, queueTotals] = await Promise.all([
+        SilaRepo.customersOutstandingTotal(),
+        SilaRepo.storeOwnOutstandingTotal(),
+        SilaRepo.totals(),
+      ]);
+      setSilaDebt({
+        outstandingMinor: Math.max(0, ownTotals.ownMinor),
+        debtorsCount: ownTotals.debtorsCount,
+        lastSyncedAt: silaTotals.lastSyncedAt,
+      });
+      setSilaPendingTotals({
+        count: queueTotals.pendingCount,
+        minor: queueTotals.pendingMinor,
+      });
+    } catch {
+      // اللوحة معلوماتية — تبقى البيانات المعروضة سابقاً.
+    }
+    // تقييم التنبيهات بعد كل تحميل (يوم جديد/مخزون تغيّر).
+    try {
+      await StockAlertsService.evaluate();
+      setAlertsTick(v => v + 1);
+    } catch {
+      // لا يعطّل شيئاً.
+    }
+  }, []);
 
   useEffect(() => {
-    if (products.length === 0) void refreshCatalog();
+    if (products.length === 0) {
+      void refreshCatalog();
+    }
     void load();
+    const timer = setInterval(() => void load(), 30_000);
+    return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const alerts = StockAlertsService.activeAlerts(8);
-  const outCount = products.filter(p => p.stock_quantity <= 0).length;
-  const lowCount = alerts.filter(a => a.kind === 'low').length;
+  const alerts = useMemo(
+    () => StockAlertsService.activeAlerts(20),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [products, alertsTick],
+  );
+  const outCount = alerts.filter(a => a.state === 'out').length;
+  const lowCount = alerts.filter(a => a.state === 'low').length;
+  const expiredCount = alerts.filter(a => a.state === 'expired').length;
+  const expiringCount = alerts.filter(a => a.state === 'expiring').length;
+
+  const onlineEnabled = online?.enabled ?? false;
+  const onlineNewCount = online?.newCount ?? 0;
+
+  const netProfit = summary?.netProfit ?? 0;
 
   return (
     <div className="screen">
-      <h1>لوحة اليوم</h1>
+      <h1>لوحة المتجر</h1>
       <div className="subtitle">
-        {settings.storeName} · ملخص أداء اليوم وتنبيهات المخزون
+        {settings.storeName} · ملخص اليوم والخزينة والديون وتنبيهات المخزون —
+        يتحدث تلقائياً كل 30 ثانية
       </div>
 
+      {/* ── مؤشرات اليوم ──────────────────────────────────────── */}
       <div className="grid-4">
         <div className="card kpi">
           <span className="label">إيراد اليوم</span>
-          <span className="value brand">{formatMoney(summary?.revenue ?? 0)}</span>
+          <span className="value brand">
+            {formatMoney(summary?.revenue ?? 0)}
+          </span>
+          <span className="label">
+            فواتير اليوم شاملة الديون — المرتجعات تُخصم من يوم فاتورتها
+          </span>
         </div>
         <div className="card kpi">
-          <span className="label">ربح اليوم الصافي</span>
-          <span className="value ok">{formatMoney(summary?.netProfit ?? 0)}</span>
+          <span className="label">صافي ربح اليوم</span>
+          <span className={`value ${netProfit >= 0 ? 'ok' : ''}`} style={netProfit < 0 ? {color: 'var(--danger)'} : undefined}>
+            {formatMoney(netProfit)}
+          </span>
+          <span className="label">بعد تكلفة البضاعة والخصومات</span>
         </div>
         <div className="card kpi">
           <span className="label">فواتير اليوم</span>
@@ -74,79 +232,219 @@ export function HomeScreen({goTo}: {goTo: (screen: string) => void}) {
           <span className="value">{summary?.itemsCount ?? 0}</span>
           <span className="label">
             خصومات اليوم {formatMoney(summary?.discountTotal ?? 0)}
+            {(summary?.returnsCount ?? 0) > 0 &&
+              ` · مرتجعات ${summary?.returnsCount} (${formatMoney(
+                summary?.returnsTotal ?? 0,
+              )})`}
           </span>
         </div>
       </div>
 
-      <div style={{display: 'flex', gap: 10, margin: '16px 0'}}>
-        <button className="btn primary" onClick={() => goTo('pos')}>
-          ابدأ البيع (F9 من شاشة الكاشير)
-        </button>
-        <button className="btn" onClick={() => goTo('stocktake')}>
-          جلسة جرد جديدة
-        </button>
-        <button className="btn" onClick={() => goTo('reports')}>
-          تقارير مفصلة
-        </button>
+      {/* ── بطاقات v57: الخزينة والديون والطلبات ──────────────── */}
+      <div className="grid-4" style={{marginTop: 14}}>
+        <div className="card kpi">
+          <span className="label">النقد المتوقع بالخزينة الآن</span>
+          <span className={`value ${(drawerMinor ?? 0) >= 0 ? 'ok' : ''}`} style={(drawerMinor ?? 0) < 0 ? {color: 'var(--danger)'} : undefined}>
+            {drawerMinor == null ? '…' : formatMoney(drawerMinor / 100)}
+          </span>
+          <span className="label">
+            مبيعات نقدية + تحصيلات − مصروفات ومسحوبات — لحظة بلحظة
+          </span>
+        </div>
+        <div className="card kpi">
+          <span className="label">ديون المتجر المحلية القائمة</span>
+          <span className="value" style={{color: 'var(--warn)'}}>
+            {formatMoney((localBook?.outstandingMinor ?? 0) / 100)}
+          </span>
+          <span className="label">
+            {localBook?.debtorsCount ?? 0} زبون مدين — دفتر المتجر (INV-L)
+          </span>
+        </div>
+        <div className="card kpi">
+          <span className="label">ديون صِلة القائمة</span>
+          {paired ? (
+            <>
+              <span className="value" style={{color: 'var(--warn)'}}>
+                {formatMoney((silaDebt?.outstandingMinor ?? 0) / 100)}
+              </span>
+              <span className="label">
+                {silaDebt?.debtorsCount ?? 0} زبون مدين — فواتير هذا المتجر
+                فقط
+                {silaDebt?.lastSyncedAt != null &&
+                  ` · محدّثة ${relativeTime(silaDebt.lastSyncedAt)}`}
+              </span>
+              {(silaPendingTotals?.count ?? 0) > 0 && (
+                <span className="chip warn" style={{alignSelf: 'flex-start'}}>
+                  {silaPendingTotals?.count} عملية بانتظار مزامنة صِلة (
+                  {formatMoney((silaPendingTotals?.minor ?? 0) / 100)})
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              <span className="value" style={{color: 'var(--muted)'}}>
+                —
+              </span>
+              <span className="label">
+                اربط تطبيق صِلة من صفحة «صِلة والقسائم» لمزامنة الديون
+                والتحصيلات سحابياً
+              </span>
+            </>
+          )}
+        </div>
+        <div className="card kpi">
+          <span className="label">طلبات أونلاين جديدة</span>
+          <span className={`value ${onlineNewCount > 0 ? 'brand' : ''}`}>
+            {onlineEnabled ? onlineNewCount : '—'}
+          </span>
+          <span className="label">
+            {onlineEnabled
+              ? (online?.outstandingCount ?? 0) > 0
+                ? `+ ${(online?.outstandingCount ?? 0)} طلب مُرسل بانتظار التسليم — دين مؤقت ${formatMoney(
+                    (online?.outstandingMinor ?? 0) / 100,
+                  )}`
+                : 'لا طلبات مُرسلة بانتظار التسليم'
+              : 'البيع أونلاين غير مفعّل — فعّله من شاشة البيع أونلاين'}
+          </span>
+        </div>
       </div>
 
-      <div className="grid-2" style={{marginTop: 6}}>
+      {/* ── إجراءات سريعة ─────────────────────────────────────── */}
+      <div className="ih-section-head">
+        <b>إجراءات سريعة</b>
+      </div>
+      <div className="ih-quick-grid">
+        <button
+          className="ih-quick-card accent"
+          onClick={() => goTo('pos')}>
+          <span className="ih-quick-icon">🛒</span>
+          <span className="ih-quick-label">بيع جديد</span>
+        </button>
+        <button className="ih-quick-card" onClick={() => goTo('stocktake')}>
+          <span className="ih-quick-icon">📋</span>
+          <span className="ih-quick-label">جرد</span>
+        </button>
+        <button className="ih-quick-card" onClick={() => goTo('reports')}>
+          <span className="ih-quick-icon">📊</span>
+          <span className="ih-quick-label">تقارير</span>
+        </button>
+        {onlineEnabled && (
+          <button
+            className="ih-quick-card"
+            onClick={() => goTo('online-orders')}>
+            <span className="ih-quick-icon">🛍️</span>
+            <span className="ih-quick-label">طلبات أونلاين</span>
+            {onlineNewCount > 0 && (
+              <span className="ih-online-badge">
+                {onlineNewCount > 99 ? '99+' : onlineNewCount}
+              </span>
+            )}
+          </button>
+        )}
+      </div>
+
+      {/* ── تنبيهات المخزون والصلاحية ─────────────────────────── */}
+      <div className="ih-section-head">
+        <b>تنبيهات المخزون</b>
+        <span className="hint">
+          {alerts.length > 0
+            ? expiredCount + expiringCount > 0
+              ? `${alerts.length} منتج يحتاج انتباهاً — مخزون أو صلاحية`
+              : `${alerts.length} منتج يحتاج إعادة تزويد`
+            : 'كل المنتجات فوق حدود التنبيه — لا إجراء مطلوب'}
+        </span>
+        {outCount > 0 && <span className="chip danger">نفد {outCount}</span>}
+        {lowCount > 0 && <span className="chip warn">منخفض {lowCount}</span>}
+        {expiredCount > 0 && (
+          <span className="chip danger">منتهي {expiredCount}</span>
+        )}
+        {expiringCount > 0 && (
+          <span className="chip warn">قرب الانتهاء {expiringCount}</span>
+        )}
+        <button className="btn sm ghost" onClick={() => goTo('inventory')}>
+          كل التنبيهات
+        </button>
+      </div>
+      {alerts.length > 0 ? (
+        <div className="ih-alerts-col">
+          {alerts.slice(0, 6).map(({product, state, days}) => {
+            const {label, tone} = alertText({
+              state,
+              days,
+              stock: product.stock_quantity,
+              byWeight: product.sold_by_weight === 1,
+            });
+            return (
+              <div
+                key={`${product.id}:${state}`}
+                className={`ih-alert-row ${tone}`}>
+                <span className={`ih-alert-icon ${tone}`}>
+                  {state === 'out'
+                    ? '📦'
+                    : state === 'expired' || state === 'expiring'
+                    ? '⏰'
+                    : '⚠️'}
+                </span>
+                <div className="ih-alert-texts">
+                  <div className="ih-alert-name">{product.name}</div>
+                  <div className="ih-alert-meta">
+                    {label}
+                    {state === 'low' &&
+                      ` · الحد ${formatQty(
+                        product.low_stock_threshold ??
+                          settings.lowStockDefaultThreshold,
+                      )}`}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
         <div className="card">
-          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
-            <b>تنبيهات المخزون</b>
-            <span style={{display: 'flex', gap: 6}}>
-              <span className="chip danger">نفد {outCount}</span>
-              <span className="chip warn">منخفض {lowCount}</span>
+          <div className="ih-hint">
+            لا تنبيهات — كل المنتجات فوق حدود المخزون والصلاحية.
+          </div>
+        </div>
+      )}
+
+      {/* ── آخر الفواتير ──────────────────────────────────────── */}
+      <div className="ih-section-head">
+        <b>آخر الفواتير</b>
+        <span className="hint">اضغط أي فاتورة لمراجعتها بالتفصيل</span>
+        <button className="btn sm ghost" onClick={() => goTo('invoices')}>
+          كل الفواتير
+        </button>
+      </div>
+      <div className="card" style={{padding: '6px 16px'}}>
+        {recent.length === 0 && (
+          <div className="ih-empty-sm">
+            لا فواتير بعد — أول بيع من نقطة البيع سيظهر هنا فوراً
+          </div>
+        )}
+        {recent.map(sale => (
+          <div
+            key={sale.id}
+            className="ih-recent-row"
+            onClick={() => goTo('invoices')}>
+            <div className="ih-recent-main">
+              <span className="ih-ref">{sale.invoice_number}</span>
+              <div className="ih-mut">{relativeTime(sale.created_at)}</div>
+            </div>
+            {(sale.returned_minor ?? 0) > 0 && (
+              <span className="chip warn">
+                مرتجع {formatMoney((sale.returned_minor ?? 0) / 100)}
+              </span>
+            )}
+            <span className="ih-recent-amount">
+              {formatMoney(sale.total_amount)}
             </span>
           </div>
-          {alerts.length === 0 && (
-            <div style={{color: 'var(--muted)', fontSize: 12.5}}>
-              كل المنتجات فوق حدود التنبيه — لا إجراء مطلوب.
-            </div>
-          )}
-          {alerts.slice(0, 6).map(a => (
-            <div
-              key={a.product.id}
-              style={{
-                display: 'flex', justifyContent: 'space-between',
-                padding: '8px 0', borderBottom: '1px solid var(--line)',
-                fontSize: 13,
-              }}>
-              <span>{a.product.name}</span>
-              <span className={`chip ${a.kind === 'out' ? 'danger' : 'warn'}`}>
-                {a.kind === 'out' ? 'نفد' : `بقي ${a.product.stock_quantity}`}
-              </span>
-            </div>
-          ))}
-        </div>
+        ))}
+      </div>
 
-        <div className="card">
-          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
-            <b>أحدث الفواتير</b>
-            <button className="btn sm ghost" onClick={() => goTo('invoices')}>
-              كل الفواتير
-            </button>
-          </div>
-          {recent.length === 0 && (
-            <div style={{color: 'var(--muted)', fontSize: 12.5}}>
-              لا فواتير بعد — أول بيع سيظهر هنا.
-            </div>
-          )}
-          {recent.map(sale => (
-            <div
-              key={sale.id}
-              style={{
-                display: 'flex', justifyContent: 'space-between',
-                padding: '8px 0', borderBottom: '1px solid var(--line)',
-                fontSize: 13, cursor: 'pointer',
-              }}
-              onClick={() => goTo('invoices')}>
-              <span dir="ltr">{sale.invoice_number}</span>
-              <span style={{color: 'var(--ink-soft)'}}>{relativeTime(sale.created_at)}</span>
-              <b style={{color: 'var(--brand-ink)'}}>{formatMoney(sale.total_amount)}</b>
-            </div>
-          ))}
-        </div>
+      <div className="ih-version">
+        {APP_NAME_AR} · الإصدار {APP_VERSION_LABEL} · يعمل دون إنترنت
       </div>
     </div>
   );

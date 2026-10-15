@@ -7,27 +7,38 @@
  */
 
 mod commands;
+mod sqlbridge;
 
 use sela_core::config::ConfigStore;
 use sela_core::db;
 use sela_core::hardware;
+use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
 use tauri::Emitter;
 
 pub struct AppState {
     pub conn: Mutex<rusqlite::Connection>,
     pub config: Mutex<ConfigStore>,
+    /// جلسات المعاملات — اتصال مخصص لكل معاملة (BEGIN IMMEDIATE).
+    pub sessions: Mutex<HashMap<u64, rusqlite::Connection>>,
+    pub next_tx: AtomicU64,
+    pub db_path: std::path::PathBuf,
 }
 
 fn main() {
     sela_core::paths::ensure_dirs().expect("تعذر إنشاء شجرة بيانات sela-pos");
-    let conn = db::open_and_init(&sela_core::paths::db_path()).expect("تعذر فتح قاعدة البيانات");
+    let db_path = sela_core::paths::db_path();
+    let conn = db::open_and_init(&db_path).expect("تعذر فتح قاعدة البيانات");
     let config = ConfigStore::open(sela_core::paths::config_path()).expect("تعذر فتح config.json");
 
     tauri::Builder::default()
         .manage(AppState {
             conn: Mutex::new(conn),
             config: Mutex::new(config),
+            sessions: Mutex::new(HashMap::new()),
+            next_tx: AtomicU64::new(1),
+            db_path,
         })
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap,
@@ -74,7 +85,27 @@ fn main() {
             commands::device_id,
             commands::uptime_ms,
             commands::scanner_running,
-            commands::wipe_data
+            commands::wipe_data,
+            // ── جسر SQL العام (واجهة op-sqlite للخدمات المنقولة) ──
+            sqlbridge::sql_run,
+            sqlbridge::tx_begin,
+            sqlbridge::tx_execute,
+            sqlbridge::tx_commit,
+            sqlbridge::tx_rollback,
+            sqlbridge::tx_sessions_alive,
+            // ── ملفات النسخ/التصدير/الاستيراد ──
+            sqlbridge::save_text_file,
+            sqlbridge::open_text_file,
+            sqlbridge::pick_folder,
+            sqlbridge::write_file_in_folder,
+            // ── ملفات وصور (جسر nativeBridge) ──
+            sqlbridge::fs_file_exists,
+            sqlbridge::fs_file_signature,
+            sqlbridge::fs_read_file_base64,
+            sqlbridge::fs_write_file_base64,
+            sqlbridge::image_compress,
+            sqlbridge::open_path,
+            sqlbridge::reveal_in_folder
         ])
         .setup(|app| {
             // ── خطاف الباركود العام: كل كود مكتمل يصل الواجهة كحدث ──

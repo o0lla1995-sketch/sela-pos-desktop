@@ -1,16 +1,14 @@
 /**
- * printing/receipt.ts — قالب الفاتورة الحرارية منقول حرفياً من
- * services/printer/receipt.ts الأندرويد (نفس الترتيب، نفس التسميات
- * ASCII bidi-safe، نفس الحسابات: subtotal = total + discount).
+ * Professional thermal receipt template.
+ * ─────────────────────────────────────────────────────────────────
+ * Structure: store header (bold, double size) → invoice meta →
+ * item lines → totals → optional manager-only net profit →
+ * thank-you footer → feed & cut.
  */
-import {ReceiptBuilder, type EscPosOp} from './escpos';
-import {formatDateTime} from '../core/format';
-import {
-  APP_NAME,
-  RECEIPT_WIDTH_58,
-  RECEIPT_WIDTH_80,
-} from '../core/config';
-import type {SaleRecord, SaleItemRecord, Product} from '../core/types';
+import {ReceiptBuilder} from './escpos';
+import {formatDateTime} from '../../core/format';
+import {APP_NAME, RECEIPT_WIDTH_58, RECEIPT_WIDTH_80} from '../../core/config';
+import type {SaleRecord, SaleItemRecord} from '../../core/types';
 
 export interface ReceiptSettings {
   storeName: string;
@@ -19,16 +17,15 @@ export interface ReceiptSettings {
   paperWidth: '58' | '80';
   codepage: number;
   showProfit: boolean;
+  /** Local logo path printed at the very top (null = skip). */
   storeLogoPath?: string | null;
-  /** إضافة مكتبية اختيارية (§2.ب): رمز QR برقم الفاتورة — معطل افتراضياً. */
-  printQr?: boolean;
 }
 
 export interface ReceiptData {
   sale: SaleRecord;
   items: SaleItemRecord[];
   /** Product lookup so receipts can print names even after re-pricing. */
-  products: Product[];
+  productNameById: Map<number, string>;
 }
 
 /** ASCII-only labels used in the money area (bidi-safe). */
@@ -41,10 +38,11 @@ const LABELS = {
   discount: 'Discount',
   total: 'TOTAL',
   profit: 'Net Profit',
+  qty: 'Qty x Price = Amount',
   thanks: 'Thank You!',
 } as const;
 
-export function buildReceiptJob(data: ReceiptData, settings: ReceiptSettings): EscPosOp[] {
+export function buildReceiptJob(data: ReceiptData, settings: ReceiptSettings) {
   const width =
     settings.paperWidth === '58' ? RECEIPT_WIDTH_58 : RECEIPT_WIDTH_80;
   const rasterWidth = settings.paperWidth === '58' ? 384 : 576;
@@ -86,14 +84,18 @@ export function buildReceiptJob(data: ReceiptData, settings: ReceiptSettings): E
   // ── Items ─────────────────────────────────────────────────────
   // Arabic name on its own right-aligned line, then ASCII money line.
   b.align(2);
-  const names = new Map<number, string>(
-    data.products.map(p => [p.id, p.name] as const),
-  );
   for (const item of data.items) {
-    const name = names.get(item.product_id) ?? `#${item.product_id}`;
+    const name =
+      data.productNameById.get(item.product_id) ?? `#${item.product_id}`;
+    // v35 (الجولة 43): وصف المتغير (لون · مقاس / حجم / ربطة) بعد
+    //  الاسم — الفاتورة تميز ما بيع تحديداً من كل موديل.
+    const variantSuffix = (item as {variant_label?: string | null})
+      .variant_label
+      ? ` (${(item as {variant_label?: string | null}).variant_label})`
+      : '';
     const unitSuffix =
       item.unit_name && item.unit_name !== 'قطعة' ? ` (${item.unit_name})` : '';
-    b.truncate(`${name}${unitSuffix}`, width);
+    b.truncate(`${name}${variantSuffix}${unitSuffix}`, width);
     b.qtyPriceLine(item.quantity, item.unit_price, item.total_line_price);
   }
 
@@ -103,7 +105,9 @@ export function buildReceiptJob(data: ReceiptData, settings: ReceiptSettings): E
     .twoColumns(LABELS.subtotal, subtotal, width)
     .twoColumns(LABELS.discount, data.sale.discount, width)
     .bold(true)
+    .size(1, 1)
     .twoColumns(LABELS.total, data.sale.total_amount, Math.max(width - 4, 16))
+    .size(0, 0)
     .bold(false);
 
   // Manager-only net profit (never printed unless explicitly enabled).
@@ -113,13 +117,6 @@ export function buildReceiptJob(data: ReceiptData, settings: ReceiptSettings): E
       .bold(false);
   }
 
-  // ── QR الاختياري برقم الفاتورة والإجمالي (§2.ب — معطل افتراضياً) ──
-  if (settings.printQr) {
-    b.separator(width)
-      .align(1)
-      .qr(`${data.sale.invoice_number} | TOTAL ${data.sale.total_amount.toFixed(2)}`, 6);
-  }
-
   // ── Footer ────────────────────────────────────────────────────
   b.separator(width)
     .align(1)
@@ -127,20 +124,36 @@ export function buildReceiptJob(data: ReceiptData, settings: ReceiptSettings): E
     .align(1)
     .bold(true)
     .textLine(LABELS.thanks)
-    .bold(false)
+    .bold(false);
+
+  // ── v25 (round-32 #4): the INVOICE barcode — CODE128 carrying
+  //  the invoice number itself, so the merchant can scan ANY
+  //  printed receipt from the invoices center's قارئ الباركود and
+  //  the exact invoice opens instantly (returns, reprints, debt
+  //  collection). HRI off; the number is already printed above.
+  //  v41 (الجولة 49 #2): GS w بعرض وحدة محسوب يتسع داخل الورق —
+  //  رقم الفاتورة (17 محرفاً = 222 وحدة) كان يتجاوز 58مم فيخرج
+  //  الباركود مشوهاً لا يقرؤه الماسح.
+  const invoiceModuleWidth = b.barcodeModuleWidthFor(
+    b.code128Modules(data.sale.invoice_number.length),
+    rasterWidth,
+  );
+  b.align(1)
+    .barcode('CODE128', data.sale.invoice_number, 60, invoiceModuleWidth)
     .feed(3)
     .cut();
 
   return b.build();
 }
 
-/** Small self-test receipt used by «طباعة تجريبية» (من الأندرويد + عربية مكتبية). */
-export function buildTestJob(settings: ReceiptSettings): EscPosOp[] {
+/** Small self-test receipt used by "طباعة تجريبية". */
+export function buildTestJob(settings: ReceiptSettings) {
   const width =
     settings.paperWidth === '58' ? RECEIPT_WIDTH_58 : RECEIPT_WIDTH_80;
   const rasterWidth = settings.paperWidth === '58' ? 384 : 576;
   const b = ReceiptBuilder.create();
 
+  // ── Optional store logo (raster, centered) ──
   if (settings.storeLogoPath) {
     b.image(settings.storeLogoPath, rasterWidth).feed(1);
   }
@@ -172,32 +185,6 @@ export function buildTestJob(settings: ReceiptSettings): EscPosOp[] {
     .textLine(`${settings.paperWidth}mm - CP${settings.codepage}`)
     .textLine('تمت الطباعة بنجاح')
     .feed(3)
-    .cut();
-  return b.build();
-}
-
-/** ملصق باركود لمنتج (§3.3 إضافة مكتبية): اسم + سعر + GS k CODE128. */
-export function buildBarcodeLabel(
-  product: import('../core/types').Product,
-  width: '58' | '80',
-  codepage: number,
-): EscPosOp[] {
-  const chars = width === '58' ? RECEIPT_WIDTH_58 : RECEIPT_WIDTH_80;
-  const b = ReceiptBuilder.create();
-  const code = product.barcode?.trim();
-  if (!code) {
-    throw new Error('هذا المنتج بلا باركود — أضف واحداً له أولاً');
-  }
-  b.codepage(codepage)
-    .align(1)
-    .bold(true)
-    .truncate(product.name, chars)
-    .bold(false)
-    .align(2)
-    .twoColumns('Retail', product.retail_price, chars)
-    .twoColumns('Wholesale', product.wholesale_price, chars)
-    .barcode128(code, 60)
-    .feed(2)
     .cut();
   return b.build();
 }

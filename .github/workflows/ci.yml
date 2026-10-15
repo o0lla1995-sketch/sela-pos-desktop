@@ -41,3 +41,28 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+  # فحص ترجمة صندوق src-tauri نفسه (الأسلاك بين النواة والواجهة) —
+  # يكشف أخطاء أوامر Tauri قبل وصولها لويندوز في خط الإصدار.
+  tauri-compile-check:
+    name: src-tauri compile check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux system deps (tauri)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+
+      - name: Compile-check the tauri app crate
+        run: cargo check -p sela-pos-desktop --locked

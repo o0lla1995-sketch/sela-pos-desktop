@@ -1,0 +1,437 @@
+/*
+ * sila.css — أنماط شاشة «صِلة والقسائم» (SilaScreen).
+ * ─────────────────────────────────────────────────────────────────
+ * تُعاد استخدام أصناف القشرة العامة من styles.css (card / btn / chip /
+ * grid-4 / kpi / table.data / toolbar / overlay / modal / empty / field)
+ * وتُضاف هنا الأصناف الخاصة بالشاشة فقط، وكلها ببادئة «sila-» كي لا
+ * تتضارب مع باقي الشاشات. كل الألوان عبر متغيرات الثيم (نهاري/ليلي).
+ */
+
+/* ── الهيكل العام ─────────────────────────────────────────────── */
+.sila-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 1280px;
+}
+.sila-muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+.sila-err {
+  color: var(--danger);
+}
+/* سطر فرعي صغير داخل خلية جدول (تحت الاسم/الرقم). */
+.sila-cell-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 3px;
+  line-height: 1.7;
+}
+.sila-cell-sub.sila-err {
+  color: var(--danger);
+}
+table.data td .chip {
+  white-space: nowrap;
+}
+table.data td {
+  vertical-align: top;
+}
+
+/* ── بطاقة الربط / حالة المزامنة (§6.1) ───────────────────────── */
+.sila-pair-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sila-pair-icon {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  border-radius: 12px;
+  font-size: 21px;
+}
+.sila-pair-meta {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.9;
+  margin-top: 3px;
+}
+/* معاينة رمز نقطة البيع (pos_token). */
+.sila-token {
+  font-family: 'Consolas', 'Courier New', monospace;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1px 8px;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  direction: ltr;
+  unicode-bidi: embed;
+}
+.sila-pair-card .sila-actions {
+  margin-top: 12px;
+}
+.sila-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 14px 2px;
+}
+.sila-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  line-height: 1.8;
+}
+.sila-step-num {
+  width: 25px;
+  height: 25px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-weight: 800;
+  color: var(--brand-ink);
+  font-size: 12px;
+}
+
+/* صناديق التنبيه داخل البطاقات. */
+.sila-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 12.5px;
+  line-height: 1.9;
+  margin-top: 10px;
+}
+.sila-alert.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.sila-alert.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.sila-alert.info {
+  background: var(--surface-2);
+  color: var(--ink-soft);
+}
+
+/* سطر حالة المزامنة (نقطة ملونة + نص). */
+.sila-sync-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.sila-sync-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 99px;
+  background: var(--ok);
+  flex-shrink: 0;
+}
+.sila-sync-line.warn {
+  color: var(--warn);
+}
+.sila-sync-line.warn .sila-sync-dot {
+  background: var(--warn);
+}
+.sila-sync-line.danger {
+  color: var(--danger);
+}
+.sila-sync-line.danger .sila-sync-dot {
+  background: var(--danger);
+}
+.sila-sync-line.brand {
+  color: var(--brand-ink);
+}
+.sila-sync-line.brand .sila-sync-dot {
+  background: var(--brand);
+  animation: sila-pulse 1s ease-in-out infinite;
+}
+@keyframes sila-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.sila-chiprow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.sila-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.sila-actions .sila-spacer {
+  flex: 1;
+}
+
+/* ── شريط التبويبين ───────────────────────────────────────────── */
+.sila-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sila-tab {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-soft);
+  padding: 10px 24px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 13px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.sila-tab:hover {
+  color: var(--ink);
+  border-color: var(--brand);
+}
+.sila-tab.on {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+/* ── رؤوس القوائم وأدواتها ────────────────────────────────────── */
+.sila-list-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.sila-list-head b {
+  font-size: 14.5px;
+}
+.sila-list-hint {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.sila-list-head .grow,
+.sila-toolbar .grow {
+  flex: 1;
+}
+.sila-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.sila-search {
+  flex: 1;
+  min-width: 230px;
+  padding: 9px 16px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+}
+.sila-search:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+.sila-more {
+  margin-top: 10px;
+}
+
+/* ── بطاقة المستحق لك (تبويب القسائم) ─────────────────────────── */
+.sila-due-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.sila-due-icon {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  border-radius: 999px;
+  font-size: 21px;
+}
+.sila-due-label {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.sila-due-value {
+  font-size: 25px;
+  font-weight: 800;
+  color: var(--brand-ink);
+  line-height: 1.35;
+}
+.sila-due-meta {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  color: var(--muted);
+  font-size: 11.5px;
+  margin-top: 12px;
+}
+.sila-due-time {
+  margin-inline-start: auto;
+}
+
+/* ── نافذة «استبدال قسيمة» ────────────────────────────────────── */
+.sila-redeem {
+  width: min(580px, 94vw);
+}
+.sila-redeem .field input {
+  width: 100%;
+}
+.sila-rulebox {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.9;
+}
+.sila-rulebox .sila-rule-icon {
+  flex-shrink: 0;
+}
+.sila-code-input {
+  text-align: center;
+  font-family: 'Consolas', 'Courier New', monospace;
+  letter-spacing: 1.5px;
+  font-size: 14px;
+}
+.sila-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 8px 10px;
+  text-align: center;
+}
+.sila-state-icon {
+  width: 58px;
+  height: 58px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 27px;
+}
+.sila-state.ok .sila-state-icon {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.sila-state.danger .sila-state-icon {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.sila-state.warn .sila-state-icon {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.sila-state-title {
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.6;
+}
+.sila-state.ok .sila-state-title {
+  color: var(--ok);
+}
+.sila-state.danger .sila-state-title {
+  color: var(--danger);
+}
+.sila-state.warn .sila-state-title {
+  color: var(--warn);
+}
+.sila-state-text {
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  line-height: 2;
+  max-width: 460px;
+}
+.sila-state-meta {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.9;
+}
+/* تفكيك المبالغ (قيمة القسيمة / الفرق النقدي عند الكاشير). */
+.sila-decomp {
+  display: flex;
+  flex-direction: column;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  margin-top: 8px;
+  width: 100%;
+  max-width: 420px;
+}
+.sila-decomp-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  padding: 5px 0;
+}
+.sila-decomp-row span {
+  color: var(--ink-soft);
+}
+.sila-decomp-row b {
+  font-weight: 800;
+  white-space: nowrap;
+}
+.sila-decomp-row.warn span,
+.sila-decomp-row.warn b {
+  color: var(--warn);
+}
+.sila-decomp-row.total {
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  padding-top: 9px;
+}
+.sila-decomp-row.total span {
+  color: var(--ink);
+  font-weight: 800;
+}
+/* مؤشر انتظار دائري صغير. */
+.sila-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid var(--line);
+  border-top-color: var(--brand);
+  animation: sila-spin 0.7s linear infinite;
+  display: inline-block;
+  vertical-align: middle;
+}
+@keyframes sila-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

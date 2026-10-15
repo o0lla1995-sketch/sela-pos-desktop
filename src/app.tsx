@@ -1,15 +1,22 @@
 /**
- * app.tsx — الهيكل العام: بوابة الترخيص → القشرة (شريط جانبي أيمن +
- * شاشات) + شريط حالة الاشتراك (grace) + التوست + موجّه الباركود العام.
+ * app.tsx — الهيكل العام v57: بوابة الترخيص → بوابة قفل PIN →
+ * القشرة (شريط جانبي أيمن + الشاشات) + شريط حالة الاشتراك (grace)
+ * + التوست + موجّه الباركود العام + إقلاع محرّكي صِلة والبيع أونلاين.
  */
 import React, {useCallback, useEffect, useState} from 'react';
 import {evaluate, heartbeat, type LicenseStatus} from './license/LicenseService';
 import {initStorage} from './state/storage';
-import {useSettingsStore} from './state/settingsStore';
-import {useToastStore, useNotificationsStore, useCatalogStore} from './state/appStores';
+import {useSettingsStore} from './stores/settingsStore';
+import {
+  useToastStore,
+  useNotificationsStore,
+  useCatalogStore,
+} from './state/appStores';
+import {useSilaStore} from './stores/silaStore';
 import {installGlobalScanner} from './lib/scanner';
 import {api} from './lib/tauri';
 import {APP_VERSION_LABEL} from './core/config';
+import {AppLockGate} from './components/AppLockGate';
 import {ActivationScreen} from './screens/ActivationScreen';
 import {HomeScreen} from './screens/HomeScreen';
 import {PosScreen} from './screens/PosScreen';
@@ -19,13 +26,27 @@ import {StocktakeScreen} from './screens/StocktakeScreen';
 import {ReportsScreen} from './screens/ReportsScreen';
 import {NotificationsScreen} from './screens/NotificationsScreen';
 import {SettingsScreen} from './screens/SettingsScreen';
+import {LocalDebtsScreen} from './screens/LocalDebtsScreen';
+import {CashMovementsScreen} from './screens/CashMovementsScreen';
+import {SilaScreen} from './screens/SilaScreen';
+import {StockAlertsScreen} from './screens/StockAlertsScreen';
+import {OnlineOrdersScreen} from './screens/online/OnlineOrdersScreen';
+import {OnlineProductsScreen} from './screens/online/OnlineProductsScreen';
+import {OnlineSellingScreen} from './screens/online/OnlineSellingScreen';
 
 type ScreenKey =
   | 'home'
   | 'pos'
   | 'invoices'
+  | 'online-orders'
+  | 'online-products'
+  | 'online-selling'
   | 'inventory'
   | 'stocktake'
+  | 'debts'
+  | 'cash'
+  | 'sila'
+  | 'stock-alerts'
   | 'reports'
   | 'notifications'
   | 'settings';
@@ -34,8 +55,12 @@ const NAV: {key: ScreenKey; label: string; icon: string}[] = [
   {key: 'home', label: 'الرئيسية', icon: '🏠'},
   {key: 'pos', label: 'نقطة البيع', icon: '🛒'},
   {key: 'invoices', label: 'الفواتير', icon: '🧾'},
+  {key: 'online-orders', label: 'الطلبات أونلاين', icon: '🛍️'},
   {key: 'inventory', label: 'المخزون', icon: '📦'},
   {key: 'stocktake', label: 'الجرد', icon: '📋'},
+  {key: 'debts', label: 'ديون المتجر', icon: '📒'},
+  {key: 'cash', label: 'الخزينة', icon: '💰'},
+  {key: 'sila', label: 'صِلة والقسائم', icon: '🔗'},
   {key: 'reports', label: 'التقارير', icon: '📊'},
   {key: 'notifications', label: 'الإشعارات', icon: '🔔'},
   {key: 'settings', label: 'الإعدادات', icon: '⚙️'},
@@ -46,12 +71,11 @@ export function App() {
   const [status, setStatus] = useState<LicenseStatus | null>(null);
   const [screen, setScreen] = useState<ScreenKey>('home');
   const toast = useToastStore(s => s.show);
-  const toastMessage = useToastStore(s => s.message);
-  const toastKind = useToastStore(s => s.kind);
-  const dismiss = useToastStore(s => s.dismiss);
-  const unread = useNotificationsStore(s => s.unread);
+  const toasts = useToastStore(s => s.toasts);
+  const unread = useNotificationsStore(s => s.unreadCount);
   const settings = useSettingsStore(s => s.settings);
   const themeMode = useSettingsStore(s => s.themeMode);
+  const silaPaired = useSilaStore(s => s.pairing != null);
 
   const refreshStatus = useCallback(() => {
     void evaluate().then(setStatus);
@@ -66,6 +90,23 @@ export function App() {
         );
         await api.bootstrap().catch(() => null);
         refreshStatus();
+        // ── محركا المزامنة: صِلة (عند الاقتران) والطلبات أونلاين ──
+        try {
+          const {SilaSync} = await import('./services/sila/SilaSync');
+          if (useSilaStore.getState().pairing != null) {
+            SilaSync.start();
+          }
+        } catch {
+          /* صِلة غير مهيأة بعد */
+        }
+        try {
+          const {ensureEngineStarted} = await import(
+            './services/online/OnlineStoreService'
+          );
+          ensureEngineStarted();
+        } catch {
+          /* البيع أونلاين غير مفعّل */
+        }
       } catch (e) {
         toast(e instanceof Error ? e.message : String(e), 'error');
       } finally {
@@ -83,13 +124,6 @@ export function App() {
     }, 15 * 60 * 1000);
     return () => clearInterval(timer);
   }, [status == null]);
-
-  // توست تلقائي الإخفاء.
-  useEffect(() => {
-    if (toastMessage == null) return;
-    const t = setTimeout(dismiss, 3200);
-    return () => clearTimeout(t);
-  }, [toastMessage, dismiss]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode;
@@ -110,15 +144,15 @@ export function App() {
     return (
       <>
         <ActivationScreen status={status} onRefresh={refreshStatus} />
-        {toastMessage != null && (
-          <div className={`toast ${toastKind}`}>{toastMessage}</div>
-        )}
+        {toasts.map(t => (
+          <div key={t.id} className={`toast ${t.kind}`}>{t.message}</div>
+        ))}
       </>
     );
   }
 
   return (
-    <>
+    <AppLockGate>
       {status.state === 'grace' && (
         <div className="state-banner">
           ⚠️ العمل دون إنترنت منذ {Math.round(status.offlineHours)} ساعة — يظل
@@ -146,6 +180,13 @@ export function App() {
                   {unread}
                 </span>
               )}
+              {item.key === 'sila' && silaPaired && (
+                <span
+                  className="dot-ok"
+                  title="مقترن بخدمة صِلة"
+                  style={{marginInlineStart: 'auto'}}
+                />
+              )}
             </button>
           ))}
           <div className="nav-spacer" />
@@ -166,16 +207,27 @@ export function App() {
             <div style={{flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0}}>
               {screen === 'home' && <HomeScreen goTo={key => setScreen(key as ScreenKey)} />}
               {screen === 'invoices' && <InvoicesScreen />}
+              {screen === 'online-orders' && <OnlineOrdersScreen />}
+              {screen === 'online-products' && <OnlineProductsScreen />}
+              {screen === 'online-selling' && (
+                <OnlineSellingScreen goTo={key => setScreen(key as ScreenKey)} />
+              )}
               {screen === 'inventory' && <InventoryScreen />}
               {screen === 'stocktake' && <StocktakeScreen />}
+              {screen === 'debts' && <LocalDebtsScreen />}
+              {screen === 'cash' && <CashMovementsScreen />}
+              {screen === 'sila' && <SilaScreen />}
+              {screen === 'stock-alerts' && <StockAlertsScreen goTo={key => setScreen(key as ScreenKey)} />}
               {screen === 'reports' && <ReportsScreen />}
               {screen === 'notifications' && <NotificationsScreen />}
-              {screen === 'settings' && <SettingsScreen />}
+              {screen === 'settings' && <SettingsScreen goTo={key => setScreen(key as ScreenKey)} />}
             </div>
           )}
         </main>
       </div>
-      {toastMessage != null && <div className={`toast ${toastKind}`}>{toastMessage}</div>}
-    </>
+      {toasts.map(t => (
+        <div key={t.id} className={`toast ${t.kind}`}>{t.message}</div>
+      ))}
+    </AppLockGate>
   );
 }

@@ -47,6 +47,9 @@ pub struct EscPosOp {
     /** حجم وحدة رمز QR للعملية qr (الافتراضي 6). */
     #[serde(default)]
     pub module_size: Option<i64>,
+    /** نوع الباركود للعملية barcode — EAN13 أو CODE128 (v9.1). */
+    #[serde(default)]
+    pub system: Option<String>,
 }
 
 /// 0=US-ASCII، 45=IBM864، 47=Windows-1256 — نفس خريطة كوتلن.
@@ -251,6 +254,58 @@ pub fn encode_job(ops: &[EscPosOp]) -> Result<Vec<u8>> {
                     buffer.extend_from_slice(&barcode_128_bytes(data, op.height.unwrap_or(60)));
                 }
             }
+            "barcode" => {
+                // v9.1 أندرويد حرفياً: GS k function B — EAN13 (m=67)
+                // أو CODE128 (m=73 مع {B ومضاعفة الأقواس). GS w عرض
+                // الوحدة (1..6) ثم GS h الارتفاع (24..162).
+                let value = op.value.as_deref().unwrap_or("");
+                let system = op.system.as_deref().unwrap_or("CODE128");
+                let height = op.height.unwrap_or(72).clamp(24, 162) as u8;
+                let module_width = op.width.unwrap_or(2).clamp(1, 6) as u8;
+                if !value.is_empty() {
+                    let pair: (u8, String) = if system == "EAN13" {
+                        let digits: String =
+                            value.chars().filter(|c| c.is_ascii_digit()).collect();
+                        if digits.len() >= 12 {
+                            let data = if digits.len() >= 13 {
+                                digits[..12].to_string()
+                            } else {
+                                digits
+                            };
+                            (67u8, data)
+                        } else {
+                            (0u8, String::new())
+                        }
+                    } else {
+                        let ascii: String = value
+                            .chars()
+                            .filter(|c| (*c as u32) >= 32 && (*c as u32) <= 126)
+                            .collect();
+                        // v41: محرف اختيار مجموعة الرموز B حرفياً كما
+                        // في دليل Epson — الطابعة تحسب خانة التحقق وتضيف
+                        // START/STOP بنفسها. الأقواس الحرفية تُضاعف.
+                        (73u8, format!("{{B{}", ascii.replace('{', "{{")))
+                    };
+                    let (m, data) = pair;
+                    if m != 0 && !data.is_empty() {
+                        let bytes = data.as_bytes();
+                        // GS w n — عرض الوحدة بالنقاط.
+                        buffer.extend_from_slice(&[0x1D, 0x77, module_width]);
+                        // GS h n — ارتفاع الباركود بالنقاط.
+                        buffer.extend_from_slice(&[0x1D, 0x68, height]);
+                        // GS k m n d1..dn — باركود الدالة B.
+                        buffer.extend_from_slice(&[
+                            0x1D,
+                            0x6B,
+                            m,
+                            bytes.len() as u8,
+                        ]);
+                        buffer.extend_from_slice(bytes);
+                        // الباركود يُطبع مع تغذية السطر التالي.
+                        buffer.extend_from_slice(&[0x0A]);
+                    }
+                }
+            }
             "qr" => {
                 // رمز QR حراري (GS ( k نموذج 2) — إضافة مكتبية §2.ب.
                 let data = op.value.as_deref().unwrap_or("");
@@ -340,7 +395,7 @@ mod tests {
             op: kind.to_string(),
             value: None, path: None, max_width: None, center: None,
             page: None, align: None, on: None, width: None, height: None, lines: None,
-            module_size: None,
+            module_size: None, system: None,
         }
     }
 
