@@ -10,6 +10,7 @@ import {getJson, setJson, KEYS} from '../storage/storage';
 import {localNow} from '../core/format';
 import {logDiag} from '../core/diagnostics';
 import {SelaNotificationsNative} from '../native/nativeBridge';
+import {showNotificationPopup} from '../components/NotificationPopups';
 import type {AppNotification, NotificationKind} from '../core/types';
 
 const MAX_ITEMS = 100;
@@ -103,6 +104,9 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
     if (options?.system) {
       void postSystemNotification(notification);
     }
+    // v59: إشعار فوري على الشاشة + نغمة مسموعة لحظة الوصول — لم يعد
+    // يلزم فتح مركز الإشعارات لتعرف أن شيئاً وصل.
+    showNotificationPopup(notification);
     return notification;
   },
 

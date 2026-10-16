@@ -31,6 +31,7 @@
  * المكتب — image_uri يُمرَّر كما هو فلا يفقد المنتج صورته أبداً.
  */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {api, assetSrc} from '../lib/tauri';
 import {ProductRepo, type ProductInput} from '../database/repositories/ProductRepo';
 import {CategoryRepo} from '../database/repositories/CategoryRepo';
 import {UnitRepo} from '../database/repositories/UnitRepo';
@@ -1022,6 +1023,35 @@ export function ProductFormModal({
     }
   }, [newCategory, settings.storeMode, toast]);
 
+  /* ── صورة المنتج (v59 — جولة المستخدم #5) ──────────────────── */
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => {
+    setImageFailed(false);
+  }, [imageUri]);
+
+  /** حوار أصلي → ضغط 512px → حفظ في بيانات التطبيق → image_uri. */
+  const pickImage = useCallback(async () => {
+    if (imageBusy) {
+      return;
+    }
+    setImageBusy(true);
+    try {
+      const path = await api.pickProductImage();
+      if (path != null) {
+        setImageUri(path);
+        toast('حُفظت صورة المنتج — ستظهر في شاشة البيع', 'success');
+      }
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : 'تعذر اختيار الصورة',
+        'error',
+      );
+    } finally {
+      setImageBusy(false);
+    }
+  }, [imageBusy, toast]);
+
   /* ── الربطة (ملابس جديدة — v35) ────────────────────────────── */
   const toggleLotSize = (size: string) =>
     setLotSizes(prev =>
@@ -1706,6 +1736,39 @@ export function ProductFormModal({
   const editingLabel =
     editingId != null ? (archived ? 'منتج مؤرشف' : 'تعديل منتج') : 'منتج جديد';
 
+  /* ── اختصارات النافذة (v59 — جولة المستخدم #3) ───────────────
+   * Ctrl+S يحفظ دون لمس الفأرة، وEscape يغلق النافذة.
+   * مرجع حيّ لآخر نسخة من save/onClose — بلا إعادة تركيب المستمع
+   * مع كل ضغطة (ومن دونه كان المستمع يحمل نسخة قديمة من الحقول
+   * فيحفظ باسم فارغ: انكشاف إغلاق قديم عند الاختبار الفعلي).
+   */
+  const saveRef = useRef(save);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    saveRef.current = save;
+    onCloseRef.current = onClose;
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!busy && !loading) {
+          void saveRef.current(false);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onCloseRef.current(false);
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [busy, loading]);
+
   /* ── العرض ─────────────────────────────────────────────────── */
   return (
     <div className="overlay pf-overlay">
@@ -1754,11 +1817,60 @@ export function ProductFormModal({
               <div className="pf-cols">
                 {/* ── العمود الأول: الأساسيات والأسعار والمخزون ── */}
                 <div className="pf-col">
-                  <section className="pf-sec">
+                  <section className="pf-sec pf-sec-essentials">
                     <div className="pf-sec-h">
-                      <b>الأساسيات والأسعار</b>
+                      <b>
+                        <span className="pf-sec-num">1</span>
+                        الأساسيات والأسعار
+                      </b>
                       <span className="pf-sec-sub">{copy.priceHint}</span>
                     </div>
+
+                    {/* ── صورة المنتج (v59) ── */}
+                    <div className="pf-image-row">
+                      <div className="pf-image-box">
+                        {imageUri != null && imageUri.length > 0 && !imageFailed ? (
+                          <img
+                            src={assetSrc(imageUri)}
+                            alt=""
+                            draggable={false}
+                            onError={() => setImageFailed(true)}
+                          />
+                        ) : (
+                          <span className="pf-image-empty">
+                            {name.trim().charAt(0) || '؟'}
+                          </span>
+                        )}
+                        {imageBusy && <span className="pf-image-busy">…</span>}
+                      </div>
+                      <div className="pf-image-actions">
+                        <div className="pf-image-label">صورة المنتج</div>
+                        <div className="pf-image-hint">
+                          تظهر في شاشة البيع — تُضغط تلقائياً إلى 512 بكسل
+                        </div>
+                        <div className="pf-image-buttons">
+                          <button
+                            type="button"
+                            className="btn sm"
+                            disabled={imageBusy}
+                            onClick={() => void pickImage()}>
+                            {imageUri != null && imageUri.length > 0
+                              ? 'تغيير الصورة'
+                              : 'اختيار صورة'}
+                          </button>
+                          {imageUri != null && imageUri.length > 0 && (
+                            <button
+                              type="button"
+                              className="btn sm danger"
+                              disabled={imageBusy}
+                              onClick={() => setImageUri(null)}>
+                              إزالة
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="pf-field">
                       <label>{`${copy.nameLabel} *`}</label>
                       <input
@@ -1928,7 +2040,7 @@ export function ProductFormModal({
                   {/* ── المخزون ── */}
                   <section className="pf-sec">
                     <div className="pf-sec-h">
-                      <b>المخزون والتتبع</b>
+                      <b><span className="pf-sec-num">2</span>المخزون والتتبع</b>
                       <span className="pf-sec-sub">
                         {saleMode === 'weight'
                           ? 'منتج وزن — الأسعار والمخزون بالكيلوغرام'
@@ -2074,7 +2186,7 @@ export function ProductFormModal({
                   {modeConfig.expiry !== 'hidden' && (
                     <section className="pf-sec">
                       <div className="pf-sec-h">
-                        <b>الصلاحية</b>
+                        <b><span className="pf-sec-num">3</span>الصلاحية</b>
                         {expiryStatus != null && (
                           <span
                             className={`iv57-mini-chip ${
@@ -2154,7 +2266,7 @@ export function ProductFormModal({
                   {/* الباركود والملصق */}
                   <section className="pf-sec">
                     <div className="pf-sec-h">
-                      <b>الباركود والملصق</b>
+                      <b><span className="pf-sec-num">4</span>الباركود والملصق</b>
                       {barcode.trim().length > 0 && (
                         <span
                           className={`iv57-mini-chip ${barcodeValid ? 'ok' : 'warn'}`}>
@@ -2208,7 +2320,7 @@ export function ProductFormModal({
                   {isClothingMode && editingId == null && (
                     <section className="pf-sec">
                       <div className="pf-sec-h">
-                        <b>الربطة (المقاسات والألوان وعدد الربط)</b>
+                        <b><span className="pf-sec-num">5</span>الربطة (المقاسات والألوان وعدد الربط)</b>
                         <span className="pf-sec-sub">
                           {lotSizes.length > 0 && lotColors.length > 0
                             ? `${lotColors.length} لون × ${lotSizes.length} مقاس × ${bundlesCount} ربط = ${
@@ -2329,7 +2441,7 @@ export function ProductFormModal({
                   {isClothingMode && variantDrafts.length > 0 && (
                     <section className="pf-sec">
                       <div className="pf-sec-h">
-                        <b>مخزون الموديل (لون × مقاس)</b>
+                        <b><span className="pf-sec-num">6</span>مخزون الموديل (لون × مقاس)</b>
                         <span className="pf-sec-sub">
                           {variantTotals.pieces} قطعة إجمالاً ·{' '}
                           {variantTotals.colors} لون · {variantTotals.sizes} مقاس
@@ -2396,7 +2508,7 @@ export function ProductFormModal({
                   {showSizesSection && (
                     <section className="pf-sec">
                       <div className="pf-sec-h">
-                        <b>الأحجام بأسعار مستقلة</b>
+                        <b><span className="pf-sec-num">7</span>الأحجام بأسعار مستقلة</b>
                         <Switch
                           checked={sizesEnabled}
                           onChange={setSizesEnabled}
@@ -2513,7 +2625,7 @@ export function ProductFormModal({
                   {/* وحدات البيع */}
                   <section className="pf-sec">
                     <div className="pf-sec-h">
-                      <b>وحدات البيع</b>
+                      <b><span className="pf-sec-num">8</span>وحدات البيع</b>
                       <span className="pf-sec-sub">
                         {unitRows.length === 0
                           ? 'لا وحدات — يُباع بوحدة الأساس'
@@ -2686,7 +2798,7 @@ export function ProductFormModal({
                   {modeConfig.receiving && (
                     <section className="pf-sec">
                       <div className="pf-sec-h">
-                        <b>استلام البضاعة</b>
+                        <b><span className="pf-sec-num">9</span>استلام البضاعة</b>
                         <span className="pf-sec-sub">
                           تعبئة تلقائية: الكمية والتكلفة واقتراح الأسعار
                         </span>
@@ -2914,6 +3026,7 @@ export function ProductFormModal({
                   : editingId != null
                   ? 'حفظ التعديلات'
                   : 'حفظ المنتج'}
+                <span className="pf-kbd">Ctrl+S</span>
               </button>
             </div>
           </>

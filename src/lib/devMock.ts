@@ -71,6 +71,14 @@ function seed(): MockState {
 
 const state = seed();
 
+// بذرة قفل لتجربة البوابة في المعاينة: وجود التجزئة يجعل AppLockGate
+// تقفل من أول إطار (رمز التحقق غير صالح في المعاينة — المهم سلوك البوابة).
+// تُفعَّل بإضافة ?lock إلى الرابط.
+if (typeof window !== 'undefined' && window.location.search.includes('lock')) {
+  state.config.set('applock_pin_hash_v1', 'dev-preview-pin-hash');
+  state.config.set('applock_pin_salt_v1', 'dev-preview-salt');
+}
+
 function sqlMock(sql: string): {rows: Record<string, unknown>[]; insertId: null; rowsAffected: number} {
   const clean = sql.trim().toLowerCase();
   if (clean.startsWith('select id, name, store_mode from categories')) {
@@ -131,6 +139,13 @@ export function mockInvoke(cmd: string, args: Record<string, unknown> = {}): unk
       return '0:0';
     case 'current_printer_channel':
       return {channel: 'none'};
+    case 'scanner_set_enabled':
+      return null;
+    case 'pick_product_image':
+      // معاينة التطوير: صورة بديلة (سلسلة بيانات برتقالية صغيرة).
+      return 'dev-mock://product-image.jpg';
+    case 'image_compress':
+      return {base64: '', hash: '', ext: 'jpg', width: 1, height: 1};
     default:
       throw new Error(`أمر غير متاح في محاكي التطوير: ${cmd}`);
   }

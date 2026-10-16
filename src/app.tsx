@@ -22,6 +22,7 @@ import {api} from './lib/tauri';
 import {APP_VERSION_LABEL} from './core/config';
 import {AppLockGate} from './components/AppLockGate';
 import {ErrorBoundary} from './components/ErrorBoundary';
+import {NotificationPopups} from './components/NotificationPopups';
 import {Icon, type IconName} from './components/Icon';
 import {ActivationScreen} from './screens/ActivationScreen';
 import {HomeScreen} from './screens/HomeScreen';
@@ -84,7 +85,7 @@ export function App() {
   const setThemeMode = useSettingsStore(s => s.setThemeMode);
   const silaPaired = useSilaStore(s => s.pairing != null);
 
-  const refreshStatus = useCallback(() => {
+  const refreshStatus = useCallback((): Promise<void> => {
     // معاينة المتصفح في وضع التطوير فقط: حالة نشطة افتراضية كي
     // تُعاين الشاشات — يُحذف الفرع كلياً من بناء الإنتاج.
     if (import.meta.env.DEV && !('__TAURI_INTERNALS__' in window)) {
@@ -103,9 +104,11 @@ export function App() {
         lockReason: null,
         revoked: false,
       });
-      return;
+      return Promise.resolve();
     }
-    void evaluate().then(setStatus);
+    // v59: تُنتظر النتيجة أثناء الإقلاع — لا وميض لشاشة التفعيل عند
+    // من لديه ترخيص نشط (كانت تظهر لحظة ثم تختفي).
+    return evaluate().then(setStatus);
   }, []);
 
   useEffect(() => {
@@ -116,7 +119,8 @@ export function App() {
           useSettingsStore.getState().settings.scannerMinLength,
         );
         await api.bootstrap().catch(() => null);
-        refreshStatus();
+        // v59: ننتظر حالة الترخيص قبل إظهار الواجهة — لا وميض.
+        await refreshStatus();
         // ── محركا المزامنة: صِلة (عند الاقتران) والطلبات أونلاين ──
         try {
           const {SilaSync} = await import('./services/sila/SilaSync');
@@ -174,6 +178,7 @@ export function App() {
         {toasts.map(t => (
           <div key={t.id} className={`toast ${t.kind}`}>{t.message}</div>
         ))}
+        <NotificationPopups />
       </ErrorBoundary>
     );
   }
@@ -321,6 +326,7 @@ export function App() {
       {toasts.map(t => (
         <div key={t.id} className={`toast ${t.kind}`}>{t.message}</div>
       ))}
+      <NotificationPopups />
     </AppLockGate>
   );
 }

@@ -85,6 +85,7 @@ export type IconName =
   | 'chevronRight'
   | 'chevronDown'
   | 'moreVertical'
+  | 'keyboard'
   | 'check'
   | 'x';
 
@@ -676,6 +677,21 @@ const P: Record<IconName, React.ReactNode> = {
     <g>
       <rect x={3} y={4.5} width={8} height={13.5} rx={1.6} />
       <rect x={13} y={4.5} width={8} height={13.5} rx={1.6} />
+    </g>
+  ),
+
+  keyboard: (
+    <g>
+      <rect x={2.5} y={5.5} width={19} height={13} rx={2.2} />
+      <line x1={6} y1={9.5} x2={6} y2={9.5} />
+      <line x1={9.4} y1={9.5} x2={9.4} y2={9.5} />
+      <line x1={12.8} y1={9.5} x2={12.8} y2={9.5} />
+      <line x1={16.2} y1={9.5} x2={16.2} y2={9.5} />
+      <line x1={6} y1={13} x2={6} y2={13} />
+      <line x1={9.4} y1={13} x2={9.4} y2={13} />
+      <line x1={12.8} y1={13} x2={12.8} y2={13} />
+      <line x1={16.2} y1={13} x2={16.2} y2={13} />
+      <line x1={7.6} y1={16.2} x2={14.6} y2={16.2} />
     </g>
   ),
 

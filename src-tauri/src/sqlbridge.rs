@@ -178,15 +178,61 @@ pub fn pick_folder() -> CmdResult<String> {
 }
 
 /// كتابة ملف داخل مجلد (النسخ التلقائي) — يعيد المسار الكامل.
+/// v59: كتابة ذرّية مقاومة للأعطال — كتابة إلى ملف مؤقت ثم استبدال،
+/// وإنشاء المجلد إن حُذف، وتشخيص عربي واضح لكل سبب فشل (قرص
+/// منفصل/صلاحيات ويندوز/ملف مقفول من مزامنة سحابية) حتى يعرف
+/// التاجر ماذا يفعل بدل «تعذر كتابة الملف» المبهمة.
 #[command]
 pub fn write_file_in_folder(folder: String, name: String, contents: String) -> CmdResult<String> {
     let dir = std::path::PathBuf::from(&folder);
+    // القرص/الفلاش انفصل أو المسار حُذف؟ رسالة تشرح السبب والفعل.
     if !dir.is_dir() {
-        return Err("المجلد غير موجود".to_string());
+        // ربما حُذف المجلد فقط لكن القرص موجود — نحاول إنشاءه.
+        if std::fs::create_dir_all(&dir).is_err() {
+            return Err(format!(
+                "المجلد غير متاح: «{folder}» — تأكد أن القرص/الفلاش موصول وأن المجلد لم يُحذف، أو اختر مجلداً جديداً من الإعدادات"
+            ));
+        }
     }
     let path = dir.join(&name);
-    std::fs::write(&path, contents).map_err(|e| format!("تعذر كتابة الملف: {e}"))?;
-    Ok(path.to_string_lossy().to_string())
+    let tmp = dir.join(format!("{name}.part"));
+
+    // محاولة 1: كتابة مؤقتة ثم استبدال ذرّي (لا يكسر نسخة قائمة).
+    let write_err = match std::fs::write(&tmp, &contents) {
+        Ok(()) => match std::fs::rename(&tmp, &path) {
+            Ok(()) => return Ok(path.to_string_lossy().to_string()),
+            // على ويندوز: الاسم الهدف مفتوح من برنامج آخر (مزامنة
+            // سحابية/مضاد فيروسات) — نحاول الكتابة المباشرة.
+            Err(e) => format!("{e}"),
+        },
+        Err(e) => format!("{e}"),
+    };
+
+    // محاولة 2: كتابة مباشرة (بعض الأقراص/المزامنات لا تدعم rename).
+    if std::fs::write(&path, &contents).is_ok() {
+        let _ = std::fs::remove_file(&tmp);
+        return Ok(path.to_string_lossy().to_string());
+    }
+    let _ = std::fs::remove_file(&tmp);
+
+    // محاولة 3: احتياطي دائم — مجلد بيانات التطبيق (مضمون الصلاحية)
+    // كي لا تضيع النسخة إن رفض ويندوز الكتابة في مجلد المستخدم
+    // (حماية المجلدات من برامج الفدية تحجب أحياناً Documents/Desktop).
+    // البادئة FALLBACK: تخبر الواجهة أن الملف لم يصل للمجلد المختار.
+    let fallback_dir = sela_core::paths::data_dir().join("backups");
+    if std::fs::create_dir_all(&fallback_dir).is_ok() {
+        let fallback_path = fallback_dir.join(&name);
+        if std::fs::write(&fallback_path, &contents).is_ok() {
+            return Ok(format!(
+                "FALLBACK:{}",
+                fallback_path.to_string_lossy()
+            ));
+        }
+    }
+
+    Err(format!(
+        "تعذر كتابة ملف النسخة في «{folder}» ({write_err}). جرّب: اختيار مجلد آخر، أو فتح صلاحية الكتابة لسيلا على هذا المجلد من إعدادات حماية ويندوز، أو تأكد أن الملف ليس مفتوحاً في برنامج آخر"
+    ))
 }
 
 // ──────────────────────────────────────────────── ملفات وصور (جسر nativeBridge)

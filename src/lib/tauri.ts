@@ -5,7 +5,7 @@
  * وضع التطوير بلا نافذة Tauri (npm run dev في المتصفح): محاكٍ
  * بالذاكرة يُعاين الواجهة — يُحذف كلياً من بناء الإنتاج.
  */
-import {invoke as tauriInvoke} from '@tauri-apps/api/core';
+import {invoke as tauriInvoke, convertFileSrc} from '@tauri-apps/api/core';
 import {listen, type UnlistenFn} from '@tauri-apps/api/event';
 
 const isTauri =
@@ -32,6 +32,18 @@ export async function onBarcode(
   return listen<string>('scanner://barcode', event => {
     handler(event.payload);
   });
+}
+
+/**
+ * رابط عرض ملف محلي عبر بروتوكول asset — آمن في معاينة المتصفح:
+ * convertFileSrc الرسمية تقرأ window.__TAURI_INTERNALS__ مباشرة
+ * فتنهار بلا نافذة Tauri؛ هنا نسقط للمسار الخام بدل الانهيار.
+ */
+export function assetSrc(path: string): string {
+  if (isTauri) {
+    return convertFileSrc(path);
+  }
+  return path;
 }
 
 // ── أوامر جاهزة باسم واضح ──
@@ -138,6 +150,11 @@ export const api = {
     invoke<void>('save_printer_channel', {channel}),
   currentPrinterChannel: () => invoke<unknown>('current_printer_channel'),
   pickStoreLogo: () => invoke<string | null>('pick_store_logo'),
+  /** اختيار صورة منتج: ضغط 512px + حفظ داخل بيانات التطبيق. */
+  pickProductImage: () => invoke<string | null>('pick_product_image'),
+  /** تعطيل/تفعيل اعتراض الباركود (لوحات المبالغ + شاشة القفل). */
+  scannerSetEnabled: (enabled: boolean) =>
+    invoke<void>('scanner_set_enabled', {enabled}),
 
   deviceId: () => invoke<string>('device_id'),
   uptimeMs: () => invoke<number>('uptime_ms'),

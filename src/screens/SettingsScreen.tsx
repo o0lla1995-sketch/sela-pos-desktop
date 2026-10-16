@@ -355,7 +355,7 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
           compact: true,
         });
         const stamp = new Date().toISOString().slice(0, 19).replace('T', '_');
-        const path = await invoke<string>('write_file_in_folder', {
+        const result = await invoke<string>('write_file_in_folder', {
           folder: autoFolder,
           name: `sela_backup_${stamp}.json`,
           contents: json,
@@ -363,12 +363,33 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
         const now = new Date().toISOString();
         setJson(AUTO_BACKUP_KEYS.lastAt, now);
         setAutoLastAt(now);
-        logDiag(
-          'backup',
-          `نسخة ${silent ? 'تلقائية' : 'يدوية'} إلى ${path} — ${summary.products} منتج، ${summary.sales} فاتورة`,
-        );
-        if (!silent) {
-          toast(`حُفظت النسخة في المجلد: ${path}`, 'success', 5000);
+        if (result.startsWith('FALLBACK:')) {
+          // v59: ويندوز رفض الكتابة في المجلد المختار (صلاحيات/مزامنة
+          // سحابية) — حُفظت النسخة في مجلد بيانات سيلا بدل ضياعها.
+          const fallbackPath = result.slice('FALLBACK:'.length);
+          logDiag(
+            'backup',
+            `تعذر المجلد المختار — حُفظت النسخة احتياطياً في ${fallbackPath} (${summary.products} منتج، ${summary.sales} فاتورة)`,
+            'warn',
+          );
+          notify(
+            'backup',
+            'النسخة حُفظت في مجلد بيانات سيلا',
+            `تعذر الكتابة في المجلد المختار فحُفظت النسخة تلقائياً في: ${fallbackPath}`,
+          );
+          toast(
+            `تعذر المجلد المختار — حُفظت النسخة في مجلد بيانات سيلا: ${fallbackPath}`,
+            'info',
+            8000,
+          );
+        } else {
+          logDiag(
+            'backup',
+            `نسخة ${silent ? 'تلقائية' : 'يدوية'} إلى ${result} — ${summary.products} منتج، ${summary.sales} فاتورة`,
+          );
+          if (!silent) {
+            toast(`حُفظت النسخة في المجلد: ${result}`, 'success', 5000);
+          }
         }
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);

@@ -512,6 +512,38 @@ pub fn pick_store_logo(_state: State<AppState>) -> CmdResult<Option<String>> {
     Ok(Some(dest.to_string_lossy().to_string()))
 }
 
+/// اختيار صورة منتج (حوار أصلي) → ضغط إلى 512px JPEG → حفظ داخل
+/// مجلد بيانات التطبيق products/ → إعادة المسار الجديد لimage_uri.
+/// المنتج يعرض الصورة في نقطة البيع عبر بروتوكول asset.
+#[command]
+pub fn pick_product_image(_state: State<AppState>) -> CmdResult<Option<String>> {
+    let picked = rfd::FileDialog::new()
+        .set_title("اختيار صورة المنتج")
+        .add_filter(
+            "صور",
+            &["png", "jpg", "jpeg", "bmp", "webp", "gif"],
+        )
+        .pick_file();
+    let Some(src) = picked else {
+        return Ok(None);
+    };
+    let compressed =
+        sela_core::images::compress_image(&src.to_string_lossy(), 512, 82)
+            .map_err(arabic)?;
+    let b64 = compressed["base64"].as_str().unwrap_or_default().to_string();
+    if b64.is_empty() {
+        return Err("تعذر قراءة الصورة".to_string());
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let name = format!("p-{stamp}.jpg");
+    let path = sela_core::fsops::write_file_base64("products", &name, &b64)
+        .map_err(arabic)?;
+    Ok(Some(path))
+}
+
 // ──────────────────────────────────────────────── النظام
 
 #[command]
@@ -527,6 +559,15 @@ pub fn uptime_ms() -> CmdResult<u64> {
 #[command]
 pub fn scanner_running() -> CmdResult<bool> {
     Ok(sela_core::hardware::hook::is_running())
+}
+
+/// تعطيل/تفعيل اعتراض الباركود مؤقتاً — تستدعيه الواجهة أثناء فتح
+/// لوحات إدخال المبالغ (كي لا يُفسَّر الكتابة على الكيبورد كمسح)
+/// وعند ظهور شاشة قفل الدخول (لا بيع قبل الدخول).
+#[command]
+pub fn scanner_set_enabled(enabled: bool) -> CmdResult<()> {
+    sela_core::hardware::hook::set_enabled(enabled);
+    Ok(())
 }
 
 #[command]

@@ -103,6 +103,8 @@ fn main() {
             commands::device_id,
             commands::uptime_ms,
             commands::scanner_running,
+            commands::scanner_set_enabled,
+            commands::pick_product_image,
             commands::wipe_data,
             // ── جسر SQL العام (واجهة op-sqlite للخدمات المنقولة) ──
             sqlbridge::sql_run,

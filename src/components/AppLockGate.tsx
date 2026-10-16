@@ -4,20 +4,23 @@
  * الإقلاع وبعد دقائق الخمول المحددة، وتظهر لوحة PIN فوق كل شيء.
  * البصمة غير متاحة على سطح المكتب — رمز PIN هو طريق القفل الوحيد.
  *
- * v58 (جذر «شاشة البيع لا تعمل»): كان المؤقت القديم يقفل بلا شرط
- * كل 10 ثوانٍ عند مهلة «فوري» (delay === 0) حتى أثناء البيع النشط —
- * فأصبحت نقطة البيع غير قابلة للاستخدام. الدلالة الصحيحة:
- *  • «فوري» = يقفل بعد 20 ثانية من آخر نشاط (خطوة سماح قصيرة)،
- *    وليس أبداً أثناء النقر والكتابة الفعالة.
- *  • بقية المهلات = دقائق خمول كاملة بعد آخر تفاعل.
- * كما لم يعد التطبيق يقفل لحظة تعيين الرمز أول مرة من الإعدادات —
- * القفل عند الإقلاع البارد فقط (نفس سلوك الأندرويد: «عند فتح
- * التطبيق»)، وتفعيل الرمز منتصف الجلسة يبدأ الحماية من الآن دون
- * قطع عمل الكاشير.
+ * v59 (جولة المستخدم #8): بوابة الدخول صارت **متزامنة مع أول إطار**
+ * — في v58 كان القفل يُفعّل داخل useEffect أي بعد رسم الشاشات:
+ * كانت نقطة البيع (وأي شاشة) تظهر وميضاً قبل لوحة PIN، ويكفي ذلك
+ * لتفهم «البيع يحدث قبل الدخول». الآن إن كان رمز مضبوطاً فأول ما
+ * يُرسم هو لوحة PIN نفسها — لا شاشة بيع ولا أي محتوى قبلها.
+ *
+ * كذلك يُكتم موجّه الباركود (الخطاف الأصلي + بديل JS) طوال فتح
+ * القفل: لا يُضاف منتج لسلة ولا يُنفَّذ أي مسح قبل الدخول.
+ *
+ * v58 (سلوك مؤقت الخمول — محفوظ): «فوري» = يقفل بعد 20 ثانية من
+ * آخر نشاط (خطوة سماح قصيرة)، وليس أبداً أثناء النقر والكتابة
+ * الفعالة؛ بقية المهلات = دقائق خمول كاملة بعد آخر تفاعل.
  */
 import React, {useEffect, useRef, useState} from 'react';
 import {useAppLockStore} from '../stores/appLockStore';
 import {getNumber, getString} from '../storage/storage';
+import {suppressScanner} from '../lib/scanner';
 import {PinPad} from './PinPad';
 
 /** مفتاح التجزئة المخزّن — نفس مفتاح appLockStore. */
@@ -36,26 +39,35 @@ export function AppLockGate({children}: {children: React.ReactNode}) {
   const verifyPin = useAppLockStore(s => s.verifyPin);
   const unlock = useAppLockStore(s => s.unlock);
   const load = useAppLockStore(s => s.load);
-  const [booted, setBooted] = useState(false);
-  const lastActivity = useRef<number>(Date.now());
+  const [unlockedOnce, setUnlockedOnce] = useState(false);
 
-  useEffect(() => {
-    load();
-    // القفل عند الإقلاع البارد فقط: إذا كان رمز مضبوطاً قبل فتح
-    // التطبيق. تعيين الرمز منتصف الجلسة لا يقفل فوراً — يبدأ من
-    // الآن فصاعداً (خمول/إقلاع قادم) دون مقاطعة الكاشير.
-    const hadPinAtBoot = getString(PIN_HASH_KEY, '').length > 0;
-    if (hadPinAtBoot) {
-      useAppLockStore.getState().lock();
-    }
-    setBooted(true);
-  }, [load]);
+  /**
+   * هل كان الرمز مضبوطاً لحظة فتح التطبيق؟ يُقرأ مرة واحدة أثناء
+   * أول رسم — المرآة (config.json) محمّلة قبل تركيب البوابة في
+   * app.tsx فالقراءة متزامنة وموثوقة، وبها تُرسم لوحة PIN من أول
+   * إطار بلا وميض للمحتوى. تعيين الرمز منتصف الجلسة لا يقفل فوراً
+   * (سلوك مقصود كي لا يقطع الكاشير) لكن الإقلاع التالي يبدأ مقفلاً.
+   */
+  const pinAtBoot = useRef<boolean | null>(null);
+  if (pinAtBoot.current === null) {
+    // قراءة متزامنة أثناء أول رسم فقط (المرآة محمّلة قبل التركيب) —
+    // بلا أي كتابة للمخزن أثناء الرسم، فلا إعادة رسم ولا تحذيرات.
+    pinAtBoot.current = getString(PIN_HASH_KEY, '').length > 0;
+  }
+  const gateUp = locked || (pinAtBoot.current === true && !unlockedOnce);
 
   const enabled = useAppLockStore(s => s.isEnabled());
+  const lastActivity = useRef<number>(Date.now());
 
-  // تتبع النشاط + القفل بعد الخمول الحقيقي.
+  // تحميل حالة الرمز للتحقق (verifyPin يقرأ المخزن لحظة الاستخدام —
+  // قبل أول ضغطة على اللوحة بزمن).
   useEffect(() => {
-    if (!enabled || !booted) return;
+    load();
+  }, [load]);
+
+  // مؤقت الخمول: قفل تلقائي بعد آخر تفاعل حقيقي.
+  useEffect(() => {
+    if (!enabled) return;
     const mark = () => {
       lastActivity.current = Date.now();
     };
@@ -73,9 +85,18 @@ export function AppLockGate({children}: {children: React.ReactNode}) {
       events.forEach(e => window.removeEventListener(e, mark));
       window.clearInterval(timer);
     };
-  }, [enabled, booted]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled]);
 
-  if (locked) {
+  // كتم الباركود طالما البوابة مغلقة — لا بيع ولا مسح قبل الدخول.
+  useEffect(() => {
+    void suppressScanner(gateUp);
+    return () => {
+      void suppressScanner(false);
+    };
+  }, [gateUp]);
+
+  if (gateUp) {
     return (
       <PinPad
         title="سيلا مقفلة"
@@ -84,6 +105,7 @@ export function AppLockGate({children}: {children: React.ReactNode}) {
         onDone={ok => {
           if (ok) {
             unlock();
+            setUnlockedOnce(true);
             lastActivity.current = Date.now();
           }
         }}

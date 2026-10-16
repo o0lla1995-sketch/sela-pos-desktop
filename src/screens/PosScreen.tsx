@@ -14,7 +14,7 @@
  * كل منطق البيع الأصلي (باركود/متغيرات/وزن/ديون/قسائم) محفوظ حرفياً.
  */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {convertFileSrc} from '@tauri-apps/api/core';
+import {assetSrc} from '../lib/tauri';
 import {
   useCartStore,
   cartTotals,
@@ -39,6 +39,7 @@ import {
 import {ThermalPrinterService} from '../services/printer/ThermalPrinterService';
 import {usePrinterStore} from '../stores/printerStore';
 import {setActiveBarcodeHandler, beep} from '../lib/scanner';
+import {useAmountKeyboard} from '../lib/useAmountKeyboard';
 import {
   formatMoney,
   localToday,
@@ -560,6 +561,24 @@ export function PosScreen() {
     }
   }, [voucherCode, lines, discountInput, pricingMode, printerStatus, clearCart, toast]);
 
+  // ── v59: معالجات ثابتة للسلة — مع memo لصفوفها لا تُعاد رسم كل
+  // الصفوف مع كل زيادة/إنقاص (كانت أكبر مصدر تلعثم في الشاشة).
+  const handleInc = useCallback(
+    (key: string) => {
+      const r = increment(key);
+      if (!r.ok && r.reason) toast(r.reason, 'error');
+    },
+    [increment, toast],
+  );
+  const handleDec = useCallback(
+    (key: string) => decrement(key),
+    [decrement],
+  );
+  const handleRemoveLine = useCallback(
+    (key: string) => removeLine(key),
+    [removeLine],
+  );
+
   // ── شبكة المنتجات بعد الفلترة ──
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -584,6 +603,51 @@ export function PosScreen() {
       return String(Math.round((current + amount) * 100) / 100);
     });
   }, []);
+
+  // ── تأكيد الوزن (زر الإضافة + Enter من الكيبورد) ──
+  const confirmWeight = useCallback(() => {
+    if (weightPick == null) return;
+    const qty = Number(weightValue);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast('أدخل وزناً صحيحاً', 'error');
+      return;
+    }
+    const r = addWeighted(weightPick.product, pricingMode, qty);
+    if (r.added) beep('ok');
+    else if (r.reason) toast(r.reason, 'error');
+    setWeightPick(null);
+  }, [weightPick, weightValue, addWeighted, pricingMode, toast]);
+
+  // ── v59: الكيبورد الفعلي في كل لوحات الأرقام ──
+  // الدفع النقدي: أرقام مباشرة + Enter يؤكد البيع فوراً.
+  useAmountKeyboard({
+    active: paySheet === 'cash',
+    text: amountText,
+    onKey: setAmountText,
+    onConfirm: () => {
+      if (!busy && lines.length > 0) void completeCashSale(amountText);
+    },
+    onCancel: () => setPaySheet(null),
+  });
+  // لوحة الوزن: نفس الشيء — Enter يضيف للسلة.
+  useAmountKeyboard({
+    active: weightPick != null,
+    text: weightValue,
+    onKey: next => setWeightValue(next.slice(0, WEIGHT_QTY_DECIMALS + 2)),
+    onConfirm: confirmWeight,
+    onCancel: () => setWeightPick(null),
+  });
+  // القسيمة: حقل نصي طبيعي + Enter يصرفها.
+  useAmountKeyboard({
+    active: voucherSheet,
+    text: voucherCode,
+    onKey: () => undefined,
+    onConfirm: () => {
+      if (!busy) void redeemVoucherOnCart();
+    },
+    onCancel: () => setVoucherSheet(false),
+    hasTextInput: true,
+  });
 
   return (
     <div className="pos-root">
@@ -692,7 +756,7 @@ export function PosScreen() {
                   product={product}
                   price={priceOf(product)}
                   pricingMode={pricingMode}
-                  onAdd={() => tryAdd(product)}
+                  onAdd={tryAdd}
                 />
               ))}
             </div>
@@ -705,7 +769,7 @@ export function PosScreen() {
                   price={priceOf(product)}
                   pricingMode={pricingMode}
                   large={view === 'cards'}
-                  onAdd={() => tryAdd(product)}
+                  onAdd={tryAdd}
                 />
               ))}
             </div>
@@ -740,12 +804,9 @@ export function PosScreen() {
               <CartRow
                 key={line.key}
                 line={line}
-                onInc={() => {
-                  const r = increment(line.key);
-                  if (!r.ok && r.reason) toast(r.reason, 'error');
-                }}
-                onDec={() => decrement(line.key)}
-                onRemove={() => removeLine(line.key)}
+                onInc={handleInc}
+                onDec={handleDec}
+                onRemove={handleRemoveLine}
               />
             ))}
           </div>
@@ -833,6 +894,10 @@ export function PosScreen() {
               </div>
               <div className="pos-amount-display" dir="ltr">
                 {amountText === '' ? '0' : amountText} ₪
+              </div>
+              <div className="pos-kbd-hint">
+                <Icon name="keyboard" size={14} />
+                اكتب المبلغ من الكيبورد مباشرة — <b>Enter</b> يؤكد البيع
               </div>
               <div className="pos-quickcash">
                 {QUICK_CASH.map(amount => (
@@ -936,6 +1001,10 @@ export function PosScreen() {
               <div className="pos-amount-display" dir="ltr">
                 {weightValue === '' ? '0' : weightValue} كغ
               </div>
+              <div className="pos-kbd-hint">
+                <Icon name="keyboard" size={14} />
+                اكتب الوزن من الكيبورد مباشرة — <b>Enter</b> يضيف للسلة
+              </div>
               <div className="pos-quickcash">
                 {QUICK_WEIGHTS.map(w => (
                   <button
@@ -983,19 +1052,7 @@ export function PosScreen() {
                 إلغاء
               </button>
               <span className="spacer" />
-              <button
-                className="btn primary lg"
-                onClick={() => {
-                  const qty = Number(weightValue);
-                  if (!Number.isFinite(qty) || qty <= 0) {
-                    toast('أدخل وزناً صحيحاً', 'error');
-                    return;
-                  }
-                  const r = addWeighted(weightPick.product, pricingMode, qty);
-                  if (r.added) beep('ok');
-                  else if (r.reason) toast(r.reason, 'error');
-                  setWeightPick(null);
-                }}>
+              <button className="btn primary lg" onClick={confirmWeight}>
                 <Icon name="plus" size={17} />
                 إضافة للسلة
               </button>
@@ -1307,8 +1364,9 @@ export function PosScreen() {
 
 // ──────────────────────────────────────────────── صورة منتج
 
-/** صورة المنتج عبر بروتوكول asset — أو حرف أول أنيق عند غيابها. */
-function ProductImage({
+/** صورة المنتج عبر بروتوكول asset — أو حرف أول أنيق عند غيابها.
+ *  v59: memo — لا تُعاد رسمها مع كل ضغطة في البحث أو السلة. */
+const ProductImage = React.memo(function ProductImage({
   product,
   className,
 }: {
@@ -1330,18 +1388,21 @@ function ProductImage({
   return (
     <img
       className={className}
-      src={convertFileSrc(product.image_uri as string)}
+      src={assetSrc(product.image_uri as string)}
       alt=""
       loading="lazy"
+      decoding="async"
       onError={() => setFailed(true)}
       draggable={false}
     />
   );
-}
+});
 
 // ──────────────────────────────────────────────── بلاطة منتج
 
-function ProductTile({
+/** بلاطة منتج — v59: memo + onAdd يستقبل المنتج (رد نداء ثابت من
+ *  الأب) فلا تُعاد رسم مئات البلاطات مع كل كتابة في الخصم أو السلة. */
+const ProductTile = React.memo(function ProductTile({
   product,
   price,
   pricingMode,
@@ -1352,7 +1413,7 @@ function ProductTile({
   price: number;
   pricingMode: 'RETAIL' | 'WHOLESALE';
   large: boolean;
-  onAdd: () => void;
+  onAdd: (product: Product) => void;
 }) {
   const hasDiscount = product.discount_pct > 0;
   const out =
@@ -1360,7 +1421,7 @@ function ProductTile({
   return (
     <button
       className={`pos-tile ${out ? 'out' : ''} ${large ? 'large' : ''}`}
-      onClick={onAdd}>
+      onClick={() => onAdd(product)}>
       <span className="pos-tile-img">
         <ProductImage product={product} />
         {hasDiscount && (
@@ -1397,11 +1458,12 @@ function ProductTile({
       </span>
     </button>
   );
-}
+});
 
 // ──────────────────────────────────────────────── صف قائمة
 
-function ProductListRow({
+/** صف القائمة — v59: memo بنفس نمط البلاطة. */
+const ProductListRow = React.memo(function ProductListRow({
   product,
   price,
   pricingMode,
@@ -1410,13 +1472,15 @@ function ProductListRow({
   product: Product;
   price: number;
   pricingMode: 'RETAIL' | 'WHOLESALE';
-  onAdd: () => void;
+  onAdd: (product: Product) => void;
 }) {
   const hasDiscount = product.discount_pct > 0;
   const out =
     product.stock_untracked !== 1 && product.stock_quantity <= 0;
   return (
-    <button className={`pos-lrow ${out ? 'out' : ''}`} onClick={onAdd}>
+    <button
+      className={`pos-lrow ${out ? 'out' : ''}`}
+      onClick={() => onAdd(product)}>
       <span className="pos-lrow-img">
         <ProductImage product={product} />
       </span>
@@ -1458,20 +1522,21 @@ function ProductListRow({
       </span>
     </button>
   );
-}
+});
 
 // ──────────────────────────────────────────────── صف سلة
 
-function CartRow({
+/** صف السلة — v59: memo + أزرار تستقبل مفتاح السطر (رد نداء ثابت). */
+const CartRow = React.memo(function CartRow({
   line,
   onInc,
   onDec,
   onRemove,
 }: {
   line: CartLine;
-  onInc: () => void;
-  onDec: () => void;
-  onRemove: () => void;
+  onInc: (key: string) => void;
+  onDec: (key: string) => void;
+  onRemove: (key: string) => void;
 }) {
   return (
     <div className="pos-line">
@@ -1492,21 +1557,24 @@ function CartRow({
       </div>
       <div className="pos-line-side">
         <div className="pos-stepper">
-          <button onClick={onDec} aria-label="إنقاص">
+          <button onClick={() => onDec(line.key)} aria-label="إنقاص">
             <Icon name="minus" size={14} />
           </button>
           <b className="pos-line-qty" dir="ltr">{line.quantity}</b>
-          <button onClick={onInc} aria-label="زيادة">
+          <button onClick={() => onInc(line.key)} aria-label="زيادة">
             <Icon name="plus" size={14} />
           </button>
         </div>
-        <button className="pos-line-remove" onClick={onRemove} aria-label="حذف">
+        <button
+          className="pos-line-remove"
+          onClick={() => onRemove(line.key)}
+          aria-label="حذف">
           <Icon name="trash" size={14} />
         </button>
       </div>
     </div>
   );
-}
+});
 
 // ──────────────────────────────────────────────── اختيار المتغيرات
 

@@ -20,6 +20,7 @@ import {
 } from '../database/repositories/LocalDebtsRepo';
 import {formatMoney, formatDateTime, relativeTime} from '../core/format';
 import {amountTextToMinor} from '../core/amountKeypad';
+import {useAmountKeyboard} from '../lib/useAmountKeyboard';
 import type {
   LocalCustomerBalance,
   LocalDebt,
@@ -437,6 +438,26 @@ export function LocalDebtsScreen() {
       setPayBusy(false);
     }
   }, [payBusy, detail, payAmount, payMethod, payNote, refreshDetail, toast]);
+
+  // ── v59: Enter من الكيبورد يسجّل السداد/الحساب وEscape يغلق ──
+  useAmountKeyboard({
+    active: payOpen && detail != null && detail.outstandingMinor > 0,
+    text: payAmount,
+    onKey: () => undefined,
+    onConfirm: () => {
+      if (!payBusy) void recordPayment();
+    },
+    onCancel: () => setPayOpen(false),
+    hasTextInput: true,
+  });
+  useAmountKeyboard({
+    active: addOpen,
+    text: addId,
+    onKey: () => undefined,
+    onConfirm: () => void createCustomer(),
+    onCancel: () => setAddOpen(false),
+    hasTextInput: true,
+  });
 
   // ──────────────────────────────────────────────────────────────
   return (

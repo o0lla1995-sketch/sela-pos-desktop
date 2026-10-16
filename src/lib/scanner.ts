@@ -8,7 +8,7 @@
  * بلا أي تركيز يدوي على حقل نصي. حاجب 1.6 ثانية لنفس الكود
  * (نفس BARCODE_DEDUPE_MS الأندرويد).
  */
-import {onBarcode} from './tauri';
+import {onBarcode, api} from './tauri';
 import {BARCODE_DEDUPE_MS} from '../core/config';
 
 export type BarcodeHandler = (code: string) => void;
@@ -16,11 +16,32 @@ export type BarcodeHandler = (code: string) => void;
 let activeHandler: BarcodeHandler | null = null;
 let lastCode: {code: string; at: number} | null = null;
 
+/**
+ * v59: كتم الماسح مؤقتاً — تستدعيه لوحات إدخال المبالغ (كي لا
+ * تُفسَّر الكتابة على الكيبورد كمسح باركود) وشاشة قفل الدخول
+ * (لا بيع قبل الدخول). يكتم المسارين معاً: توجيه JS والخطاف
+ * الأصلي على ويندوز.
+ */
+let suppressedCount = 0;
+
+export async function suppressScanner(suppress: boolean): Promise<void> {
+  suppressedCount = Math.max(0, suppressedCount + (suppress ? 1 : -1));
+  const on = suppressedCount === 0;
+  try {
+    if ('__TAURI_INTERNALS__' in window) {
+      await api.scannerSetEnabled(on);
+    }
+  } catch {
+    /* أفضل جهد */
+  }
+}
+
 export function setActiveBarcodeHandler(handler: BarcodeHandler | null): void {
   activeHandler = handler;
 }
 
 function route(code: string): void {
+  if (suppressedCount > 0) return; // لوحة مبالغ مفتوحة أو التطبيق مقفل.
   const clean = code.trim();
   if (clean.length < 4) return;
   if (lastCode && lastCode.code === clean && Date.now() - lastCode.at < BARCODE_DEDUPE_MS) {
@@ -48,6 +69,12 @@ export async function installGlobalScanner(minLength: number): Promise<void> {
   window.addEventListener(
     'keydown',
     event => {
+      // v59: لوحة مبالغ مفتوحة أو التطبيق مقفل — الكتابة الإنسانية
+      // لا تُجمع كاندفاعة قارئ أبداً.
+      if (suppressedCount > 0) {
+        buffer = '';
+        return;
+      }
       const target = event.target as HTMLElement | null;
       const insideInput =
         target != null &&

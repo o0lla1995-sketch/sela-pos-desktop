@@ -31,6 +31,7 @@ import {
   localMonthStart,
 } from '../core/format';
 import {amountTextToMinor} from '../core/amountKeypad';
+import {useAmountKeyboard} from '../lib/useAmountKeyboard';
 import type {
   CashAuthMethod,
   CashMovementKind,
@@ -321,6 +322,16 @@ export function CashMovementsScreen() {
     executeMovement,
     toast,
   ]);
+
+  // ── v59: Enter من الكيبورد يؤكد الحركة وEscape يغلقها ──
+  useAmountKeyboard({
+    active: formMode != null && !pinOpen,
+    text: amountText,
+    onKey: () => undefined,
+    onConfirm: confirmForm,
+    onCancel: closeForm,
+    hasTextInput: true,
+  });
 
   // ── كشف الفترة: PDF + طباعة حرارية ──────────────────────────
   const exportPdf = useCallback(async () => {

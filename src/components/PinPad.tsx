@@ -1,8 +1,12 @@
 /**
- * components/PinPad.tsx — لوحة رمز PIN v58 (إعادة تصميم كاملة):
+ * components/PinPad.tsx — لوحة رمز PIN v59 (إعادة تصميم كاملة):
  * بطاقة مركّزة بأيقونة قفل داخل دائرة هوية، نقاط ملء نابضة، مفاتيح
  * كبيرة مريحة، اهتزاز عند الخطأ + رسالة واضحة، ودعم لوحة المفاتيح
- * الفعلية (أرقام + Backspace + Enter) لسرعة الكاشير.
+ * الفعلية (أرقام + Backspace + Enter + Escape) لسرعة الكاشير.
+ *
+ * v59: القيمة تُدار عبر مرجع حيّ (pinRef) — الكتابة السريعة جداً
+ * (قارئ باركود خلف لوحة PIN أو إدخال آلي) كانت تفقد خانات لأن
+ * مستمع keydown يحمل نسخة قديمة من الحالة بين الدفعات المتزامنة.
  */
 import React, {useEffect, useRef, useState} from 'react';
 import {Icon} from './Icon';
@@ -17,6 +21,8 @@ interface PinPadProps {
   cancelLabel?: string;
 }
 
+const PIN_LENGTH = 4;
+
 export function PinPad({
   title,
   subtitle,
@@ -30,6 +36,11 @@ export function PinPad({
   const [shake, setShake] = useState(false);
   const [attempts, setAttempts] = useState(0);
   const timer = useRef<number | null>(null);
+  /** القيمة الحقيقية — لا تنسخ بين الدفعات أبداً. */
+  const pinRef = useRef('');
+  /** أحدث onDone/verify/onCancel — بلا إعادة تركيب المستمع. */
+  const cbs = useRef({verify, onDone, onCancel, cancelable});
+  cbs.current = {verify, onDone, onCancel, cancelable};
 
   useEffect(() => {
     return () => {
@@ -37,17 +48,23 @@ export function PinPad({
     };
   }, []);
 
-  function press(digit: string): void {
-    if (pin.length >= 4) return;
-    const next = pin + digit;
+  function setPinValue(next: string): void {
+    pinRef.current = next;
     setPin(next);
-    if (next.length === 4) {
+  }
+
+  function press(digit: string): void {
+    const current = pinRef.current;
+    if (current.length >= PIN_LENGTH) return;
+    const next = current + digit;
+    setPinValue(next);
+    if (next.length === PIN_LENGTH) {
       // مهلة قصيرة كي تظهر الخانة الرابعة قبل التمويه.
       timer.current = window.setTimeout(() => {
-        if (verify(next)) {
-          onDone(true);
+        if (cbs.current.verify(next)) {
+          cbs.current.onDone(true);
         } else {
-          setPin('');
+          setPinValue('');
           setShake(true);
           setAttempts(a => a + 1);
           window.setTimeout(() => setShake(false), 450);
@@ -56,21 +73,40 @@ export function PinPad({
     }
   }
 
-  // دعم لوحة المفاتيح الفعلية — أرقام/Backspace/Escape.
+  function backspace(): void {
+    setPinValue(pinRef.current.slice(0, -1));
+  }
+
+  // دعم لوحة المفاتيح الفعلية — أرقام/Backspace/Enter/Escape.
+  // مستمع ثابت يقرأ كل شيء من المراجع: لا حالة قديمة إطلاقاً.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key >= '0' && e.key <= '9') {
+        e.preventDefault();
         press(e.key);
       } else if (e.key === 'Backspace') {
-        setPin(p => p.slice(0, -1));
-      } else if (e.key === 'Escape' && cancelable) {
-        onCancel?.();
+        e.preventDefault();
+        backspace();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (pinRef.current.length === PIN_LENGTH) {
+          if (cbs.current.verify(pinRef.current)) {
+            cbs.current.onDone(true);
+          } else {
+            setPinValue('');
+            setShake(true);
+            setAttempts(a => a + 1);
+            window.setTimeout(() => setShake(false), 450);
+          }
+        }
+      } else if (e.key === 'Escape' && cbs.current.cancelable) {
+        cbs.current.onCancel?.();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pin, cancelable]);
+  }, []);
 
   return (
     <div className="pinpad-overlay">
@@ -108,7 +144,7 @@ export function PinPad({
           </button>
           <button
             className="pin-key pin-key-action"
-            onClick={() => setPin(p => p.slice(0, -1))}
+            onClick={backspace}
             aria-label="حذف">
             <Icon name="backspace" size={20} />
           </button>
