@@ -49,6 +49,7 @@ import type {
   SilaDebtRow,
   VoucherRedemptionRow,
 } from '../core/types';
+import {Icon} from '../components/Icon';
 import './sila.css';
 
 // ── ثوابت العرض ──────────────────────────────────────────────────
@@ -360,7 +361,7 @@ function VoucherRedeemModal({
         <div className="modal-head">
           <b>استبدال قسيمة صِلة (بدون سلة)</b>
           <button className="btn sm ghost" onClick={handleClose}>
-            ✕
+            <Icon name="x" size={14} />
           </button>
         </div>
         <div className="modal-body">
@@ -436,7 +437,7 @@ function VoucherRedeemModal({
           {/* ── النجاح ── */}
           {step.phase === 'success' && (
             <div className="sila-state ok">
-              <div className="sila-state-icon">✓</div>
+              <div className="sila-state-icon"><Icon name="check" size={22} /></div>
               <span className="sila-state-title">
                 صُرفت القسيمة — {formatMoney(valueMinor / 100)}
               </span>

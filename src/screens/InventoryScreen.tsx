@@ -37,6 +37,7 @@ import type {Category, Product} from '../core/types';
 import {generateInternalEan13} from '../services/BarcodeService';
 import {buildLabelJob} from '../services/printer/label';
 import {ThermalPrinterService} from '../services/printer/ThermalPrinterService';
+import {Icon} from '../components/Icon';
 import {
   notifyCatalogChanged,
   syncProducts,
@@ -738,7 +739,10 @@ export function InventoryScreen() {
               <td colSpan={10}>
                 <div className="empty" style={{padding: '28px 16px'}}>
                   <div className="icon">
-                    {showArchived ? '🗄' : showExpiring ? '⏰' : '📦'}
+                    <Icon
+                      name={showArchived ? 'archive' : showExpiring ? 'clock' : 'box'}
+                      size={30}
+                    />
                   </div>
                   {loadingArchived && showArchived
                     ? 'جارٍ تحميل المؤرشفة…'
@@ -883,7 +887,11 @@ export function InventoryScreen() {
                       title="طباعة ملصق باركود (يولّد باركوداً داخلياً إن لم يوجد)"
                       disabled={printBusyId === product.id}
                       onClick={() => void printLabel(product)}>
-                      {printBusyId === product.id ? '…' : '🖨'}
+                      {printBusyId === product.id ? (
+                        '…'
+                      ) : (
+                        <Icon name="printer" size={15} />
+                      )}
                     </button>
                     {product.is_archived === 1 ? (
                       <button
@@ -891,7 +899,7 @@ export function InventoryScreen() {
                         title="استرجاع للرف"
                         disabled={deleteBusyId === product.id}
                         onClick={() => void unarchiveProduct(product)}>
-                        ↩
+                        <Icon name="undo" size={15} />
                       </button>
                     ) : (
                       <button

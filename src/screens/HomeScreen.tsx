@@ -317,8 +317,9 @@ export function HomeScreen({goTo}: {goTo: (screen: string) => void}) {
       <div className="ih-quick-grid">
         <button
           className="ih-quick-card accent"
+          title="فتح نقطة البيع مباشرة"
           onClick={() => goTo('pos')}>
-          <span className="ih-quick-icon"><Icon name="cart" size={26} /></span>
+          <span className="ih-quick-icon"><Icon name="plus" size={26} /></span>
           <span className="ih-quick-label">بيع جديد</span>
         </button>
         <button className="ih-quick-card" onClick={() => goTo('stocktake')}>

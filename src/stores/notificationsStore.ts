@@ -27,6 +27,8 @@ interface NotificationsState {
   ) => AppNotification;
   markAllRead: () => void;
   markRead: (id: string) => void;
+  /** v60: حذف إشعار واحد من المركز (زر × في الصف). */
+  remove: (id: string) => void;
   clearAll: () => void;
 }
 
@@ -122,6 +124,12 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
     const items = get().items.map(item =>
       item.id === id ? {...item, read: true} : item,
     );
+    persist(items);
+    set({items, unreadCount: recount(items)});
+  },
+
+  remove: id => {
+    const items = get().items.filter(item => item.id !== id);
     persist(items);
     set({items, unreadCount: recount(items)});
   },

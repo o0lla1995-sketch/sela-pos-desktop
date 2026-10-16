@@ -638,7 +638,279 @@ table.data tbody tr {
   font-size: 10.5px;
 }
 
-/* ───────────────────────────────── المقاطع (Segmented) ───────────── */
+/* ───────────────────── أزرار التبويب والفلترة (chip-toggle) ─────────
+   v60: صنف chip-toggle كان مستخدماً في 11 موضعاً عبر الشاشات
+   (الخزينة، الفواتير، التقارير، الجرد، تنبيهات المخزون، صِلة،
+   الحماية، الطلبات أونلاين) دون أي تعريف CSS — كانت تُرسم كأزرار
+   خام. هذا هو النظام الكامل بنفس لغة الأزرار v59: قرصان بحواف
+   مدورة، حالة on بتدرج البرتقالي وإشعاع، ورفع عند hover وضغط
+   مرن عند active — يعمل في الوضعين الداكن والفاتح. */
+.chip-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  background: linear-gradient(
+    180deg,
+    var(--surface-3) 0%,
+    var(--surface-2) 100%
+  );
+  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 7px 16px;
+  font-weight: 700;
+  font-size: 12.5px;
+  line-height: 1.2;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: background-color var(--transition), color var(--transition),
+    border-color var(--transition), box-shadow var(--transition),
+    filter var(--transition),
+    transform 90ms cubic-bezier(0.2, 0.6, 0.3, 1);
+  user-select: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chip-toggle:hover {
+  border-color: color-mix(in srgb, var(--brand) 55%, var(--line));
+  color: var(--brand-ink);
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+.chip-toggle:active {
+  transform: translateY(0) scale(0.96);
+  filter: brightness(0.96);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), inset 0 2px 4px rgba(0, 0, 0, 0.14);
+}
+.chip-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.chip-toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+}
+.chip-toggle.on {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--brand) 90%, #ffffff 10%) 0%,
+    var(--brand) 45%,
+    var(--brand-strong) 100%
+  );
+  border-color: var(--brand-deep);
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(120, 40, 0, 0.32);
+  box-shadow: 0 2px 5px rgba(234, 88, 12, 0.3),
+    0 5px 14px rgba(234, 88, 12, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.chip-toggle.on:hover {
+  color: #fff;
+  border-color: var(--brand-deep);
+  filter: brightness(1.06);
+  box-shadow: 0 3px 8px rgba(234, 88, 12, 0.36),
+    0 8px 20px rgba(234, 88, 12, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.34);
+}
+.chip-toggle.on:active {
+  background: var(--brand-strong);
+}
+/* شارة عدّاد داخل زر تبويب (اختيارية) */
+.chip-toggle .chip {
+  padding: 1px 8px;
+  font-size: 10.5px;
+}
+.chip-toggle.on .chip {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+/* ───────────────── شارات مفاتيح الوظائف (F1…F12) ─────────────────
+   v60: رقاقة لوحة مفاتيح صغيرة تُلصق بزر لتفشيح اختصاره —
+   تُستخدم في أزرار سلة نقطة البيع (F1 تفريغ، F2 دين المتجر،
+   F3 دين العميل، F4 القسيمة، F9 إتمام). */
+.pos-fkey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink-soft);
+  font-family: 'Segoe UI', var(--font);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  line-height: 1;
+  direction: ltr;
+  flex-shrink: 0;
+}
+button.primary > .pos-fkey,
+.pos-charge-btn .pos-fkey {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+/* ───────────────── زر البيع السريع العائم (＋) ─────────────────
+   v60: زر زائد دائري ثابت أسفل الشاشة يفتح نقطة البيع مباشرة
+   من أي شاشة — نفس تدرج الأزرار الأساسية بحجم أكبر وإشعاع أقوى.
+   يظهر في كل الشاشات عدا نقطة البيع نفسها. */
+.pos-fab {
+  position: fixed;
+  bottom: 26px;
+  inset-inline-end: 26px;
+  z-index: 60;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  border: 1px solid var(--brand-deep);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--brand) 90%, #ffffff 10%) 0%,
+    var(--brand) 45%,
+    var(--brand-strong) 100%
+  );
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(234, 88, 12, 0.38),
+    0 14px 34px rgba(234, 88, 12, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.34);
+  transition: filter var(--transition),
+    transform 110ms cubic-bezier(0.2, 0.6, 0.3, 1), box-shadow var(--transition);
+}
+.pos-fab:hover {
+  filter: brightness(1.07);
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 6px 14px rgba(234, 88, 12, 0.44),
+    0 20px 48px rgba(234, 88, 12, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.38);
+}
+.pos-fab:active {
+  transform: translateY(0) scale(0.95);
+  filter: brightness(0.96);
+  box-shadow: 0 2px 6px rgba(234, 88, 12, 0.36),
+    inset 0 2px 6px rgba(120, 40, 0, 0.3);
+}
+.pos-fab:focus-visible {
+  outline: none;
+  box-shadow: var(--ring), 0 4px 10px rgba(234, 88, 12, 0.38);
+}
+.pos-fab .fab-ring {
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--brand) 34%, transparent);
+  pointer-events: none;
+}
+
+/* ─────────────────────── صف إشعار مركز التنبيهات ───────────────────
+   v60: صفوف مركز الإشعارات بحافة نوع جانبية وأزرار حذف فردي
+   وحالة hover — مطابقة لجودة صفوف v59 الأخرى. */
+.notif-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 14px 16px;
+  padding-inline-end: 46px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+  transition: border-color var(--transition),
+    box-shadow var(--transition), transform var(--transition);
+  overflow: hidden;
+}
+.notif-row::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0;
+  bottom: 0;
+  width: 3.5px;
+  background: var(--muted);
+}
+.notif-row.tone-danger::before {background: var(--danger);}
+.notif-row.tone-warn::before {background: var(--warn);}
+.notif-row.tone-ok::before {background: var(--ok);}
+.notif-row.tone-brand::before {background: var(--brand);}
+.notif-row:hover {
+  border-color: color-mix(in srgb, var(--brand) 34%, var(--line));
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
+}
+.notif-row.unread {
+  background: color-mix(in srgb, var(--brand) 4%, var(--surface));
+  border-color: color-mix(in srgb, var(--brand) 26%, var(--line-soft));
+}
+.notif-row .notif-del {
+  position: absolute;
+  inset-inline-end: 10px;
+  top: 10px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color var(--transition), color var(--transition);
+}
+.notif-row .notif-del:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ───────────────────── بطاقات ملخص تقرير الجرد ─────────────────────
+   v60: شبكة بطاقات صغيرة أعلى تقرير جلسة الجرد (صفوف/مطابق/
+   نقص/زيادة/الفرق) — نفس لغة st-stat في شاشة الجرد. */
+.st-report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+.st-report-grid .cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.st-report-grid .cell .v {
+  font-size: 16px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  text-align: end;
+}
+.st-report-grid .cell .l {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.st-report-grid .cell.ok .v {color: var(--ok);}
+.st-report-grid .cell.danger .v {color: var(--danger);}
+.st-report-grid .cell.brand .v {color: var(--brand-ink);}
+
+/* ───────────────────────────────── المقاطع (Segmented) ─────────────
+   v60: نفس المقاطع بلغة الأزرار v59 — حالة on بتدرج برتقالي كامل
+   (كانت سطحية باهتة) + hover بلفت + ضغط مرن. */
 .seg {
   display: inline-flex;
   background: var(--surface-2);
@@ -646,6 +918,7 @@ table.data tbody tr {
   border-radius: var(--radius-sm);
   padding: 3px;
   gap: 2px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 .seg button {
   border: 0;
@@ -656,18 +929,36 @@ table.data tbody tr {
   font-weight: 700;
   font-size: 12.5px;
   transition: background-color var(--transition), color var(--transition),
-    box-shadow var(--transition);
+    box-shadow var(--transition), filter var(--transition),
+    transform 90ms cubic-bezier(0.2, 0.6, 0.3, 1);
 }
 .seg button:hover {
-  color: var(--ink);
+  color: var(--brand-ink);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.seg button:active {
+  transform: scale(0.96);
 }
 .seg button.on {
-  background: var(--surface);
-  color: var(--brand-ink);
-  box-shadow: var(--shadow-1);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--brand) 90%, #ffffff 10%) 0%,
+    var(--brand) 45%,
+    var(--brand-strong) 100%
+  );
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(120, 40, 0, 0.3);
+  box-shadow: 0 1px 4px rgba(234, 88, 12, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 :root[data-theme='light'] .seg button.on {
-  background: #fff;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--brand) 90%, #ffffff 10%) 0%,
+    var(--brand) 45%,
+    var(--brand-strong) 100%
+  );
+  color: #fff;
 }
 
 /* ───────────────────────────────── مفتاح التبديل ─────────────────── */

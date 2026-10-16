@@ -311,7 +311,7 @@ export function App() {
               )}
               {screen === 'notifications' && (
                 <ErrorBoundary label="الإشعارات">
-                  <NotificationsScreen />
+                  <NotificationsScreen goTo={key => setScreen(key as ScreenKey)} />
                 </ErrorBoundary>
               )}
               {screen === 'settings' && (
@@ -323,6 +323,18 @@ export function App() {
           )}
         </main>
       </div>
+      {/* v60 (الجولة 25 #3): زر البيع السريع — زائد دائري عائم يفتح
+          نقطة البيع مباشرة من أي شاشة، مخفي داخل نقطة البيع نفسها. */}
+      {screen !== 'pos' && (
+        <button
+          className="pos-fab"
+          title="بيع جديد — فتح نقطة البيع"
+          aria-label="بيع جديد — فتح نقطة البيع"
+          onClick={() => setScreen('pos')}>
+          <span className="fab-ring" />
+          <Icon name="plus" size={28} strokeWidth={2.4} />
+        </button>
+      )}
       {toasts.map(t => (
         <div key={t.id} className={`toast ${t.kind}`}>{t.message}</div>
       ))}

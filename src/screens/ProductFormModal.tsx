@@ -47,6 +47,7 @@ import {BASE_UNIT_NAME, WEIGHT_UNIT_NAME} from '../core/config';
 import {formatMoney, parseNumber} from '../core/format';
 import {daysUntilExpiry, expiryStateOf} from '../core/types';
 import type {Category, Product, ProductUnit, Unit} from '../core/types';
+import {Icon} from '../components/Icon';
 import './inventoryv57.css';
 
 /* ── أنواع المسودات ──────────────────────────────────────────── */
@@ -1802,8 +1803,8 @@ export function ProductFormModal({
               {archived && (
                 <div className="pf-archived-banner">
                   <span>
-                    ⚠️ منتج مؤرشف — مخفي من البيع والمخزن، وسجله محفوظ
-                    للتقارير والمرتجعات
+                    <Icon name="alert" size={15} /> منتج مؤرشف — مخفي من البيع
+                    والمخزن، وسجله محفوظ للتقارير والمرتجعات
                   </span>
                   <button
                     className="btn sm"
@@ -2311,7 +2312,7 @@ export function ProductFormModal({
                         className="btn sm"
                         disabled={labelBusy || barcode.trim().length === 0}
                         onClick={() => void printLabel()}>
-                        {labelBusy ? 'جارٍ الطباعة…' : `🖨 طباعة ${labelCopies} ملصق`}
+                        {labelBusy ? 'جارٍ الطباعة…' : (<><Icon name="printer" size={15} /> طباعة {labelCopies} ملصق</>)}
                       </button>
                     </div>
                   </section>
@@ -2488,7 +2489,7 @@ export function ProductFormModal({
                                   className="pf-del-btn"
                                   title={`حذف متغير ${row.color} · ${row.size}`}
                                   onClick={() => removeVariant(row.color, row.size)}>
-                                  ✕
+                                  <Icon name="x" size={14} />
                                 </button>
                               </div>
                             ))}
@@ -2606,7 +2607,7 @@ export function ProductFormModal({
                                         prev.filter((_, i) => i !== index),
                                       )
                                     }>
-                                    ✕
+                                    <Icon name="x" size={14} />
                                   </button>
                                 </div>
                               ))}
@@ -2756,7 +2757,7 @@ export function ProductFormModal({
                                     className="pf-del-btn"
                                     title="حذف صف الوحدة"
                                     onClick={() => removeUnitRow(index)}>
-                                    ✕
+                                    <Icon name="x" size={14} />
                                   </button>
                                 </td>
                               </tr>
@@ -2788,8 +2789,8 @@ export function ProductFormModal({
                     )}
                     {usedUnitWarning(unitRows) && (
                       <span className="iv57-hint">
-                        ⚠️ لا تكرّر الوحدة نفسها في صفّين — الثانية تلغي الأولى
-                        عند الحفظ.
+                        <Icon name="alert" size={14} /> لا تكرّر الوحدة نفسها في
+                        صفّين — الثانية تلغي الأولى عند الحفظ.
                       </span>
                     )}
                   </section>

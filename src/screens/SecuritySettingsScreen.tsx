@@ -17,6 +17,7 @@ import {useAppLockStore} from '../stores/appLockStore';
 import {useToastStore} from '../state/appStores';
 import {PinPad} from '../components/PinPad';
 import {getNumber, setJson} from '../storage/storage';
+import {Icon} from '../components/Icon';
 import './settingsv57.css';
 
 /** نفس مفتاح الأندرويد v57 — تقرأه AppLockGate كل 10 ثوانٍ. */
@@ -306,7 +307,7 @@ export function SecurityPanel() {
             className="btn"
             disabled={!pinIsSet}
             onClick={lockNow}>
-            🔒 قفل الآن
+            <Icon name="lock" size={15} /> قفل الآن
           </button>
         </div>
       </div>

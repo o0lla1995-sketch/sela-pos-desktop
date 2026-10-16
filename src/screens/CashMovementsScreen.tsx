@@ -24,6 +24,7 @@ import {
 } from '../services/CashService';
 import {useAppLockStore} from '../stores/appLockStore';
 import {PinPad} from '../components/PinPad';
+import {Icon} from '../components/Icon';
 import {
   formatDateTime,
   localToday,
@@ -151,7 +152,9 @@ export function CashMovementsScreen() {
     [rows, kindFilter],
   );
 
+  const [quick, setQuick] = useState<'today' | 'last7' | 'month' | null>(null);
   const applyQuick = useCallback((key: 'today' | 'last7' | 'month') => {
+    setQuick(key);
     const today = localToday();
     if (key === 'today') {
       setFrom(today);
@@ -484,13 +487,19 @@ export function CashMovementsScreen() {
             aria-label="إلى تاريخ"
           />
         </div>
-        <button className="btn sm ghost" onClick={() => applyQuick('today')}>
+        <button
+          className={`chip-toggle ${quick === 'today' ? 'on' : ''}`}
+          onClick={() => applyQuick('today')}>
           اليوم
         </button>
-        <button className="btn sm ghost" onClick={() => applyQuick('last7')}>
+        <button
+          className={`chip-toggle ${quick === 'last7' ? 'on' : ''}`}
+          onClick={() => applyQuick('last7')}>
           آخر 7 أيام
         </button>
-        <button className="btn sm ghost" onClick={() => applyQuick('month')}>
+        <button
+          className={`chip-toggle ${quick === 'month' ? 'on' : ''}`}
+          onClick={() => applyQuick('month')}>
           هذا الشهر
         </button>
         <button className="btn" onClick={() => void load()} disabled={loading}>
@@ -577,7 +586,11 @@ export function CashMovementsScreen() {
                     disabled={reprintId === m.local_id}
                     title={`إعادة طباعة سند ${m.ref}`}
                     onClick={() => void reprint(m)}>
-                    {reprintId === m.local_id ? '…' : '🖨'}
+                    {reprintId === m.local_id ? (
+                      '…'
+                    ) : (
+                      <Icon name="printer" size={15} />
+                    )}
                   </button>
                 </td>
               </tr>
@@ -653,12 +666,13 @@ export function CashMovementsScreen() {
               {formMode === 'withdrawal' &&
                 (movementSecurityMode() === 'none' ? (
                   <div className="dc-warnbox">
-                    ⚠️ لم تُفعّل أي حماية للحركات — يُنصح بتفعيل رمز PIN من
-                    الإعدادات (تُسجَّل الحركة «بدون تأمين»)
+                    <Icon name="alert" size={15} /> لم تُفعّل أي حماية للحركات
+                    — يُنصح بتفعيل رمز PIN من الإعدادات (تُسجَّل الحركة «بدون
+                    تأمين»)
                   </div>
                 ) : (
                   <div className="dc-hint">
-                    🔒 السحب مؤمَّن{' '}
+                    <Icon name="lock" size={15} /> السحب مؤمَّن{' '}
                     {movementSecurityMode() === 'pin'
                       ? 'برمز PIN'
                       : 'بالبصمة مع سقوط على رمز PIN'}{' '}

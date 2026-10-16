@@ -40,6 +40,7 @@ import {getJson, setJson, getNumber} from '../storage/storage';
 import {logDiag} from '../state/storage';
 import {APP_VERSION_LABEL} from '../core/config';
 import {SecurityPanel} from './SecuritySettingsScreen';
+import {Icon} from '../components/Icon';
 import './settingsv57.css';
 
 /* ── مفاتيح النسخ التلقائي إلى مجلد (سطح المكتب) ────────────────── */
@@ -354,7 +355,16 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
         const {json, summary} = await BackupService.buildBackupJson({
           compact: true,
         });
-        const stamp = new Date().toISOString().slice(0, 19).replace('T', '_');
+        // v60 (جذر OS Error 123): ISO الزمني يحمل نقطتين «14:30:45»
+        // وهي محظورة في أسماء ملفات ويندوز — ويندوز يرفض الاسم كله
+        // بالخطأ 123 (صيغة اسم غير صحيحة)، وكان الاحتياطي v59 يفشل
+        // بدوره لأنه يعيد استخدام نفس الاسم المعطوب. النقطتان
+        // تُستبدلان بشرطة فيصبح الاسم: sela_backup_2026-10-17_14-30-45.json
+        const stamp = new Date()
+          .toISOString()
+          .slice(0, 19)
+          .replace('T', '_')
+          .replace(/:/g, '-');
         const result = await invoke<string>('write_file_in_folder', {
           folder: autoFolder,
           name: `sela_backup_${stamp}.json`,
@@ -1200,7 +1210,7 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
                       onClick={() => void applyStoreMode(config.key)}>
                       <b>
                         {config.label}
-                        {active && ' ✓'}
+                        {active && <Icon name="check" size={13} />}
                       </b>
                       <span>{config.blurb}</span>
                     </button>

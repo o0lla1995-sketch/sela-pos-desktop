@@ -29,6 +29,10 @@ import {
 } from '../state/appStores';
 import {useSettingsStore} from '../stores/settingsStore';
 import {formatDateTime, formatMoney, formatQty, parseNumber} from '../core/format';
+import {Icon} from '../components/Icon';
+import {buildStocktakeReportJob} from '../services/printer/stocktakeReceipt';
+import {printJob} from '../printing/dispatch';
+import type {ReceiptSettings} from '../services/printer/receipt';
 import type {
   Category,
   Stocktake,
@@ -89,6 +93,9 @@ export function StocktakeScreen() {
   const [cancelBusy, setCancelBusy] = useState(false);
   const [reportSession, setReportSession] = useState<Stocktake | null>(null);
   const [reportItems, setReportItems] = useState<StocktakeItem[] | null>(null);
+  /** v60: ملخص الجلسة المفتوح تقريرها — يُعرض كبطاقات أعلى الجدول. */
+  const [reportSummary, setReportSummary] = useState<StocktakeSummary | null>(null);
+  const [printBusy, setPrintBusy] = useState(false);
 
   /** سلسلة تركيز حقول العدّ — Enter يقفز للصف التالي (عدّ متواصل). */
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -263,9 +270,13 @@ export function StocktakeScreen() {
   const openReport = useCallback(
     async (entry: Stocktake) => {
       try {
-        const report = await StocktakeRepo.listItems(entry.id);
+        const [report, reportSum] = await Promise.all([
+          StocktakeRepo.listItems(entry.id),
+          StocktakeRepo.summary(entry.id),
+        ]);
         setReportSession(entry);
         setReportItems(report);
+        setReportSummary(reportSum);
       } catch (error) {
         toast(
           error instanceof Error ? error.message : 'تعذر فتح التقرير',
@@ -274,6 +285,51 @@ export function StocktakeScreen() {
       }
     },
     [toast],
+  );
+
+  /** v60 (الجولة 25 #5): طباعة تقرير الجلسة حرارياً — يعمل للتقرير
+   *  النهائي وللمرحلي للجلسة النشطة على حد سواء. */
+  const printReport = useCallback(
+    async (target: Stocktake, targetItems: StocktakeItem[], targetSummary: StocktakeSummary | null, interim: boolean) => {
+      if (printBusy) return;
+      if (targetSummary == null) {
+        toast('ملخص الجلسة غير متاح — أعد فتح التقرير', 'error');
+        return;
+      }
+      setPrintBusy(true);
+      try {
+        const s = useSettingsStore.getState().settings;
+        const receiptSettings: ReceiptSettings = {
+          storeName: s.storeName,
+          storePhone: s.storePhone,
+          footerMessage: s.footerMessage,
+          storeLogoPath: s.storeLogoPath,
+          paperWidth: s.paperWidth,
+          codepage: s.codepage,
+          showProfit: false,
+        };
+        await printJob(
+          buildStocktakeReportJob(
+            {session: target, items: targetItems, summary: targetSummary, interim},
+            receiptSettings,
+          ),
+        );
+        toast(
+          interim
+            ? `طُبع التقرير المرحلي للجلسة #${target.id}`
+            : `طُبع تقرير الجلسة #${target.id}`,
+          'success',
+        );
+      } catch (error) {
+        toast(
+          error instanceof Error ? error.message : 'فشلت الطباعة',
+          'error',
+        );
+      } finally {
+        setPrintBusy(false);
+      }
+    },
+    [printBusy, toast],
   );
 
   /* ── القوائم المشتقة ───────────────────────────────────────── */
@@ -359,7 +415,7 @@ export function StocktakeScreen() {
               className="btn primary"
               disabled={starting}
               onClick={() => void startSession()}>
-              {starting ? 'جارٍ بدء الجلسة…' : '▶ بدء جلسة جرد جديدة'}
+              {starting ? 'جارٍ بدء الجلسة…' : (<><Icon name="plus" size={16} /> بدء جلسة جرد جديدة</>)}
             </button>
           </div>
 
@@ -418,7 +474,18 @@ export function StocktakeScreen() {
                   كميتها كما هي عند الإتمام.
                 </div>
               </div>
-              <div style={{display: 'flex', gap: 8}}>
+              <div style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
+                <button
+                  className="btn"
+                  disabled={printBusy || summary == null || items.length === 0}
+                  title="طباعة نسخة حرارية من تقدّم الجلسة وفروقاتها حتى الآن"
+                  onClick={() =>
+                    session != null &&
+                    void printReport(session, items, summary, true)
+                  }>
+                  <Icon name="printer" size={15} />
+                  {printBusy ? 'جارٍ الطباعة…' : 'طباعة تقرير مرحلي'}
+                </button>
                 <button
                   className="btn danger"
                   disabled={cancelBusy}
@@ -527,7 +594,7 @@ export function StocktakeScreen() {
                 <tr>
                   <td colSpan={5}>
                     <div className="empty" style={{padding: '24px 16px'}}>
-                      <div className="icon">🔍</div>
+                      <div className="icon"><Icon name="search" size={26} /></div>
                       {items.length === 0
                         ? 'لا صفوف في هذه الجلسة — كل منتجاتك مؤرشفة؟'
                         : 'لا نتائج بهذه الفلاتر — جرّب بحثاً آخر أو أطفئ «غير المعدودة فقط»'}
@@ -590,7 +657,7 @@ export function StocktakeScreen() {
                           item.system_qty,
                         )})`}
                         onClick={() => void markMatched(item)}>
-                        ✓ مطابق
+                        <Icon name="check" size={13} /> مطابق
                       </button>
                     </td>
                   </tr>
@@ -683,7 +750,8 @@ export function StocktakeScreen() {
               </div>
               {uncounted > 0 && (
                 <div className="iv57-hint">
-                  ⚠️ {uncounted} صفّاً لم يُعدّ — ستبقى كميتها كما هي.
+                  <Icon name="alert" size={14} /> {uncounted} صفّاً لم يُعدّ —
+                  ستبقى كميتها كما هي.
                 </div>
               )}
               <div className="iv57-hint">
@@ -716,27 +784,76 @@ export function StocktakeScreen() {
         </div>
       )}
 
-      {/* تقرير جلسة منتهية */}
+      {/* تقرير جلسة منتهية — v60: ملخص بطاقات + فرق رقمي + طباعة */}
       {reportSession != null && reportItems != null && (
         <div className="overlay">
-          <div className="modal" style={{width: 'min(760px, 94vw)'}}>
+          <div className="modal" style={{width: 'min(860px, 94vw)'}}>
             <div className="modal-head">
               <b>
                 تقرير جلسة الجرد #{reportSession.id} —{' '}
                 {reportSession.completed_at
                   ? formatDateTime(reportSession.completed_at)
-                  : ''}
+                  : 'جلسة مفتوحة'}
               </b>
-              <button
-                className="btn sm ghost"
-                onClick={() => {
-                  setReportSession(null);
-                  setReportItems(null);
-                }}>
-                إغلاق
-              </button>
+              <span style={{display: 'flex', gap: 8}}>
+                <button
+                  className="btn sm primary"
+                  disabled={printBusy || reportSummary == null}
+                  onClick={() =>
+                    void printReport(
+                      reportSession,
+                      reportItems,
+                      reportSummary,
+                      reportSession.status === 'open',
+                    )
+                  }>
+                  <Icon name="printer" size={15} />
+                  {printBusy ? 'جارٍ الطباعة…' : 'طباعة التقرير'}
+                </button>
+                <button
+                  className="btn sm ghost"
+                  onClick={() => {
+                    setReportSession(null);
+                    setReportItems(null);
+                    setReportSummary(null);
+                  }}>
+                  إغلاق
+                </button>
+              </span>
             </div>
-            <div className="modal-body" style={{padding: 0}}>
+            <div className="modal-body" style={{padding: 16, overflowY: 'auto'}}>
+              {/* ملخص الجلسة v60 */}
+              {reportSummary != null && (
+                <div className="st-report-grid">
+                  <div className="cell">
+                    <span className="v">{reportSummary.totalItems}</span>
+                    <span className="l">صف الجرد</span>
+                  </div>
+                  <div className="cell brand">
+                    <span className="v">{reportSummary.countedItems}</span>
+                    <span className="l">معدود</span>
+                  </div>
+                  <div className="cell ok">
+                    <span className="v">{reportSummary.matchedItems}</span>
+                    <span className="l">مطابق</span>
+                  </div>
+                  <div className="cell danger">
+                    <span className="v">{reportSummary.shortageItems}</span>
+                    <span className="l">نقص</span>
+                  </div>
+                  <div className="cell">
+                    <span className="v">{reportSummary.surplusItems}</span>
+                    <span className="l">زيادة</span>
+                  </div>
+                  <div className="cell">
+                    <span className="v">
+                      {formatQty(reportSummary.totalSystem)} →{' '}
+                      {formatQty(reportSummary.totalCounted)}
+                    </span>
+                    <span className="l">النظام → العدّ</span>
+                  </div>
+                </div>
+              )}
               <table className="st-table" style={{border: 0, borderRadius: 0}}>
                 <thead>
                   <tr>
@@ -744,11 +861,16 @@ export function StocktakeScreen() {
                     <th>النظام</th>
                     <th>العدّ</th>
                     <th>الفرق</th>
+                    <th>الحالة</th>
                   </tr>
                 </thead>
                 <tbody>
                   {reportItems.map(item => {
                     const variance = varianceOf(item);
+                    const numeric =
+                      item.counted_qty != null
+                        ? item.counted_qty - item.system_qty
+                        : null;
                     return (
                       <tr
                         key={`${item.product_id}-${item.variantId ?? 0}`}>
@@ -767,6 +889,25 @@ export function StocktakeScreen() {
                           {item.counted_qty == null
                             ? '—'
                             : formatQty(item.counted_qty)}
+                        </td>
+                        <td
+                          className="iv57-num"
+                          style={{
+                            color:
+                              numeric == null
+                                ? 'var(--muted)'
+                                : Math.abs(numeric) < 0.0005
+                                ? 'var(--ok)'
+                                : numeric > 0
+                                ? 'var(--ok)'
+                                : 'var(--danger)',
+                            fontWeight: 800,
+                          }}>
+                          {numeric == null
+                            ? '—'
+                            : Math.abs(numeric) < 0.0005
+                            ? '0'
+                            : `${numeric > 0 ? '+' : ''}${formatQty(numeric)}`}
                         </td>
                         <td>
                           <span className={`st-badge ${variance.tone}`}>

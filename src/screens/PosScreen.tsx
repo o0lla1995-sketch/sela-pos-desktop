@@ -308,32 +308,8 @@ export function PosScreen() {
     return () => setActiveBarcodeHandler(null);
   }, [products, tryAdd, addProductToCart, pricingMode, toast, totals.total, lines.length]);
 
-  // ── اختصارات لوحة المفاتيح (§3.1) ──
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'F2') {
-        e.preventDefault();
-        searchRef.current?.focus();
-      } else if (e.key === 'F3') {
-        e.preventDefault();
-        setPricingMode(pricingMode === 'RETAIL' ? 'WHOLESALE' : 'RETAIL');
-      } else if (e.key === 'F9') {
-        e.preventDefault();
-        if (lines.length > 0 && !busy) setPaySheet('cash');
-      } else if (e.key === 'Escape') {
-        // v58: Escape يغلق كل النوافذ المفتوحة — دفع/دين/متغير/وزن/
-        // اختيار زبون/قسيمة (كانت لوحتا الاختيار لا تُغلقان به).
-        setPaySheet(null);
-        setDebtConfirm(null);
-        setVariantPick(null);
-        setWeightPick(null);
-        setDebtSheet(null);
-        setVoucherSheet(false);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [pricingMode, setPricingMode, lines.length, busy]);
+  // ── اختصارات لوحة المفاتيح v60 ──
+  // (الكاملة أدناه بعد تعريف لوحات اختيار الزبون — تعتمد عليها.)
 
   // ── بيع نقدي ──
   const completeCashSale = useCallback(
@@ -511,6 +487,65 @@ export function PosScreen() {
     }
   }, [localCreateName, localCreateId, localCreatePhone, toast, totals.total]);
 
+  // ── اختصارات لوحة المفاتيح v60 (طلب الجولة 25 #3) ─────────────
+  // F1 تفريغ السلة · F2 دين المتجر · F3 دين العميل (صِلة) · F4
+  // القسيمة — أزرار السلة تحمل شاراتها كي يكتشفها الكاشير بلا
+  // دليل. البحث انتقل لـ F6 ومفرق/جملة لـ F7 كي لا تتصادم مع
+  // التعيين الجديد، وF9 إتمام البيع كما كان منذ v58.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'F1') {
+        e.preventDefault();
+        if (lines.length > 0) {
+          clearCart();
+          beep('ok');
+        }
+      } else if (e.key === 'F2') {
+        e.preventDefault();
+        if (lines.length > 0 && !busy && paySheet == null && debtConfirm == null) {
+          void openLocalPicker();
+        } else if (lines.length === 0) {
+          toast('أضف منتجات للسلة أولاً ثم سجّل دين المتجر', 'info');
+        }
+      } else if (e.key === 'F3') {
+        e.preventDefault();
+        if (!silaPaired) {
+          toast('اربط صِلة أولاً من شاشة صِلة والقسائم', 'info');
+        } else if (lines.length > 0 && !busy && paySheet == null && debtConfirm == null) {
+          void openSilaPicker();
+        } else if (lines.length === 0) {
+          toast('أضف منتجات للسلة أولاً ثم سجّل دين العميل', 'info');
+        }
+      } else if (e.key === 'F4') {
+        e.preventDefault();
+        if (paySheet == null && debtConfirm == null && weightPick == null && variantPick == null) {
+          setVoucherCode('');
+          setVoucherSheet(true);
+        }
+      } else if (e.key === 'F6') {
+        e.preventDefault();
+        searchRef.current?.focus();
+      } else if (e.key === 'F7') {
+        e.preventDefault();
+        setPricingMode(pricingMode === 'RETAIL' ? 'WHOLESALE' : 'RETAIL');
+      } else if (e.key === 'F9') {
+        e.preventDefault();
+        if (lines.length > 0 && !busy) setPaySheet('cash');
+      } else if (e.key === 'Escape') {
+        // v58: Escape يغلق كل النوافذ المفتوحة — دفع/دين/متغير/وزن/
+        // اختيار زبون/قسيمة (كانت لوحتا الاختيار لا تُغلقان به).
+        setPaySheet(null);
+        setDebtConfirm(null);
+        setVariantPick(null);
+        setWeightPick(null);
+        setDebtSheet(null);
+        setVoucherSheet(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pricingMode, setPricingMode, lines.length, busy, paySheet, debtConfirm, weightPick, variantPick, silaPaired, clearCart, openLocalPicker, openSilaPicker, toast]);
+
   // ── صرف قسيمة على السلة (v20) ──
   const redeemVoucherOnCart = useCallback(async () => {
     const payload = voucherCode.trim();
@@ -659,7 +694,7 @@ export function PosScreen() {
           </span>
           <input
             ref={searchRef}
-            placeholder="بحث بالاسم أو الباركود… (F2)"
+            placeholder="بحث بالاسم أو الباركود… (F6)"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -673,7 +708,7 @@ export function PosScreen() {
           <button
             className={pricingMode === 'RETAIL' ? 'on' : ''}
             onClick={() => setPricingMode('RETAIL')}
-            title="تبديل مفرق/جملة (F3)">
+            title="تبديل مفرق/جملة (F7)">
             مفرق
           </button>
           <button
@@ -787,9 +822,10 @@ export function PosScreen() {
               )}
             </div>
             {lines.length > 0 && (
-              <button className="btn ghost sm" onClick={() => clearCart()}>
+              <button className="btn ghost sm" onClick={() => clearCart()} title="تفريغ السلة — F1">
                 <Icon name="trash" size={14} />
                 تفريغ
+                <span className="pos-fkey">F1</span>
               </button>
             )}
           </div>
@@ -851,26 +887,35 @@ export function PosScreen() {
               <button
                 className="btn"
                 disabled={lines.length === 0 || busy || !silaPaired}
-                title={silaPaired ? '' : 'اربط صِلة أولاً من شاشة صِلة'}
+                title={
+                  silaPaired
+                    ? 'بيع بالدين على حساب العميل في صِلة — F3'
+                    : 'اربط صِلة أولاً من شاشة صِلة'
+                }
                 onClick={() => void openSilaPicker()}>
                 <Icon name="link" size={15} />
-                دين صِلة
+                دين العميل
+                <span className="pos-fkey">F3</span>
               </button>
               <button
                 className="btn"
                 disabled={lines.length === 0 || busy}
+                title="بيع بالدين في دفتر المتجر — F2"
                 onClick={() => void openLocalPicker()}>
                 <Icon name="book" size={15} />
                 دين المتجر
+                <span className="pos-fkey">F2</span>
               </button>
               <button
                 className="btn ghost"
+                title="صرف قسيمة صِلة — F4"
                 onClick={() => {
                   setVoucherCode('');
                   setVoucherSheet(true);
                 }}>
                 <Icon name="ticket" size={15} />
                 قسيمة
+                <span className="pos-fkey">F4</span>
               </button>
             </div>
           </div>

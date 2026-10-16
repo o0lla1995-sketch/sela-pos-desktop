@@ -26,6 +26,7 @@ import type {
   LocalDebt,
   LocalPayment,
 } from '../core/types';
+import {Icon} from '../components/Icon';
 import './debtscash.css';
 
 type FieldErrors = {id?: string; name?: string; phone?: string};
@@ -1049,7 +1050,7 @@ export function LocalDebtsScreen() {
               </button>
             </div>
             <div className="modal-body">
-              <div className="dc-warnbox">⚠️ حذف نهائي لا يمكن التراجع عنه</div>
+              <div className="dc-warnbox"><Icon name="alert" size={15} /> حذف نهائي لا يمكن التراجع عنه</div>
               <div className="dc-hint">
                 الحساب مسدّد بالكامل (لا دين قائم ولا رصيد دائن). سيُحذف
                 الحساب وسجل عملياته (الديون المسددة والسدادات) من دفتر المتجر

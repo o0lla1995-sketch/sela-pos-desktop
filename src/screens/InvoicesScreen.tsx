@@ -35,6 +35,7 @@ import {SilaRepo} from '../services/sila/SilaRepo';
 import {applyProductDiscount} from '../stores/cartStore';
 import {buildReturnReceiptJob} from '../services/printer/returnReceipt';
 import {ThermalPrinterService} from '../services/printer/ThermalPrinterService';
+import {Icon} from '../components/Icon';
 import type {ReceiptSettings} from '../services/printer/receipt';
 import {
   formatDateTime,
@@ -217,7 +218,9 @@ export function InvoicesScreen() {
     void reload();
   }, [reload]);
 
+  const [quick, setQuick] = useState<'today' | 'week' | 'month' | 'all' | null>(null);
   const applyQuick = useCallback((key: 'today' | 'week' | 'month' | 'all') => {
+    setQuick(key);
     const today = localToday();
     if (key === 'today') {
       setFrom(today);
@@ -305,16 +308,24 @@ export function InvoicesScreen() {
             aria-label="إلى تاريخ"
           />
         </div>
-        <button className="btn sm ghost" onClick={() => applyQuick('today')}>
+        <button
+          className={`chip-toggle ${quick === 'today' ? 'on' : ''}`}
+          onClick={() => applyQuick('today')}>
           اليوم
         </button>
-        <button className="btn sm ghost" onClick={() => applyQuick('week')}>
+        <button
+          className={`chip-toggle ${quick === 'week' ? 'on' : ''}`}
+          onClick={() => applyQuick('week')}>
           آخر 7 أيام
         </button>
-        <button className="btn sm ghost" onClick={() => applyQuick('month')}>
+        <button
+          className={`chip-toggle ${quick === 'month' ? 'on' : ''}`}
+          onClick={() => applyQuick('month')}>
           هذا الشهر
         </button>
-        <button className="btn sm ghost" onClick={() => applyQuick('all')}>
+        <button
+          className={`chip-toggle ${quick === 'all' ? 'on' : ''}`}
+          onClick={() => applyQuick('all')}>
           كل الفترات
         </button>
         <span className="grow" />
@@ -408,7 +419,11 @@ export function InvoicesScreen() {
                       title={`إعادة طباعة ${row.invoice_number}`}
                       disabled={reprintId === row.id}
                       onClick={() => void reprintRow(row)}>
-                      {reprintId === row.id ? '…' : '🖨'}
+                      {reprintId === row.id ? (
+                        '…'
+                      ) : (
+                        <Icon name="printer" size={15} />
+                      )}
                     </button>
                   </td>
                 </tr>
@@ -712,14 +727,16 @@ function DetailModal({
           <span style={{display: 'flex', gap: 8}}>
             {canReturn && (
               <button className="btn sm" onClick={onReturn}>
-                ↩ إرجاع/استبدال
+                <Icon name="undo" size={14} />
+                إرجاع/استبدال
               </button>
             )}
             <button
               className="btn sm"
               onClick={() => void reprint()}
               disabled={reprinting}>
-              {reprinting ? 'جارٍ الطباعة…' : '🖨 إعادة الطباعة'}
+              <Icon name="printer" size={14} />
+              {reprinting ? 'جارٍ الطباعة…' : 'إعادة الطباعة'}
             </button>
             <button className="btn sm ghost" onClick={onClose}>
               إغلاق
@@ -849,7 +866,11 @@ function DetailModal({
                     title={`إعادة طباعة ${ret.return_number}`}
                     disabled={retPrintId === ret.id}
                     onClick={() => void reprintReturn(ret)}>
-                    {retPrintId === ret.id ? '…' : '🖨'}
+                    {retPrintId === ret.id ? (
+                      '…'
+                    ) : (
+                      <Icon name="printer" size={15} />
+                    )}
                   </button>
                 </div>
               ))}
@@ -859,7 +880,8 @@ function DetailModal({
         <div className="modal-foot">
           {canReturn && (
             <button className="btn" onClick={onReturn}>
-              ↩ إرجاع/استبدال
+              <Icon name="undo" size={15} />
+              إرجاع/استبدال
             </button>
           )}
           <button
@@ -1151,7 +1173,9 @@ function ReturnModal({
             {loading ? (
               <div className="ih-empty-sm">جارٍ تحضير الإرجاع…</div>
             ) : error != null ? (
-              <div className="ih-warnbox">⚠️ {error}</div>
+              <div className="ih-warnbox">
+                <Icon name="alert" size={16} /> {error}
+              </div>
             ) : (
               <>
                 {/* سياق الدفتر — ماذا سيحدث للقيمة عند التنفيذ */}
@@ -1174,7 +1198,10 @@ function ReturnModal({
                     'طلب أونلاين مسلَّم — المبلغ دخل الخزينة بسند تحصيل، فالمرتجع استرداد نقدي منها.'}
                 </div>
                 {blocked && (
-                  <div className="ih-warnbox">⚠️ {debtState.reason ?? 'الحالة لا تسمح بالإرجاع الآن'}</div>
+                  <div className="ih-warnbox">
+                    <Icon name="alert" size={16} />{' '}
+                    {debtState.reason ?? 'الحالة لا تسمح بالإرجاع الآن'}
+                  </div>
                 )}
 
                 {/* أسطر الفاتورة — عدّاد لكل صنف بحدّ المتبقي */}
@@ -1278,7 +1305,7 @@ function ReturnModal({
                           onClick={() =>
                             setPicks(prev => prev.filter(x => x.key !== pick.key))
                           }>
-                          ✕
+                          <Icon name="x" size={14} />
                         </button>
                       </div>
                     ))}

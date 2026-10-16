@@ -44,6 +44,7 @@ import {
   weekdayLabel,
 } from '../core/format';
 import type {ReportRangeKey} from '../core/types';
+import {Icon} from '../components/Icon';
 import './settingsv57.css';
 
 /* ──────────────────────────────────────────────────────────────
@@ -588,7 +589,7 @@ export function ReportsScreen() {
       {loading && bundle == null ? (
         <div className="card">
           <div className="sv57-empty">
-            <div className="icon">📊</div>
+            <div className="icon"><Icon name="chart" size={30} /></div>
             جارٍ تحميل التقارير…
           </div>
         </div>
@@ -1245,7 +1246,7 @@ export function ReportsScreen() {
       ) : (
         <div className="card">
           <div className="sv57-empty">
-            <div className="icon">📊</div>
+            <div className="icon"><Icon name="chart" size={30} /></div>
             لا بيانات — جرّب نطاقاً آخر أو أعد التحديث
           </div>
         </div>
