@@ -160,6 +160,38 @@ export function App() {
     document.documentElement.dataset.theme = themeMode;
   }, [themeMode]);
 
+  // v61 (الجولة 26 #1): مفتاح «+» يفتح نقطة البيع مباشرة من أي شاشة —
+  // بدل زر الزائد العائم الذي حُذف. لا يعمل أثناء الكتابة في حقل،
+  // ولا فوق نافذة حوار مفتوحة، ولا داخل نقطة البيع نفسها.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (screen === 'pos') return;
+      // + من الصف العلوي (Shift+=) أو من لوحة الأرقام الجانبية.
+      if (e.key !== '+' && e.code !== 'NumpadAdd' && e.code !== 'Equal') {
+        return;
+      }
+      if (e.key !== '+') return; // Equal بلا Shift لا يُحتسب
+      const target = e.target as HTMLElement | null;
+      if (
+        target != null &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      // نافذة حوار مفتوحة؟ لا نبدّل الشاشة خلفها.
+      if (document.querySelector('.overlay, .pinpad-overlay') != null) {
+        return;
+      }
+      e.preventDefault();
+      setScreen('pos');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [screen]);
+
   if (!ready) {
     return (
       <div className="activation">
@@ -323,18 +355,9 @@ export function App() {
           )}
         </main>
       </div>
-      {/* v60 (الجولة 25 #3): زر البيع السريع — زائد دائري عائم يفتح
-          نقطة البيع مباشرة من أي شاشة، مخفي داخل نقطة البيع نفسها. */}
-      {screen !== 'pos' && (
-        <button
-          className="pos-fab"
-          title="بيع جديد — فتح نقطة البيع"
-          aria-label="بيع جديد — فتح نقطة البيع"
-          onClick={() => setScreen('pos')}>
-          <span className="fab-ring" />
-          <Icon name="plus" size={28} strokeWidth={2.4} />
-        </button>
-      )}
+      {/* v61 (الجولة 26 #1): زر الزائد العائم حُذف بطلب التاجر —
+          مفتاح «+» في الكيبورد يفتح نقطة البيع من أي شاشة (المعالج
+          أدناه في useEffect). */}
       {toasts.map(t => (
         <div key={t.id} className={`toast ${t.kind}`}>{t.message}</div>
       ))}

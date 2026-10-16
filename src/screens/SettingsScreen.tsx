@@ -40,6 +40,8 @@ import {getJson, setJson, getNumber} from '../storage/storage';
 import {logDiag} from '../state/storage';
 import {APP_VERSION_LABEL} from '../core/config';
 import {SecurityPanel} from './SecuritySettingsScreen';
+import {useEnterConfirm} from '../lib/useEnterConfirm';
+import {Select} from '../components/Select';
 import {Icon} from '../components/Icon';
 import './settingsv57.css';
 
@@ -341,6 +343,14 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
     }
   }, [refreshCatalog, restoreDoc, toast]);
 
+  // v61 (الجولة 26 #6): Enter يؤكد استرجاع النسخة الاحتياطية مباشرة
+  // (نفس زر «استرجاع الآن» وبنفس شرطه).
+  useEnterConfirm({
+    active: restoreDoc != null,
+    onConfirm: () => void confirmRestore(),
+    enabled: () => !busyRestore,
+  });
+
   /** نسخة الآن إلى المجلد التلقائي (write_file_in_folder بلا حوار). */
   const runAutoBackup = useCallback(
     async (silent: boolean) => {
@@ -585,19 +595,19 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
           <div className="sv57-form">
             <div className="field">
               <label>قناة الطابعة</label>
-              <select
+              <Select
                 value={printer.channel}
-                onChange={e =>
+                onChange={value =>
                   updatePrinter({
-                    channel: e.target.value as typeof printer.channel,
+                    channel: value as typeof printer.channel,
                   })
-                }>
-                {PRINTER_CHANNELS.map(ch => (
-                  <option key={ch.value} value={ch.value}>
-                    {ch.label}
-                  </option>
-                ))}
-              </select>
+                }
+                options={PRINTER_CHANNELS.map(ch => ({
+                  value: ch.value,
+                  label: ch.label,
+                }))}
+                ariaLabel="قناة الطابعة"
+              />
             </div>
             {printer.channel === 'tcp' && (
               <>
@@ -641,17 +651,15 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
                 </div>
                 <div className="field">
                   <label>السرعة (Baud)</label>
-                  <select
-                    value={printer.baud}
-                    onChange={e =>
-                      updatePrinter({baud: Number(e.target.value)})
-                    }>
-                    {[9600, 19200, 38400, 57600, 115200].map(b => (
-                      <option key={b} value={b}>
-                        {b}
-                      </option>
-                    ))}
-                  </select>
+                  <Select
+                    value={String(printer.baud)}
+                    onChange={value => updatePrinter({baud: Number(value)})}
+                    options={[9600, 19200, 38400, 57600, 115200].map(b => ({
+                      value: String(b),
+                      label: String(b),
+                    }))}
+                    ariaLabel="سرعة المنفذ التسلسلي"
+                  />
                 </div>
               </>
             )}
@@ -679,24 +687,28 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
             )}
             <div className="field">
               <label>عرض الورق</label>
-              <select
+              <Select
                 value={settings.paperWidth}
-                onChange={e =>
-                  update({paperWidth: e.target.value as '58' | '80'})
-                }>
-                <option value="58">58 مم (32 حرفاً)</option>
-                <option value="80">80 مم (48 حرفاً)</option>
-              </select>
+                onChange={value => update({paperWidth: value as '58' | '80'})}
+                options={[
+                  {value: '58', label: '58 مم (32 حرفاً)'},
+                  {value: '80', label: '80 مم (48 حرفاً)'},
+                ]}
+                ariaLabel="عرض الورق"
+              />
             </div>
             <div className="field">
               <label>ترميز العربية</label>
-              <select
-                value={settings.codepage}
-                onChange={e => update({codepage: Number(e.target.value)})}>
-                <option value={47}>Windows-1256 (الأكثر شيوعاً)</option>
-                <option value={45}>IBM-864 (بعض Xprinter)</option>
-                <option value={0}>ASCII (إنجليزي فقط)</option>
-              </select>
+              <Select
+                value={String(settings.codepage)}
+                onChange={value => update({codepage: Number(value)})}
+                options={[
+                  {value: '47', label: 'Windows-1256 (الأكثر شيوعاً)'},
+                  {value: '45', label: 'IBM-864 (بعض Xprinter)'},
+                  {value: '0', label: 'ASCII (إنجليزي فقط)'},
+                ]}
+                ariaLabel="ترميز العربية للطابعة"
+              />
             </div>
           </div>
           <div className="sv57-switches">
@@ -871,16 +883,19 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
           <div className="sv57-form">
             <div className="field">
               <label>نمط التسعير الافتراضي</label>
-              <select
+              <Select
                 value={settings.defaultPricingMode}
-                onChange={e =>
+                onChange={value =>
                   update({
-                    defaultPricingMode: e.target.value as 'RETAIL' | 'WHOLESALE',
+                    defaultPricingMode: value as 'RETAIL' | 'WHOLESALE',
                   })
-                }>
-                <option value="RETAIL">مفرق</option>
-                <option value="WHOLESALE">جملة</option>
-              </select>
+                }
+                options={[
+                  {value: 'RETAIL', label: 'مفرق'},
+                  {value: 'WHOLESALE', label: 'جملة'},
+                ]}
+                ariaLabel="نمط التسعير الافتراضي"
+              />
             </div>
             <div className="field">
               <label>شكل عرض المنتجات في البيع</label>
@@ -1058,17 +1073,16 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
             <button className="btn sm" onClick={() => void pickAutoFolder()}>
               اختيار المجلد
             </button>
-            <select
-              className="btn sm"
-              value={autoIntervalDays}
-              onChange={e => changeAutoInterval(Number(e.target.value))}
-              style={{padding: '5px 10px'}}>
-              {AUTO_INTERVALS.map(interval => (
-                <option key={interval.value} value={interval.value}>
-                  {interval.label}
-                </option>
-              ))}
-            </select>
+            <Select
+              style={{width: 'auto', minWidth: 170}}
+              value={String(autoIntervalDays)}
+              onChange={value => changeAutoInterval(Number(value))}
+              options={AUTO_INTERVALS.map(interval => ({
+                value: String(interval.value),
+                label: interval.label,
+              }))}
+              ariaLabel="فاصل النسخ التلقائي"
+            />
             <button
               className="btn sm"
               disabled={autoBusy || autoFolder.length === 0}

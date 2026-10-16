@@ -21,12 +21,14 @@ import {
 import {formatMoney, formatDateTime, relativeTime} from '../core/format';
 import {amountTextToMinor} from '../core/amountKeypad';
 import {useAmountKeyboard} from '../lib/useAmountKeyboard';
+import {useEnterConfirm} from '../lib/useEnterConfirm';
 import type {
   LocalCustomerBalance,
   LocalDebt,
   LocalPayment,
 } from '../core/types';
 import {Icon} from '../components/Icon';
+import {Select} from '../components/Select';
 import './debtscash.css';
 
 type FieldErrors = {id?: string; name?: string; phone?: string};
@@ -458,6 +460,25 @@ export function LocalDebtsScreen() {
     onConfirm: () => void createCustomer(),
     onCancel: () => setAddOpen(false),
     hasTextInput: true,
+  });
+
+  // ── v61 (الجولة 26 #6): Enter يؤكد مباشرة في بقية نوافذ الدفتر ──
+  // تعديل الحساب / تسجيل دين / تأكيد الحذف النهائي.
+  useEnterConfirm({
+    active: editOpen && detail != null,
+    onConfirm: () => void saveEdit(),
+    enabled: () => !editBusy,
+    skipOnInputs: true, // نص طويل بملاحظات — Enter داخله سطر جديد
+  });
+  useEnterConfirm({
+    active: debtOpen && detail != null,
+    onConfirm: () => void recordDebt(),
+    enabled: () => !debtBusy,
+  });
+  useEnterConfirm({
+    active: deleteTarget != null,
+    onConfirm: () => void confirmDelete(),
+    enabled: () => !deleteBusy,
   });
 
   // ──────────────────────────────────────────────────────────────
@@ -1001,13 +1022,16 @@ export function LocalDebtsScreen() {
               <div className="dc-form-grid">
                 <div className="field">
                   <label>طريقة السداد</label>
-                  <select
+                  <Select
                     value={payMethod}
-                    onChange={e => setPayMethod(e.target.value as PayMethod)}>
-                    <option value="cash">نقد</option>
-                    <option value="card">بطاقة</option>
-                    <option value="other">أخرى</option>
-                  </select>
+                    onChange={value => setPayMethod(value as PayMethod)}
+                    options={[
+                      {value: 'cash', label: 'نقد'},
+                      {value: 'card', label: 'بطاقة'},
+                      {value: 'other', label: 'أخرى'},
+                    ]}
+                    ariaLabel="طريقة السداد"
+                  />
                 </div>
                 <div className="field">
                   <label>ملاحظة (اختياري)</label>

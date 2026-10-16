@@ -759,57 +759,136 @@ button.primary > .pos-fkey,
   color: #fff;
 }
 
-/* ───────────────── زر البيع السريع العائم (＋) ─────────────────
-   v60: زر زائد دائري ثابت أسفل الشاشة يفتح نقطة البيع مباشرة
-   من أي شاشة — نفس تدرج الأزرار الأساسية بحجم أكبر وإشعاع أقوى.
-   يظهر في كل الشاشات عدا نقطة البيع نفسها. */
-.pos-fab {
-  position: fixed;
-  bottom: 26px;
-  inset-inline-end: 26px;
-  z-index: 60;
-  width: 58px;
-  height: 58px;
-  border-radius: 50%;
-  border: 1px solid var(--brand-deep);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--brand) 90%, #ffffff 10%) 0%,
-    var(--brand) 45%,
-    var(--brand-strong) 100%
-  );
-  color: #fff;
+/* ───────────────── زر البيع السريع (＋) ─────────────────
+   v61 (الجولة 26 #1): الزر العائم حُذف بطلب التاجر — مكانه مفتاح
+   «+» على الكيبورد يفتح نقطة البيع من أي شاشة (المعالج في app.tsx). */
+
+/* ───────────────── القوائم المنسدلة المخصّصة (v61 #7) ─────────────────
+   بديل <select> الأصلي بكل مواضعه — نفس لغة الحقول مغلقاً، وقائمة
+   عائمة أنيقة مفتوحة: لا ضغط داخل الجداول، انقلاب للأعلى عند ضيق
+   المساحة، وخيار نشط بمحاذاة علامة صح للمختار. */
+.sela-select {
+  position: relative;
+  min-width: 0;
+  display: block;
+}
+.sela-select.disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.sela-select-btn {
+  width: 100%;
   display: flex;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 4px 10px rgba(234, 88, 12, 0.38),
-    0 14px 34px rgba(234, 88, 12, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.34);
-  transition: filter var(--transition),
-    transform 110ms cubic-bezier(0.2, 0.6, 0.3, 1), box-shadow var(--transition);
+  justify-content: space-between;
+  gap: 9px;
+  padding: 10px 13px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: start;
+  transition: border-color var(--transition), box-shadow var(--transition),
+    background-color var(--transition);
 }
-.pos-fab:hover {
-  filter: brightness(1.07);
-  transform: translateY(-2px) scale(1.04);
-  box-shadow: 0 6px 14px rgba(234, 88, 12, 0.44),
-    0 20px 48px rgba(234, 88, 12, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.38);
+:root[data-theme='light'] .sela-select-btn {
+  background: var(--surface);
 }
-.pos-fab:active {
-  transform: translateY(0) scale(0.95);
-  filter: brightness(0.96);
-  box-shadow: 0 2px 6px rgba(234, 88, 12, 0.36),
-    inset 0 2px 6px rgba(120, 40, 0, 0.3);
+.sela-select-btn:hover {
+  border-color: color-mix(in srgb, var(--brand) 55%, var(--line));
 }
-.pos-fab:focus-visible {
-  outline: none;
-  box-shadow: var(--ring), 0 4px 10px rgba(234, 88, 12, 0.38);
+.sela-select.open .sela-select-btn,
+.sela-select-btn:focus-visible {
+  border-color: var(--brand);
+  box-shadow: var(--ring);
 }
-.pos-fab .fab-ring {
+.sela-select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sela-select-value.empty {
+  color: var(--muted);
+  font-weight: 500;
+}
+.sela-select-caret {
+  display: grid;
+  place-items: center;
+  color: var(--ink-soft);
+  transition: transform 140ms ease, color var(--transition);
+}
+.sela-select.open .sela-select-caret {
+  transform: rotate(180deg);
+  color: var(--brand-ink);
+}
+.sela-select-list {
   position: absolute;
-  inset: -5px;
-  border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--brand) 34%, transparent);
-  pointer-events: none;
+  top: calc(100% + 6px);
+  inset-inline: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: 320px;
+  max-height: 264px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-3);
+  padding: 6px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: sela-select-in 110ms ease-out;
+}
+.sela-select-list.flip-up {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+@keyframes sela-select-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+.sela-select-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: start;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.sela-select-opt.active {
+  background: var(--surface-2);
+}
+.sela-select-opt.selected {
+  color: var(--brand-ink);
+  font-weight: 800;
+}
+.sela-select-opt.selected.active {
+  background: var(--brand-soft);
+}
+.sela-select-opt:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.sela-select-opt svg {
+  color: var(--brand);
+  flex-shrink: 0;
 }
 
 /* ─────────────────────── صف إشعار مركز التنبيهات ───────────────────

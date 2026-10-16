@@ -50,6 +50,7 @@ import type {
   VoucherRedemptionRow,
 } from '../core/types';
 import {Icon} from '../components/Icon';
+import {useEnterConfirm} from '../lib/useEnterConfirm';
 import './sila.css';
 
 // ── ثوابت العرض ──────────────────────────────────────────────────
@@ -310,6 +311,14 @@ function VoucherRedeemModal({
     step.phase,
     toast,
   ]);
+
+  // v61 (الجولة 26 #6): Enter يصرف القسيمة مباشرة في مرحلة الإدخال
+  // (نفس زر «صرف القسيمة» وبنفس شرطه — كود غير فارغ).
+  useEnterConfirm({
+    active: open && step.phase === 'input',
+    onConfirm: () => void submit(),
+    enabled: () => codeText.trim().length > 0,
+  });
 
   const reprint = useCallback(async () => {
     if (step.phase !== 'success') {

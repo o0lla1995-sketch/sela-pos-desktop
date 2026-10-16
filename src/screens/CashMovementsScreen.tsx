@@ -39,6 +39,7 @@ import type {
   CashMovementRecord,
   CashMovementTotals,
 } from '../core/types';
+import {Select} from '../components/Select';
 import './debtscash.css';
 
 type KindFilter = 'all' | 'expense' | 'withdrawal' | 'deposit';
@@ -640,15 +641,15 @@ export function CashMovementsScreen() {
               {formMode === 'expense' && (
                 <div className="field">
                   <label>فئة المصروف</label>
-                  <select
+                  <Select
                     value={category}
-                    onChange={e => setCategory(e.target.value)}>
-                    {EXPENSE_CATEGORIES.map(c => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setCategory}
+                    options={EXPENSE_CATEGORIES.map(c => ({
+                      value: c,
+                      label: c,
+                    }))}
+                    ariaLabel="فئة المصروف"
+                  />
                 </div>
               )}
               <div className="field">

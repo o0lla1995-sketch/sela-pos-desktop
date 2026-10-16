@@ -245,7 +245,12 @@ export function SecurityPanel() {
         </div>
       ) : (
         <div className="card sv57-sec" style={{alignItems: 'center', gap: 10}}>
+          {/* v61 (الجولة 26 #5): key=flow — كل خطوة من المسار تركّب لوحة
+              جديدة فارغة. البقعة القديمة: اللوحة تبقى محمّلة بأرقام
+              الخطوة السابقة فتتجاهل الضغط الرابع وكان التاجر يمسح
+              الرموز بيده ليُدخل الرمز الجديد/التأكيد. */}
           <PinPad
+            key={flow}
             title={FLOW_TITLES[flow].title}
             subtitle={FLOW_TITLES[flow].subtitle}
             verify={padVerify}

@@ -48,6 +48,8 @@ import {formatMoney, parseNumber} from '../core/format';
 import {daysUntilExpiry, expiryStateOf} from '../core/types';
 import type {Category, Product, ProductUnit, Unit} from '../core/types';
 import {Icon} from '../components/Icon';
+import {Select} from '../components/Select';
+import {useEnterConfirm} from '../lib/useEnterConfirm';
 import './inventoryv57.css';
 
 /* ── أنواع المسودات ──────────────────────────────────────────── */
@@ -266,8 +268,17 @@ export function ProductFormModal({
   const [customSizeName, setCustomSizeName] = useState('');
 
   // ── استلام البضاعة (v16/v38) ─────────────────────────────────
+  /** v61 (الجولة 26 #4): منتج جديد بنمط استلام يفتح على وضع الاستلام
+   *  المناسب للمجال (كرتونة/علبة — أو كيساً للفواكه) — القسم الأول
+   *  جاهز للإدخال فور فتح النافذة. التعديل يظل «بلا استلام». */
+  const defaultReceiveMode = useCallback((): 'none' | 'carton' | 'bag' => {
+    if (!modeConfig.receiving) {
+      return 'none';
+    }
+    return modeConfig.receivingByContainer ? 'carton' : 'bag';
+  }, [modeConfig]);
   const [receiveMode, setReceiveMode] = useState<'none' | 'carton' | 'bag'>(
-    'none',
+    productProp == null ? defaultReceiveMode() : 'none',
   );
   const [intakeAdd, setIntakeAdd] = useState(true);
   const [cartonsCount, setCartonsCount] = useState('');
@@ -1645,7 +1656,7 @@ export function ProductFormModal({
     setExpiryDateText('');
     setDurationValue('');
     setDurationUnit('days');
-    setReceiveMode('none');
+    setReceiveMode(defaultReceiveMode());
     setIntakeAdd(true);
     setCartonsCount('');
     setPiecesPerCarton('');
@@ -1770,7 +1781,76 @@ export function ProductFormModal({
     return () => window.removeEventListener('keydown', onKey, true);
   }, [busy, loading]);
 
+  // v61 (الجولة 26 #6): Enter يحفظ المنتج مباشرة — إلا داخل حقول
+  // الإدخال (مسح الباركود يرسل Enter وسيحفظ منتجاً نصف مكتمل)؛
+  // داخل الحقول يبقى Ctrl+S كما كان.
+  useEnterConfirm({
+    active: !loading,
+    onConfirm: () => {
+      if (!busy) {
+        void saveRef.current(false);
+      }
+    },
+    enabled: () => !busy,
+    skipOnInputs: true,
+  });
+
   /* ── العرض ─────────────────────────────────────────────────── */
+
+  /* ── v61 (الجولة 26 #4): ترقيم الأقسام ديناميكياً ──────────────
+   * استلام البضاعة أول الأقسام (بطلب التاجر) والأقسام المخفية بنمط
+   * آخر لا تترك فراغاً في التسلسل. */
+  const secNums = useMemo(() => {
+    let n = 0;
+    const next = () => ++n;
+    const receiving = modeConfig.receiving ? next() : null;
+    const essentials = next();
+    const inventory = next();
+    const expiry = modeConfig.expiry !== 'hidden' ? next() : null;
+    const barcode = next();
+    const lot = isClothingMode && editingId == null ? next() : null;
+    const model = isClothingMode && variantDrafts.length > 0 ? next() : null;
+    const sizes = showSizesSection ? next() : null;
+    const units = next();
+    return {
+      receiving,
+      essentials,
+      inventory,
+      expiry,
+      barcode,
+      lot,
+      model,
+      sizes,
+      units,
+    };
+  }, [modeConfig, isClothingMode, editingId, variantDrafts.length, showSizesSection]);
+
+  /** v61: خيارات وحدة الأساس — «قطعة» الافتراضية + وحدات النمط
+   *  (أو خيارات المجال للصيدلية/المطعم)، والقيمة المحفوظة المخصّصة
+   *  تبقى ضمن الخيارات كي لا تضيع عند التعديل. */
+  const baseUnitOptions = useMemo(() => {
+    const names: string[] = [];
+    const push = (name: string | null | undefined): void => {
+      if (name == null || name.trim() === '' || names.includes(name)) {
+        return;
+      }
+      names.push(name);
+    };
+    if (baseUnitChoices != null) {
+      baseUnitChoices.forEach(push);
+      push(BASE_UNIT_NAME);
+    } else {
+      push(BASE_UNIT_NAME);
+      units.forEach(unit => push(unit.name));
+    }
+    push(baseUnitName);
+    return names.map(name => ({
+      value: name,
+      label:
+        name === BASE_UNIT_NAME ? `${BASE_UNIT_NAME} — الافتراضي` : name,
+    }));
+  }, [baseUnitChoices, units, baseUnitName]);
+
   return (
     <div className="overlay pf-overlay">
       <div className="modal pf-modal">
@@ -1816,12 +1896,210 @@ export function ProductFormModal({
               )}
 
               <div className="pf-cols">
-                {/* ── العمود الأول: الأساسيات والأسعار والمخزون ── */}
+                {/* ── العمود الأول: الاستلام ثم الأساسيات والمخزون ──
+                    v61 (الجولة 26 #4): استلام البضاعة أول الأقسام —
+                    أول ما يُدخل عند إضافة منتج بنمط المتجر. ── */}
                 <div className="pf-col">
+                  {/* استلام البضاعة */}
+                  {modeConfig.receiving && (
+                    <section className="pf-sec">
+                      <div className="pf-sec-h">
+                        <b><span className="pf-sec-num">{secNums.receiving}</span>استلام البضاعة</b>
+                        <span className="pf-sec-sub">
+                          تعبئة تلقائية: الكمية والتكلفة واقتراح الأسعار
+                        </span>
+                      </div>
+                      <div className="pf-receive">
+                        <div className="iv57-chips">
+                          <button
+                            type="button"
+                            className={`iv57-chip ${receiveMode === 'none' ? 'on' : ''}`}
+                            onClick={() => switchReceiveMode('none')}>
+                            بلا استلام
+                          </button>
+                          {modeConfig.receivingByContainer && (
+                            <button
+                              type="button"
+                              className={`iv57-chip ${receiveMode === 'carton' ? 'on' : ''}`}
+                              onClick={() => switchReceiveMode('carton')}>
+                              بال{
+                                modeConfig.receivingLabels?.container ?? 'كرتونة'
+                              }
+                            </button>
+                          )}
+                          {modeConfig.receivingByBag && (
+                            <button
+                              type="button"
+                              className={`iv57-chip ${receiveMode === 'bag' ? 'on' : ''}`}
+                              onClick={() => switchReceiveMode('bag')}>
+                              بالكيس وزناً
+                            </button>
+                          )}
+                          {editingId != null && receiveMode !== 'none' && (
+                            <Switch
+                              checked={intakeAdd}
+                              onChange={setIntakeAdd}
+                              label={intakeAdd ? 'إضافة للموجود' : 'تعيين الكمية'}
+                            />
+                          )}
+                        </div>
+                        {receiveMode === 'carton' && (
+                          <>
+                            <div className="pf-grid3">
+                              <div className="pf-field">
+                                <label>
+                                  عدد{' '}
+                                  {modeConfig.receivingLabels?.container ?? 'كرتونة'}
+                                </label>
+                                <input
+                                  className="iv57-num"
+                                  inputMode="decimal"
+                                  value={cartonsCount}
+                                  onChange={e => setCartonsCount(e.target.value)}
+                                  placeholder="0"
+                                />
+                              </div>
+                              <div className="pf-field">
+                                <label>
+                                  {modeConfig.receivingLabels?.perContainer ??
+                                    'قطع بالكرتونة'}
+                                </label>
+                                <input
+                                  className="iv57-num"
+                                  inputMode="decimal"
+                                  value={piecesPerCarton}
+                                  onChange={e => setPiecesPerCarton(e.target.value)}
+                                  placeholder="0"
+                                />
+                              </div>
+                              <div className="pf-field">
+                                <label>سعر ال{
+                                  modeConfig.receivingLabels?.container ?? 'الكرتونة'
+                                } (₪)</label>
+                                <input
+                                  className="iv57-num"
+                                  inputMode="decimal"
+                                  value={cartonCost}
+                                  onChange={e => setCartonCost(e.target.value)}
+                                  placeholder="0.00"
+                                />
+                              </div>
+                            </div>
+                            {cartonMath != null && (
+                              <div className="pf-receive-math">
+                                {cartonMath.totalPieces} قطعة إجمالاً
+                                {cartonMath.perPiece != null && (
+                                  <>
+                                    {' '}
+                                    · تكلفة القطعة{' '}
+                                    <b>
+                                      {(
+                                        Math.round(cartonMath.perPiece * 1000) /
+                                        1000
+                                      ).toFixed(3)}
+                                    </b>{' '}
+                                    ₪
+                                  </>
+                                )}
+                                <div className="iv57-chips" style={{marginTop: 6}}>
+                                  <button
+                                    type="button"
+                                    className="btn sm"
+                                    onClick={() =>
+                                      applyReceivingPrices(
+                                        cartonMath.retail,
+                                        cartonMath.wholesale,
+                                      )
+                                    }>
+                                    اعتماد المقترح: مفرق{' '}
+                                    {cartonMath.retail?.toFixed(2)} ₪ · جملة{' '}
+                                    {cartonMath.wholesale?.toFixed(2)} ₪
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                        {receiveMode === 'bag' && (
+                          <>
+                            <div className="pf-grid3">
+                              <div className="pf-field">
+                                <label>عدد الأكياس</label>
+                                <input
+                                  className="iv57-num"
+                                  inputMode="decimal"
+                                  value={bagsCount}
+                                  onChange={e => setBagsCount(e.target.value)}
+                                  placeholder="0"
+                                />
+                              </div>
+                              <div className="pf-field">
+                                <label>كغ بالكيس</label>
+                                <input
+                                  className="iv57-num"
+                                  inputMode="decimal"
+                                  value={kgPerBag}
+                                  onChange={e => setKgPerBag(e.target.value)}
+                                  placeholder="0.0"
+                                />
+                              </div>
+                              <div className="pf-field">
+                                <label>سعر الكيس (₪)</label>
+                                <input
+                                  className="iv57-num"
+                                  inputMode="decimal"
+                                  value={bagCost}
+                                  onChange={e => setBagCost(e.target.value)}
+                                  placeholder="0.00"
+                                />
+                              </div>
+                            </div>
+                            {bagMath != null && (
+                              <div className="pf-receive-math">
+                                {bagMath.totalKg} كغ إجمالاً
+                                {bagMath.perKg != null && (
+                                  <>
+                                    {' '}
+                                    · تكلفة الكيلو{' '}
+                                    <b>
+                                      {(Math.round(bagMath.perKg * 1000) / 1000).toFixed(3)}
+                                    </b>{' '}
+                                    ₪
+                                  </>
+                                )}
+                                <div className="iv57-chips" style={{marginTop: 6}}>
+                                  <button
+                                    type="button"
+                                    className="btn sm"
+                                    onClick={() =>
+                                      applyReceivingPrices(
+                                        bagMath.retail,
+                                        bagMath.wholesale,
+                                      )
+                                    }>
+                                    اعتماد المقترح: كيلو مفرق{' '}
+                                    {bagMath.retail?.toFixed(2)} ₪ · جملة{' '}
+                                    {bagMath.wholesale?.toFixed(2)} ₪
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                        {receiveMode === 'none' && (
+                          <span className="iv57-hint">
+                            اختر كيف وصلت البضاعة — الكمية والتكلفة
+                            والأسعار المقترحة وصف وحدة العبوة تُملأ تلقائياً.
+                          </span>
+                        )}
+                      </div>
+                    </section>
+                  )}
+
                   <section className="pf-sec pf-sec-essentials">
                     <div className="pf-sec-h">
                       <b>
-                        <span className="pf-sec-num">1</span>
+                        <span className="pf-sec-num">{secNums.essentials}</span>
                         الأساسيات والأسعار
                       </b>
                       <span className="pf-sec-sub">{copy.priceHint}</span>
@@ -2041,7 +2319,7 @@ export function ProductFormModal({
                   {/* ── المخزون ── */}
                   <section className="pf-sec">
                     <div className="pf-sec-h">
-                      <b><span className="pf-sec-num">2</span>المخزون والتتبع</b>
+                      <b><span className="pf-sec-num">{secNums.inventory}</span>المخزون والتتبع</b>
                       <span className="pf-sec-sub">
                         {saleMode === 'weight'
                           ? 'منتج وزن — الأسعار والمخزون بالكيلوغرام'
@@ -2149,36 +2427,26 @@ export function ProductFormModal({
                       </>
                     )}
 
-                    {/* v35: وحدة الأساس بلغة المجال */}
+                    {/* v61 (الجولة 26 #4): وحدة الأساس — حقل مُسيَّج
+                        حقيقي بقائمة منسدلة أنيقة (كان حقلاً عارياً
+                        بلا إطار ولا سياق) بخيارات وحدات النمط. */}
                     {!isClothingMode && (
-                      <div>
-                        <label style={{fontSize: 11.5, color: 'var(--ink-soft)', fontWeight: 700}}>
-                          وحدة الأساس (تظهر في البيع والفواتير)
-                        </label>
-                        {baseUnitChoices != null ? (
-                          <div className="iv57-chips" style={{marginTop: 6}}>
-                            {baseUnitChoices.map(unit => (
-                              <button
-                                type="button"
-                                key={unit}
-                                className={`iv57-chip ${
-                                  (baseUnitName ?? baseUnitChoices[0]) === unit
-                                    ? 'on'
-                                    : ''
-                                }`}
-                                onClick={() => setBaseUnitName(unit)}>
-                                بال{unit}
-                              </button>
-                            ))}
-                          </div>
-                        ) : (
-                          <input
-                            style={{marginTop: 6}}
-                            value={baseUnitName ?? ''}
-                            onChange={e => setBaseUnitName(e.target.value)}
-                            placeholder={`قطعة — افتراضي (${BASE_UNIT_NAME})`}
-                          />
-                        )}
+                      <div className="pf-field">
+                        <label>وحدة الأساس (تظهر في البيع والفواتير)</label>
+                        <Select
+                          value={
+                            baseUnitName ??
+                            baseUnitOptions[0]?.value ??
+                            BASE_UNIT_NAME
+                          }
+                          onChange={setBaseUnitName}
+                          options={baseUnitOptions}
+                          ariaLabel="وحدة الأساس"
+                        />
+                        <span className="iv57-hint">
+                          هي ما يُخصم منه المخزون عند البيع — ووحدات أكبر
+                          (كرتونة…) تُبنى في قسم وحدات البيع.
+                        </span>
                       </div>
                     )}
                   </section>
@@ -2187,7 +2455,7 @@ export function ProductFormModal({
                   {modeConfig.expiry !== 'hidden' && (
                     <section className="pf-sec">
                       <div className="pf-sec-h">
-                        <b><span className="pf-sec-num">3</span>الصلاحية</b>
+                        <b><span className="pf-sec-num">{secNums.expiry}</span>الصلاحية</b>
                         {expiryStatus != null && (
                           <span
                             className={`iv57-mini-chip ${
@@ -2245,16 +2513,19 @@ export function ProductFormModal({
                           </div>
                           <div className="pf-field">
                             <label>الوحدة</label>
-                            <select
+                            <Select
                               value={durationUnit}
-                              onChange={e =>
+                              onChange={value =>
                                 setDurationUnit(
-                                  e.target.value === 'months' ? 'months' : 'days',
+                                  value === 'months' ? 'months' : 'days',
                                 )
-                              }>
-                              <option value="days">أيام</option>
-                              <option value="months">أشهر</option>
-                            </select>
+                              }
+                              options={[
+                                {value: 'days', label: 'أيام'},
+                                {value: 'months', label: 'أشهر'},
+                              ]}
+                              ariaLabel="وحدة مدة الصلاحية"
+                            />
                           </div>
                         </div>
                       )}
@@ -2267,7 +2538,7 @@ export function ProductFormModal({
                   {/* الباركود والملصق */}
                   <section className="pf-sec">
                     <div className="pf-sec-h">
-                      <b><span className="pf-sec-num">4</span>الباركود والملصق</b>
+                      <b><span className="pf-sec-num">{secNums.barcode}</span>الباركود والملصق</b>
                       {barcode.trim().length > 0 && (
                         <span
                           className={`iv57-mini-chip ${barcodeValid ? 'ok' : 'warn'}`}>
@@ -2287,11 +2558,17 @@ export function ProductFormModal({
                       </div>
                       <button
                         type="button"
-                        className="btn sm"
+                        className="btn sm pf-barcode-gen"
                         disabled={labelBusy}
                         onClick={() => void generateBarcode()}
                         title="توليد EAN-13 داخلي فريد (بادئة 20…)">
-                        {labelBusy ? '…' : '⚡ توليد داخلي'}
+                        {labelBusy ? (
+                          '…'
+                        ) : (
+                          <>
+                            <Icon name="flash" size={15} /> توليد داخلي
+                          </>
+                        )}
                       </button>
                     </div>
                     <div className="iv57-chips">
@@ -2321,7 +2598,7 @@ export function ProductFormModal({
                   {isClothingMode && editingId == null && (
                     <section className="pf-sec">
                       <div className="pf-sec-h">
-                        <b><span className="pf-sec-num">5</span>الربطة (المقاسات والألوان وعدد الربط)</b>
+                        <b><span className="pf-sec-num">{secNums.lot}</span>الربطة (المقاسات والألوان وعدد الربط)</b>
                         <span className="pf-sec-sub">
                           {lotSizes.length > 0 && lotColors.length > 0
                             ? `${lotColors.length} لون × ${lotSizes.length} مقاس × ${bundlesCount} ربط = ${
@@ -2442,7 +2719,7 @@ export function ProductFormModal({
                   {isClothingMode && variantDrafts.length > 0 && (
                     <section className="pf-sec">
                       <div className="pf-sec-h">
-                        <b><span className="pf-sec-num">6</span>مخزون الموديل (لون × مقاس)</b>
+                        <b><span className="pf-sec-num">{secNums.model}</span>مخزون الموديل (لون × مقاس)</b>
                         <span className="pf-sec-sub">
                           {variantTotals.pieces} قطعة إجمالاً ·{' '}
                           {variantTotals.colors} لون · {variantTotals.sizes} مقاس
@@ -2509,7 +2786,7 @@ export function ProductFormModal({
                   {showSizesSection && (
                     <section className="pf-sec">
                       <div className="pf-sec-h">
-                        <b><span className="pf-sec-num">7</span>الأحجام بأسعار مستقلة</b>
+                        <b><span className="pf-sec-num">{secNums.sizes}</span>الأحجام بأسعار مستقلة</b>
                         <Switch
                           checked={sizesEnabled}
                           onChange={setSizesEnabled}
@@ -2626,7 +2903,7 @@ export function ProductFormModal({
                   {/* وحدات البيع */}
                   <section className="pf-sec">
                     <div className="pf-sec-h">
-                      <b><span className="pf-sec-num">8</span>وحدات البيع</b>
+                      <b><span className="pf-sec-num">{secNums.units}</span>وحدات البيع</b>
                       <span className="pf-sec-sub">
                         {unitRows.length === 0
                           ? 'لا وحدات — يُباع بوحدة الأساس'
@@ -2660,35 +2937,46 @@ export function ProductFormModal({
                             const unitKnown = units.some(
                               unit => unit.id === row.unit_id,
                             );
+                            // v61 (الجولة 26 #4): قائمة منسدلة مخصّصة —
+                            // القائمة الأصلية كانت مضغوطة داخل الخلية.
+                            const unitSelectOptions: {
+                              value: string;
+                              label: string;
+                            }[] = [];
+                            if (!unitKnown) {
+                              unitSelectOptions.push({
+                                value: String(row.unit_id),
+                                label:
+                                  unitNameById.get(row.unit_id) ?? 'وحدة',
+                              });
+                            }
+                            units
+                              .filter(
+                                unit =>
+                                  unit.id === row.unit_id ||
+                                  !unitRows.some(
+                                    other => other.unit_id === unit.id,
+                                  ),
+                              )
+                              .forEach(unit =>
+                                unitSelectOptions.push({
+                                  value: String(unit.id),
+                                  label: unit.name,
+                                }),
+                              );
                             return (
                               <tr key={`unitrow-${index}`}>
                                 <td>
-                                  <select
-                                    value={row.unit_id}
-                                    onChange={e =>
+                                  <Select
+                                    value={String(row.unit_id)}
+                                    onChange={value =>
                                       updateUnitRow(index, {
-                                        unit_id: Number(e.target.value),
+                                        unit_id: Number(value),
                                       })
-                                    }>
-                                    {!unitKnown && (
-                                      <option value={row.unit_id}>
-                                        {unitNameById.get(row.unit_id) ?? 'وحدة'}
-                                      </option>
-                                    )}
-                                    {units
-                                      .filter(
-                                        unit =>
-                                          unit.id === row.unit_id ||
-                                          !unitRows.some(
-                                            other => other.unit_id === unit.id,
-                                          ),
-                                      )
-                                      .map(unit => (
-                                        <option key={unit.id} value={unit.id}>
-                                          {unit.name}
-                                        </option>
-                                      ))}
-                                  </select>
+                                    }
+                                    options={unitSelectOptions}
+                                    ariaLabel="وحدة البيع"
+                                  />
                                 </td>
                                 <td>
                                   <input
@@ -2795,201 +3083,6 @@ export function ProductFormModal({
                     )}
                   </section>
 
-                  {/* استلام البضاعة */}
-                  {modeConfig.receiving && (
-                    <section className="pf-sec">
-                      <div className="pf-sec-h">
-                        <b><span className="pf-sec-num">9</span>استلام البضاعة</b>
-                        <span className="pf-sec-sub">
-                          تعبئة تلقائية: الكمية والتكلفة واقتراح الأسعار
-                        </span>
-                      </div>
-                      <div className="pf-receive">
-                        <div className="iv57-chips">
-                          <button
-                            type="button"
-                            className={`iv57-chip ${receiveMode === 'none' ? 'on' : ''}`}
-                            onClick={() => switchReceiveMode('none')}>
-                            بلا استلام
-                          </button>
-                          {modeConfig.receivingByContainer && (
-                            <button
-                              type="button"
-                              className={`iv57-chip ${receiveMode === 'carton' ? 'on' : ''}`}
-                              onClick={() => switchReceiveMode('carton')}>
-                              بال{
-                                modeConfig.receivingLabels?.container ?? 'كرتونة'
-                              }
-                            </button>
-                          )}
-                          {modeConfig.receivingByBag && (
-                            <button
-                              type="button"
-                              className={`iv57-chip ${receiveMode === 'bag' ? 'on' : ''}`}
-                              onClick={() => switchReceiveMode('bag')}>
-                              بالكيس وزناً
-                            </button>
-                          )}
-                          {editingId != null && receiveMode !== 'none' && (
-                            <Switch
-                              checked={intakeAdd}
-                              onChange={setIntakeAdd}
-                              label={intakeAdd ? 'إضافة للموجود' : 'تعيين الكمية'}
-                            />
-                          )}
-                        </div>
-                        {receiveMode === 'carton' && (
-                          <>
-                            <div className="pf-grid3">
-                              <div className="pf-field">
-                                <label>
-                                  عدد{' '}
-                                  {modeConfig.receivingLabels?.container ?? 'كرتونة'}
-                                </label>
-                                <input
-                                  className="iv57-num"
-                                  inputMode="decimal"
-                                  value={cartonsCount}
-                                  onChange={e => setCartonsCount(e.target.value)}
-                                  placeholder="0"
-                                />
-                              </div>
-                              <div className="pf-field">
-                                <label>
-                                  {modeConfig.receivingLabels?.perContainer ??
-                                    'قطع بالكرتونة'}
-                                </label>
-                                <input
-                                  className="iv57-num"
-                                  inputMode="decimal"
-                                  value={piecesPerCarton}
-                                  onChange={e => setPiecesPerCarton(e.target.value)}
-                                  placeholder="0"
-                                />
-                              </div>
-                              <div className="pf-field">
-                                <label>سعر ال{
-                                  modeConfig.receivingLabels?.container ?? 'الكرتونة'
-                                } (₪)</label>
-                                <input
-                                  className="iv57-num"
-                                  inputMode="decimal"
-                                  value={cartonCost}
-                                  onChange={e => setCartonCost(e.target.value)}
-                                  placeholder="0.00"
-                                />
-                              </div>
-                            </div>
-                            {cartonMath != null && (
-                              <div className="pf-receive-math">
-                                {cartonMath.totalPieces} قطعة إجمالاً
-                                {cartonMath.perPiece != null && (
-                                  <>
-                                    {' '}
-                                    · تكلفة القطعة{' '}
-                                    <b>
-                                      {(
-                                        Math.round(cartonMath.perPiece * 1000) /
-                                        1000
-                                      ).toFixed(3)}
-                                    </b>{' '}
-                                    ₪
-                                  </>
-                                )}
-                                <div className="iv57-chips" style={{marginTop: 6}}>
-                                  <button
-                                    type="button"
-                                    className="btn sm"
-                                    onClick={() =>
-                                      applyReceivingPrices(
-                                        cartonMath.retail,
-                                        cartonMath.wholesale,
-                                      )
-                                    }>
-                                    اعتماد المقترح: مفرق{' '}
-                                    {cartonMath.retail?.toFixed(2)} ₪ · جملة{' '}
-                                    {cartonMath.wholesale?.toFixed(2)} ₪
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </>
-                        )}
-                        {receiveMode === 'bag' && (
-                          <>
-                            <div className="pf-grid3">
-                              <div className="pf-field">
-                                <label>عدد الأكياس</label>
-                                <input
-                                  className="iv57-num"
-                                  inputMode="decimal"
-                                  value={bagsCount}
-                                  onChange={e => setBagsCount(e.target.value)}
-                                  placeholder="0"
-                                />
-                              </div>
-                              <div className="pf-field">
-                                <label>كغ بالكيس</label>
-                                <input
-                                  className="iv57-num"
-                                  inputMode="decimal"
-                                  value={kgPerBag}
-                                  onChange={e => setKgPerBag(e.target.value)}
-                                  placeholder="0.0"
-                                />
-                              </div>
-                              <div className="pf-field">
-                                <label>سعر الكيس (₪)</label>
-                                <input
-                                  className="iv57-num"
-                                  inputMode="decimal"
-                                  value={bagCost}
-                                  onChange={e => setBagCost(e.target.value)}
-                                  placeholder="0.00"
-                                />
-                              </div>
-                            </div>
-                            {bagMath != null && (
-                              <div className="pf-receive-math">
-                                {bagMath.totalKg} كغ إجمالاً
-                                {bagMath.perKg != null && (
-                                  <>
-                                    {' '}
-                                    · تكلفة الكيلو{' '}
-                                    <b>
-                                      {(Math.round(bagMath.perKg * 1000) / 1000).toFixed(3)}
-                                    </b>{' '}
-                                    ₪
-                                  </>
-                                )}
-                                <div className="iv57-chips" style={{marginTop: 6}}>
-                                  <button
-                                    type="button"
-                                    className="btn sm"
-                                    onClick={() =>
-                                      applyReceivingPrices(
-                                        bagMath.retail,
-                                        bagMath.wholesale,
-                                      )
-                                    }>
-                                    اعتماد المقترح: كيلو مفرق{' '}
-                                    {bagMath.retail?.toFixed(2)} ₪ · جملة{' '}
-                                    {bagMath.wholesale?.toFixed(2)} ₪
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </>
-                        )}
-                        {receiveMode === 'none' && (
-                          <span className="iv57-hint">
-                            اختر كيف وصلت البضاعة — الكمية والتكلفة
-                            والأسعار المقترحة وصف وحدة العبوة تُملأ تلقائياً.
-                          </span>
-                        )}
-                      </div>
-                    </section>
-                  )}
                 </div>
               </div>
             </div>

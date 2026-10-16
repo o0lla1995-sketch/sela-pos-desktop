@@ -35,6 +35,7 @@ import {SilaRepo} from '../services/sila/SilaRepo';
 import {applyProductDiscount} from '../stores/cartStore';
 import {buildReturnReceiptJob} from '../services/printer/returnReceipt';
 import {ThermalPrinterService} from '../services/printer/ThermalPrinterService';
+import {useEnterConfirm} from '../lib/useEnterConfirm';
 import {Icon} from '../components/Icon';
 import type {ReceiptSettings} from '../services/printer/receipt';
 import {
@@ -456,6 +457,7 @@ export function InvoicesScreen() {
           saleId={detailId}
           receiptSettings={receiptSettings}
           reloadSignal={detailReload}
+          enterEnabled={returnId == null}
           onClose={() => setDetailId(null)}
           onReturn={() => setReturnId(detailId)}
         />
@@ -486,12 +488,15 @@ function DetailModal({
   saleId,
   receiptSettings,
   reloadSignal,
+  enterEnabled,
   onClose,
   onReturn,
 }: {
   saleId: number;
   receiptSettings: ReceiptSettings;
   reloadSignal: number;
+  /** v61: Enter يغلق النافذة (زر «تم») — إلا والنافذة الإرجاع فوقها. */
+  enterEnabled: boolean;
   onClose: () => void;
   onReturn: () => void;
 }) {
@@ -515,6 +520,13 @@ function DetailModal({
   } | null>(null);
   const [reprinting, setReprinting] = useState(false);
   const [retPrintId, setRetPrintId] = useState<number | null>(null);
+
+  // v61 (الجولة 26 #6): Enter يغلق تفاصيل الفاتورة — نفس زر «تم»
+  // (معطّل ونافذة الإرجاع مفتوحة فوقها).
+  useEnterConfirm({
+    active: enterEnabled,
+    onConfirm: onClose,
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1144,6 +1156,14 @@ function ReturnModal({
   ]);
 
   const blocked = debtState.kind === 'blocked';
+
+  // v61 (الجولة 26 #6): Enter يؤكد الإرجاع/الاستبدال مباشرة بنفس
+  // حراس زر التأكيد — معطّل أثناء نافذة اختيار البدائل المفتوحة.
+  useEnterConfirm({
+    active: !loading && error == null && !exchangeOpen,
+    onConfirm: () => void confirm(),
+    enabled: () => !busy && !blocked && refundTotal > 0 && pickedCount > 0,
+  });
 
   return (
     <>
@@ -1781,6 +1801,14 @@ function ExchangeModal({
                   inputMode="decimal"
                   value={qtyText}
                   onChange={e => setQtyText(e.target.value)}
+                  onKeyDown={e => {
+                    // v61 (الجولة 26 #6): Enter يضيف البديل الحالي
+                    // مباشرة من حقل الكمية.
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (qtyValid) addCurrent();
+                    }
+                  }}
                 />
               </div>
               <div className="ih-price-line">

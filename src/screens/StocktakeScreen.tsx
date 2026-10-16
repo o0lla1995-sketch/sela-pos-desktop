@@ -32,6 +32,7 @@ import {formatDateTime, formatMoney, formatQty, parseNumber} from '../core/forma
 import {Icon} from '../components/Icon';
 import {buildStocktakeReportJob} from '../services/printer/stocktakeReceipt';
 import {printJob} from '../printing/dispatch';
+import {useEnterConfirm} from '../lib/useEnterConfirm';
 import type {ReceiptSettings} from '../services/printer/receipt';
 import type {
   Category,
@@ -240,6 +241,14 @@ export function StocktakeScreen() {
     },
     [session, completing, pushNotification, loadAll, refreshCatalog, toast],
   );
+
+  // v61 (الجولة 26 #6): Enter في نافذة إنهاء الجرد = «إنهاء وتعديل
+  // المخزون» (الزر الأساسي) — Escape يبقى للتراجع.
+  useEnterConfirm({
+    active: completeOpen,
+    onConfirm: () => void completeSession(true),
+    enabled: () => !completing,
+  });
 
   const cancelSession = useCallback(async () => {
     if (session == null || cancelBusy) {

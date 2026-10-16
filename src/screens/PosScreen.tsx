@@ -40,12 +40,12 @@ import {ThermalPrinterService} from '../services/printer/ThermalPrinterService';
 import {usePrinterStore} from '../stores/printerStore';
 import {setActiveBarcodeHandler, beep} from '../lib/scanner';
 import {useAmountKeyboard} from '../lib/useAmountKeyboard';
+import {useEnterConfirm} from '../lib/useEnterConfirm';
 import {
   formatMoney,
   localToday,
 } from '../core/format';
 import {
-  QUICK_WEIGHTS,
   WEIGHT_QTY_DECIMALS,
 } from '../core/config';
 import {applyAmountKey, AMOUNT_KEYPAD_KEYS} from '../core/amountKeypad';
@@ -100,8 +100,9 @@ interface DebtConfirmState {
   creditMinor?: number;
 }
 
-/** أزرار النقد السريع في لوحة الدفع. */
-const QUICK_CASH = [20, 50, 100, 200];
+/** v61 (الجولة 26 #3): أزرار النقد السريع والمبالغ المقترحة حُذفت بطلب
+ * التاجر — بقيت أزرار «كامل المبلغ» و«تصفير» فقط، وملاحظة الكيبورد
+ * أزيلت من لوحتي الدفع والوزن. */
 
 export function PosScreen() {
   const toast = useToastStore(s => s.show);
@@ -632,12 +633,145 @@ export function PosScreen() {
     return Number.isFinite(paid) ? Math.max(0, paid - totals.total) : 0;
   }, [amountText, totals.total]);
 
-  const addQuickCash = useCallback((amount: number) => {
-    setAmountText(t => {
-      const current = t === '' ? 0 : Number(t) || 0;
-      return String(Math.round((current + amount) * 100) / 100);
-    });
-  }, []);
+  // ── v61 (الجولة 26 #2): التنقل بأسهم الكيبورد في شبكة المنتجات ──
+  // المعيّن يتتبع معرّف المنتج (لا الفهرس) كي يبقى صادقاً مع البحث
+  // والفلاتر. الأسهم تحرّك حلقة التحديد، Enter يضيف المعيّن للسلة،
+  // وEnter داخل حقل البحث يضيف أول نتيجة ويصفّي البحث للمسح التالي.
+  const [selId, setSelId] = useState<number | null>(null);
+  const gridWrapRef = useRef<HTMLDivElement | null>(null);
+
+  /** عدد أعمدة الشبكة الحالي — يقاس من العرض الفعلي (auto-fill). */
+  const gridColumns = useCallback((): number => {
+    if (view === 'list') return 1;
+    const grid = gridWrapRef.current?.querySelector<HTMLElement>(
+      view === 'cards' ? '.pos-grid.cards' : '.pos-grid',
+    );
+    const items = grid?.children;
+    if (items == null || items.length === 0) return 1;
+    const firstTop = (items[0] as HTMLElement).offsetTop;
+    let cols = 0;
+    for (let i = 0; i < items.length; i++) {
+      if ((items[i] as HTMLElement).offsetTop === firstTop) cols++;
+      else break;
+    }
+    return Math.max(1, cols);
+  }, [view]);
+
+  /** فهرس المعيّن الحالي داخل filtered (‎-1 إن لم يعد موجوداً). */
+  const selIndexInFiltered = useCallback((): number => {
+    if (selId == null) return -1;
+    return filtered.findIndex(p => p.id === selId);
+  }, [filtered, selId]);
+
+  const moveSelection = useCallback(
+    (delta: number): void => {
+      if (filtered.length === 0) return;
+      const current = selIndexInFiltered();
+      const next =
+        current === -1
+          ? delta > 0
+            ? 0
+            : filtered.length - 1
+          : Math.max(0, Math.min(filtered.length - 1, current + delta));
+      setSelId(filtered[next].id);
+    },
+    [filtered, selIndexInFiltered],
+  );
+
+  // سقوط المعيّن عند تغيّر الفلتر/البحث → يُصفّر بدل التعلق بمنتج مخفي.
+  useEffect(() => {
+    if (selId != null && !filtered.some(p => p.id === selId)) {
+      setSelId(null);
+    }
+  }, [filtered, selId]);
+
+  // إبقاء المعيّن داخل مجال الرؤية أثناء التنقل.
+  useEffect(() => {
+    if (selId == null) return;
+    gridWrapRef.current
+      ?.querySelector<HTMLElement>('[data-kbsel="true"]')
+      ?.scrollIntoView({block: 'nearest', inline: 'nearest'});
+  }, [selId]);
+
+  // مستمع الأسهم وEnter — يعمل فقط حين لا نافذة مفتوحة فوق الشبكة.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        paySheet != null ||
+        debtConfirm != null ||
+        debtSheet != null ||
+        voucherSheet ||
+        weightPick != null ||
+        variantPick != null
+      ) {
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      const inField =
+        target != null &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable);
+
+      if (e.key === 'Enter') {
+        // Enter داخل حقل البحث: أضف النتيجة المعيّنة أو الأولى.
+        if (target === searchRef.current) {
+          if (filtered.length === 0) return;
+          e.preventDefault();
+          const product =
+            selId != null
+              ? filtered.find(p => p.id === selId) ?? filtered[0]
+              : filtered[0];
+          tryAdd(product);
+          setSearch('');
+          return;
+        }
+        if (inField) return;
+        if (selId == null) return;
+        const product = filtered.find(p => p.id === selId);
+        if (product != null) {
+          e.preventDefault();
+          tryAdd(product);
+        }
+        return;
+      }
+
+      if (inField) return; // الأسهم داخل الحقول لتحريك المؤشر
+      const cols = gridColumns();
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          moveSelection(cols);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          moveSelection(-cols);
+          break;
+        // الشبكة RTL: العناصر تجري من اليمين لليسار — اليسار = التالي.
+        case 'ArrowLeft':
+          e.preventDefault();
+          moveSelection(1);
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          moveSelection(-1);
+          break;
+        case 'Home':
+          e.preventDefault();
+          if (filtered.length > 0) setSelId(filtered[0].id);
+          break;
+        case 'End':
+          e.preventDefault();
+          if (filtered.length > 0) setSelId(filtered[filtered.length - 1].id);
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [paySheet, debtConfirm, debtSheet, voucherSheet, weightPick, variantPick, filtered, selId, tryAdd, setSearch, moveSelection, gridColumns]);
 
   // ── تأكيد الوزن (زر الإضافة + Enter من الكيبورد) ──
   const confirmWeight = useCallback(() => {
@@ -682,6 +816,75 @@ export function PosScreen() {
     },
     onCancel: () => setVoucherSheet(false),
     hasTextInput: true,
+  });
+
+  // ── v61 (الجولة 26 #6): Enter يؤكد مباشرة في نوافذ البيع ──
+  // تأكيد الدين: Enter = زر «تأكيد الدين وطباعة الإيصال».
+  useEnterConfirm({
+    active: debtConfirm != null,
+    onConfirm: () => {
+      if (debtConfirm != null && !busy) {
+        void completeDebtSale(debtConfirm);
+      }
+    },
+    enabled: () => !busy,
+  });
+  // اختيار زبون صِلة: Enter يختار أول نتيجة مطابقة للبحث.
+  useEnterConfirm({
+    active: debtSheet === 'sila',
+    onConfirm: () => {
+      const q = silaQuery.trim();
+      const hit = silaCustomers.find(c => c.name.includes(q));
+      if (hit == null) return;
+      setDebtConfirm({
+        kind: 'sila',
+        customerId: hit.customer_id,
+        customerName: hit.name,
+        customerPhoneLast4: hit.phone_last4,
+        customerCard: null,
+        offlineQr: null,
+        amountMinor: Math.round(totals.total * 100),
+        creditMinor: hit.credit_minor,
+      });
+      setDebtSheet(null);
+    },
+  });
+  // اختيار زبون الدفتر: Enter يختار أول نتيجة — وإن كُتب في حقول
+  // «زبون جديد» فيُنشئ الحساب ويسجّل الدين عليه مباشرة.
+  useEnterConfirm({
+    active: debtSheet === 'local',
+    onConfirm: () => {
+      const hasCreateText =
+        localCreateName.trim() !== '' ||
+        localCreateId.trim() !== '' ||
+        localCreatePhone.trim() !== '';
+      if (hasCreateText) {
+        void createLocalAndDebt();
+        return;
+      }
+      const q = localQuery.trim();
+      const hit = localCustomers.find(
+        c =>
+          c.customer.name.includes(q) ||
+          c.customer.id_number.includes(q) ||
+          (c.customer.phone ?? '').includes(q),
+      );
+      if (hit == null) return;
+      setDebtConfirm({
+        kind: 'local',
+        customerId: null,
+        localCustomerId: hit.customer.id,
+        customerName: hit.customer.name,
+        customerPhoneLast4:
+          hit.customer.phone != null && hit.customer.phone.length >= 4
+            ? hit.customer.phone.slice(-4)
+            : null,
+        customerCard: null,
+        offlineQr: null,
+        amountMinor: Math.round(totals.total * 100),
+      });
+      setDebtSheet(null);
+    },
   });
 
   return (
@@ -771,7 +974,7 @@ export function PosScreen() {
 
       <div className="pos-body">
         {/* ── شبكة المنتجات ── */}
-        <div className="pos-grid-wrap">
+        <div className="pos-grid-wrap" ref={gridWrapRef}>
           {filtered.length === 0 && (
             <div className="empty">
               <span className="icon">
@@ -792,6 +995,7 @@ export function PosScreen() {
                   price={priceOf(product)}
                   pricingMode={pricingMode}
                   onAdd={tryAdd}
+                  selected={selId === product.id}
                 />
               ))}
             </div>
@@ -805,6 +1009,7 @@ export function PosScreen() {
                   pricingMode={pricingMode}
                   large={view === 'cards'}
                   onAdd={tryAdd}
+                  selected={selId === product.id}
                 />
               ))}
             </div>
@@ -940,20 +1145,7 @@ export function PosScreen() {
               <div className="pos-amount-display" dir="ltr">
                 {amountText === '' ? '0' : amountText} ₪
               </div>
-              <div className="pos-kbd-hint">
-                <Icon name="keyboard" size={14} />
-                اكتب المبلغ من الكيبورد مباشرة — <b>Enter</b> يؤكد البيع
-              </div>
               <div className="pos-quickcash">
-                {QUICK_CASH.map(amount => (
-                  <button
-                    key={amount}
-                    className="btn sm"
-                    dir="ltr"
-                    onClick={() => addQuickCash(amount)}>
-                    +{amount} ₪
-                  </button>
-                ))}
                 <button
                   className="btn sm"
                   onClick={() => setAmountText(String(totals.total))}>
@@ -1046,19 +1238,7 @@ export function PosScreen() {
               <div className="pos-amount-display" dir="ltr">
                 {weightValue === '' ? '0' : weightValue} كغ
               </div>
-              <div className="pos-kbd-hint">
-                <Icon name="keyboard" size={14} />
-                اكتب الوزن من الكيبورد مباشرة — <b>Enter</b> يضيف للسلة
-              </div>
               <div className="pos-quickcash">
-                {QUICK_WEIGHTS.map(w => (
-                  <button
-                    key={w.kg}
-                    className="btn sm"
-                    onClick={() => setWeightValue(String(w.kg))}>
-                    {w.label}
-                  </button>
-                ))}
                 <button className="btn sm ghost" onClick={() => setWeightValue('')}>
                   تصفير
                 </button>
@@ -1453,19 +1633,22 @@ const ProductTile = React.memo(function ProductTile({
   pricingMode,
   large,
   onAdd,
+  selected,
 }: {
   product: Product;
   price: number;
   pricingMode: 'RETAIL' | 'WHOLESALE';
   large: boolean;
   onAdd: (product: Product) => void;
+  selected?: boolean;
 }) {
   const hasDiscount = product.discount_pct > 0;
   const out =
     product.stock_untracked !== 1 && product.stock_quantity <= 0;
   return (
     <button
-      className={`pos-tile ${out ? 'out' : ''} ${large ? 'large' : ''}`}
+      className={`pos-tile ${out ? 'out' : ''} ${large ? 'large' : ''} ${selected ? 'kbsel' : ''}`}
+      data-kbsel={selected ? 'true' : undefined}
       onClick={() => onAdd(product)}>
       <span className="pos-tile-img">
         <ProductImage product={product} />
@@ -1513,18 +1696,21 @@ const ProductListRow = React.memo(function ProductListRow({
   price,
   pricingMode,
   onAdd,
+  selected,
 }: {
   product: Product;
   price: number;
   pricingMode: 'RETAIL' | 'WHOLESALE';
   onAdd: (product: Product) => void;
+  selected?: boolean;
 }) {
   const hasDiscount = product.discount_pct > 0;
   const out =
     product.stock_untracked !== 1 && product.stock_quantity <= 0;
   return (
     <button
-      className={`pos-lrow ${out ? 'out' : ''}`}
+      className={`pos-lrow ${out ? 'out' : ''} ${selected ? 'kbsel' : ''}`}
+      data-kbsel={selected ? 'true' : undefined}
       onClick={() => onAdd(product)}>
       <span className="pos-lrow-img">
         <ProductImage product={product} />

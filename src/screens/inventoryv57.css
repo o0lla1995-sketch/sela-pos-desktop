@@ -197,6 +197,15 @@
 .inv-table tbody tr:hover {
   background: var(--bg);
 }
+/* v61 (الجولة 26 #2): الصف المعيّن بأسهم الكيبورد — حلقة داخلية
+   بلا انزياح تخطيطي، وEnter يفتح ملف المنتج. */
+.inv-table tbody tr.rowsel td {
+  background: var(--brand-soft);
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+.inv-table tbody tr.rowsel .inv-name b {
+  color: var(--brand-ink);
+}
 .inv-table tr.archived td {
   opacity: 0.72;
 }
@@ -553,10 +562,20 @@
 .pf-barcode-row {
   display: flex;
   gap: 8px;
-  align-items: flex-start;
+  align-items: flex-end;
 }
 .pf-barcode-row .pf-field {
   flex: 1;
+}
+/* v61 (الجولة 26 #4): زر التوليد الداخلي بمحاذاة حقل الباركود نفسه
+   (كان معلقاً أعلى الصف بمحاذاة التسمية) وبأيقونة بدل الإيموجي. */
+.pf-barcode-gen {
+  height: 44px;
+  align-self: flex-end;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 .pf-preview {
   border: 1px dashed var(--line);
@@ -709,6 +728,10 @@
 .pf-units-table {
   width: 100%;
   border-collapse: collapse;
+}
+/* v61: عمود الوحدة أوسع كي تستقر القائمة المنسدلة المخصّصة بلا ضغط. */
+.pf-units-table td:first-child {
+  min-width: 132px;
 }
 .pf-units-table th {
   font-size: 10.5px;

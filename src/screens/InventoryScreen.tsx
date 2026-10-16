@@ -19,7 +19,7 @@
  *    والمرتجعات) ومنتج بلا سجل يُحذف نهائياً — نفس رسائل الأندرويد.
  *  • إدارة التصنيفات: إضافة/تسمية/حذف داخل نطاق نمط المتجر.
  */
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {ProductRepo, type ProductInput} from '../database/repositories/ProductRepo';
 import {CategoryRepo} from '../database/repositories/CategoryRepo';
 import {UnitRepo} from '../database/repositories/UnitRepo';
@@ -218,6 +218,80 @@ export function InventoryScreen() {
   }, [archivedProducts, search]);
 
   const visible = showArchived ? archivedFiltered : filtered;
+
+  /* ── v61 (الجولة 26 #2): التنقل بأسهم الكيبورد في جدول المنتجات ──
+     ↑/↓ يحرّكان صفّاً معيّناً، Enter يفتح ملف المنتج للتعديل،
+     والصف المعيّن يُبرز ويُبقى داخل مجال الرؤية. */
+  const [selRowId, setSelRowId] = useState<number | null>(null);
+  const tableWrapRef = useRef<HTMLTableElement | null>(null);
+
+  const moveRowSelection = useCallback(
+    (delta: number): void => {
+      if (visible.length === 0) return;
+      const current =
+        selRowId == null ? -1 : visible.findIndex(p => p.id === selRowId);
+      const next =
+        current === -1
+          ? delta > 0
+            ? 0
+            : visible.length - 1
+          : Math.max(0, Math.min(visible.length - 1, current + delta));
+      setSelRowId(visible[next].id);
+    },
+    [visible, selRowId],
+  );
+
+  useEffect(() => {
+    if (selRowId != null && !visible.some(p => p.id === selRowId)) {
+      setSelRowId(null);
+    }
+  }, [visible, selRowId]);
+
+  useEffect(() => {
+    if (selRowId == null) return;
+    tableWrapRef.current
+      ?.querySelector<HTMLElement>('[data-rowsel="true"]')
+      ?.scrollIntoView({block: 'nearest', inline: 'nearest'});
+  }, [selRowId]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // نافذة ملف المنتج مفتوحة؟ الكيبورد ملكها (Ctrl+S للحفظ…).
+      if (editing !== undefined) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target != null &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        moveRowSelection(1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        moveRowSelection(-1);
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        if (visible.length > 0) setSelRowId(visible[0].id);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        if (visible.length > 0) setSelRowId(visible[visible.length - 1].id);
+      } else if (e.key === 'Enter') {
+        if (selRowId == null) return;
+        const product = visible.find(p => p.id === selRowId);
+        if (product != null) {
+          e.preventDefault();
+          setEditing(product);
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editing, moveRowSelection, visible, selRowId]);
 
   const countFor = useCallback(
     (categoryId: CategoryFilter) =>
@@ -718,7 +792,7 @@ export function InventoryScreen() {
       )}
 
       {/* جدول المنتجات */}
-      <table className="inv-table">
+      <table className="inv-table" ref={tableWrapRef}>
         <thead>
           <tr>
             <th>المنتج</th>
@@ -771,7 +845,8 @@ export function InventoryScreen() {
             return (
               <tr
                 key={product.id}
-                className={product.is_archived === 1 ? 'archived' : ''}>
+                className={`${product.is_archived === 1 ? 'archived' : ''} ${selRowId === product.id ? 'rowsel' : ''}`}
+                data-rowsel={selRowId === product.id ? 'true' : undefined}>
                 <td>
                   <div className="inv-name">
                     <b>{product.name}</b>

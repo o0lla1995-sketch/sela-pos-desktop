@@ -3529,7 +3529,7 @@ dependencies = [
 
 [[package]]
 name = "sela-pos-desktop"
-version = "60.0.0"
+version = "61.0.0"
 dependencies = [
  "base64 0.22.1",
  "rfd",

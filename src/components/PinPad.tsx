@@ -48,6 +48,15 @@ export function PinPad({
     };
   }, []);
 
+  // v61 (الجولة 26 #5): تغيّر العنوان = خطوة جديدة في مسار متعدد —
+  // تصفير تلقائي للخانات كي لا تبقى اللوحة محمّلة برمز الخطوة
+  // السابقة (كانت تتجاهل الأرقام حتى يمسحها المستخدم بيده).
+  useEffect(() => {
+    setPinValue('');
+    setAttempts(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, subtitle]);
+
   function setPinValue(next: string): void {
     pinRef.current = next;
     setPin(next);

@@ -17,6 +17,7 @@
 import {useEffect} from 'react';
 import {applyAmountKey} from '../core/amountKeypad';
 import {suppressScanner} from './scanner';
+import {selaSelectOpen} from '../components/Select';
 
 export interface AmountKeyboardOptions {
   /** اللوحة معروضة الآن؟ (لا تركيب أي مستمع وهي مغلقة). */
@@ -59,8 +60,12 @@ export function useAmountKeyboard(options: AmountKeyboardOptions): void {
           target.tagName === 'TEXTAREA' ||
           target.isContentEditable);
 
-      // Enter يؤكد دائماً — حتى داخل حقل نصي (صريح وواضح).
+      // Enter يؤكد دائماً — حتى داخل حقل نصي (صريح وواضح) — إلا إن
+      // كانت قائمة منسدلة مخصّصة مفتوحة (v61: Enter يختار خيارها).
       if (event.key === 'Enter') {
+        if (selaSelectOpen()) {
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         onConfirm();
