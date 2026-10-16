@@ -10,6 +10,7 @@ import {
   loadLicense,
   getDeviceId,
 } from '../license/LicenseService';
+import {platformFetch} from '../../lib/http';
 import {logDiag} from '../../core/diagnostics';
 
 export type OnlineApiErrorCode =
@@ -70,7 +71,8 @@ async function storePost<T>(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${getServerUrl()}${path}`, {
+    // v57.2: عبر نواة Rust — WebView كان يمنع النداء بـ CSP/CORS.
+    const response = await platformFetch(`${getServerUrl()}${path}`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({

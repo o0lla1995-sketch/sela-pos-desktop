@@ -6,9 +6,11 @@
  */
 import nacl from 'tweetnacl';
 import {api} from '../lib/tauri';
+import {platformFetch} from '../lib/http';
 import {
   LICENSE_SERVER_URL,
   LICENSE_PUBLIC_KEY_HEX,
+  LICENSE_CONTACT_FALLBACK,
   LICENSE_GRACE_SOFT_HOURS,
   LICENSE_GRACE_HARD_HOURS,
   LICENSE_ROLLBACK_TOLERANCE_MS,
@@ -200,7 +202,9 @@ async function apiPost<T>(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${getServerUrl()}${path}`, {
+    // v57.2: عبر نواة Rust (platformFetch) — WebView كان يمنع
+    // الطلب بـ CSP/CORS قبل خروجه للشبكة أصلاً.
+    const response = await platformFetch(`${getServerUrl()}${path}`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(body),
@@ -262,6 +266,54 @@ export function getServerUrl(): string {
 
 export function setServerUrl(url: string): void {
   setString(KEYS.licenseServerUrl, url.trim().replace(/\/+$/, ''));
+}
+
+/** v57.2 (منقول من أندرويد v48/الجولة 56): يتحقق أن رابطاً ما هو
+ *  عنوان خادم تفعيل صالح (http/https فقط) قبل تبنّيه — لا يُقبل
+ *  أي مخطط آخر. نفس تعبير أندرويد v53 حرفياً. */
+export function isValidServerUrl(url: string): boolean {
+  if (typeof url !== 'string') {
+    return false;
+  }
+  const trimmed = url.trim();
+  if (trimmed.length < 8 || trimmed.length > 200) {
+    return false;
+  }
+  const m = /^(https?):\/\/([^\/?#\s]+)/i.exec(trimmed);
+  if (m == null) {
+    return false;
+  }
+  const host = m[2];
+  return host.length > 3 && /[a-z0-9]/i.test(host);
+}
+
+/** v57.2 (منقول من أندرويد v48/الجولة 56): رابط التفعيل يُدار من
+ *  لوحة التحكم — كل رد من الخادم (تفعيل/نبضة/إعدادات) قد يحمل
+ *  activationUrl فيتبنّاه الجهاز بصمت دون أي تدخل المستخدم.
+ *  التبنّي مشروط بـ http/https صالح ويختلف عن الحالي. */
+export function adoptServerUrlIfProvided(data: unknown): void {
+  try {
+    const url = (data as {activationUrl?: unknown} | null)?.activationUrl;
+    if (typeof url !== 'string' || url.length === 0) {
+      return;
+    }
+    const normalized = url.trim().replace(/\/+$/, '');
+    if (!isValidServerUrl(normalized)) {
+      logDiag(
+        'license',
+        'تجاهُل رابط تفعيل غير صالح ورد من الخادم',
+        'warn',
+      );
+      return;
+    }
+    if (normalized === getServerUrl()) {
+      return;
+    }
+    setServerUrl(normalized);
+    logDiag('license', 'تم تبنّي رابط سيرفر التفعيل الجديد من الإدارة');
+  } catch {
+    // Never let URL adoption break an activation/heartbeat flow.
+  }
 }
 
 // ── Device identity (stable id from the Rust core) ────────────────
@@ -379,6 +431,69 @@ export function getCachedContact(): LicenseContact | null {
   return getJson<LicenseContact | null>(KEYS.licenseContact, null);
 }
 
+/** القنوات المعروضة للmerchant: دمج حرفي — الخادم مقدّماً على
+ *  الاحتياطي حقلًا بحقل (نفس دمج أندرويد {...FALLBACK, ...cached}) —
+ *  الحقول الفارغة من الخادم تخفي القناة كما في التطبيق. */
+export function mergedContact(): LicenseContact {
+  const cached = getCachedContact();
+  if (cached == null) {
+    return {...LICENSE_CONTACT_FALLBACK};
+  }
+  return {
+    phone: cached.phone ?? '',
+    whatsapp: cached.whatsapp ?? '',
+    telegram: cached.telegram ?? '',
+    email: cached.email ?? '',
+    note: cached.note ?? '',
+  };
+}
+
+interface ServerConfigResponse {
+  ok?: boolean;
+  contact?: LicenseContact;
+  activationUrl?: string;
+  currency?: string;
+}
+
+/** v57.2 — «قسم التواصل من السيرفر مثل التطبيق»: يجلب إعدادات
+ *  الخادم العامة (GET /api/v1/config — بلا مصادقة) ويحدّث جهات
+ *  الاتصال المخزنة + يتبنّى رابط التفعيل إن أدارته الإدارة.
+ *
+ *  في أندرويد تصل هذه البيانات عبر ردود التفعيل/النبضة — وهنا
+ *  كذلك (تعمل الآن بعد إصلاح طبقة الشبكة)، لكن هذا النداء الإضافي
+ *  يضمن أن شاشة التفعيل تعرض بيانات التواصل الحية حتى قبل أول
+ *  تفعيل، ويعيد تحديثها عند كل دخول للشاشة ودورة النبض. أي
+ *  تعديل من لوحة الإدارة يظهر تلقائياً — لا نسخة جامدة بعد اليوم.
+ *
+ *  لا يرفع أي خطأ — أفضل جهد دائماً. */
+export async function refreshServerContact(): Promise<LicenseContact | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await platformFetch(`${getServerUrl()}/api/v1/config`, {
+      method: 'GET',
+      headers: {'Content-Type': 'application/json'},
+      signal: controller.signal,
+    });
+    const data = (await response.json().catch(() => null)) as
+      | ServerConfigResponse
+      | null;
+    if (!response.ok || data == null) {
+      return null;
+    }
+    if (data.contact) {
+      setJson(KEYS.licenseContact, data.contact);
+    }
+    adoptServerUrlIfProvided(data);
+    return data.contact ?? getCachedContact();
+  } catch {
+    // الخادم غير متاح — البيانات المخزنة تبقى كما هي.
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function storeLicense(
   payloadB64: string,
   signatureB64: string,
@@ -403,6 +518,8 @@ interface ActivateResponse {
   serverTime: number;
   expiresInDays: number;
   contact?: LicenseContact;
+  /** v57.2: رابط التفعيل الذي تديره لوحة التحكم (أندرويد v48). */
+  activationUrl?: string;
 }
 
 interface HeartbeatResponse {
@@ -413,6 +530,8 @@ interface HeartbeatResponse {
   contact?: LicenseContact;
   license?: string;
   signature?: string;
+  /** v57.2: رابط التفعيل الذي تديره لوحة التحكم (أندرويد v48). */
+  activationUrl?: string;
 }
 
 /** Activates a subscription key from the management server. */
@@ -429,6 +548,8 @@ export async function activateLicense(
     appVersion: APP_VERSION,
   });
   onStatus?.('جارٍ التحقق من التوقيع…');
+  // v57.2: تبنّي رابط التفعيل الذي تديره الإدارة (نفس أندرويد v48).
+  adoptServerUrlIfProvided(data);
   const payload = storeLicense(data.license, data.signature, data.serverTime);
   if (payload == null) {
     throw new LicenseError(
@@ -470,6 +591,8 @@ export async function heartbeat(force = false): Promise<LicenseStatus> {
     if (data.contact) {
       setJson(KEYS.licenseContact, data.contact);
     }
+    // v57.2: تبنّي رابط التفعيل الذي تديره الإدارة (نفس أندرويد v48).
+    adoptServerUrlIfProvided(data);
     switch (data.status) {
       case 'revoked':
         setNumber(KEYS.licenseLastVerify, -1);

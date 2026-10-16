@@ -30,8 +30,10 @@ import {UnitRepo} from '../database/repositories/UnitRepo';
 import {BackupService, type BackupFile} from '../services/BackupService';
 import {loadOnlineSettings} from '../services/online/OnlineStoreService';
 import {
-  getCachedContact,
+  mergedContact,
+  refreshServerContact,
   loadLicense,
+  type LicenseContact,
   type LicensePayload,
 } from '../license/LicenseService';
 import {getJson, setJson, getNumber} from '../storage/storage';
@@ -132,7 +134,12 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
   const [deviceId, setDeviceId] = useState('');
   const [uptimeText, setUptimeText] = useState('…');
   const [license, setLicense] = useState<LicensePayload | null>(null);
-  const contact = getCachedContact();
+  // v57.2: قسم التواصل حيّة من السيرفر — دمج {احتياطي، مخزّن} مثل
+  // أندرويد (SubscriptionSection) بدل إخفاء القسم كلياً عند غياب
+  // الكاش، مع تحديث فوري من GET /api/v1/config عند فتح الإعدادات.
+  const [contact, setContact] = useState<LicenseContact>(() =>
+    mergedContact(),
+  );
 
   useEffect(() => {
     void api.listSerialPorts().then(setSerialPorts).catch(() => setSerialPorts([]));
@@ -143,6 +150,11 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
       .then(ms => setUptimeText(formatUptime(ms)))
       .catch(() => setUptimeText('غير متاح'));
     setLicense(loadLicense()?.payload ?? null);
+    void refreshServerContact().then(live => {
+      if (live != null) {
+        setContact(mergedContact());
+      }
+    });
   }, []);
 
   /* ── الشعار ─────────────────────────────────────────────────── */

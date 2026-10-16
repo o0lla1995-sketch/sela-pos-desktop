@@ -10,6 +10,7 @@
  * Base URL is configurable (§14) — default is the live server.
  */
 import type {SilaPairing} from '../../core/types';
+import {platformFetch} from '../../lib/http';
 import {logDiag} from '../../core/diagnostics';
 
 export const SILA_DEFAULT_BASE_URL = 'https://sila.pornxvideo.com';
@@ -284,7 +285,8 @@ async function silaFetch(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, {...init, signal: controller.signal});
+    // v57.2: عبر نواة Rust — WebView كان يمنع نداءات صِلة بـ CSP/CORS.
+    return await platformFetch(url, {...init, signal: controller.signal});
   } finally {
     clearTimeout(timer);
   }

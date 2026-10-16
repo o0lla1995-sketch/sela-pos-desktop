@@ -8,10 +8,11 @@ import {
   activateLicense,
   heartbeat,
   unbindDevice,
-  getCachedContact,
+  mergedContact,
+  refreshServerContact,
+  type LicenseContact,
   type LicenseStatus,
 } from '../license/LicenseService';
-import {LICENSE_CONTACT_FALLBACK} from '../core/config';
 import {useToastStore} from '../state/appStores';
 
 export function ActivationScreen({
@@ -24,10 +25,21 @@ export function ActivationScreen({
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState('');
+  // v57.2: التواصل حيّة من السيرفر (GET /api/v1/config) — أي تعديل
+  // من لوحة الإدارة يظهر هنا فوراً مثل التطبيق، لا نسخة جامدة.
+  const [contact, setContact] = useState<LicenseContact>(() =>
+    mergedContact(),
+  );
   const toast = useToastStore(s => s.show);
-  const contact = getCachedContact() ?? LICENSE_CONTACT_FALLBACK;
 
   useEffect(() => {
+    // ١) تواصل السيرفر أولًا — حتى بلا ترخيص تُعرض بيانات الإدارة
+    //    الحية على الشاشة. ٢) نبضة إن وُجد ترخيص.
+    void refreshServerContact().then(live => {
+      if (live != null) {
+        setContact(mergedContact());
+      }
+    });
     void heartbeat(true).finally(onRefresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -42,6 +54,7 @@ export function ActivationScreen({
       await activateLicense(key, setPhase);
       toast('تم تفعيل الاشتراك بنجاح', 'success');
       setKey('');
+      setContact(mergedContact());
       onRefresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'تعذر التفعيل', 'error');
@@ -121,7 +134,16 @@ export function ActivationScreen({
           </button>
           <button
             className="btn"
-            onClick={() => void heartbeat(true).finally(onRefresh)}
+            onClick={() =>
+              void heartbeat(true)
+                .then(() => refreshServerContact())
+                .then(live => {
+                  if (live != null) {
+                    setContact(mergedContact());
+                  }
+                })
+                .finally(onRefresh)
+            }
             disabled={busy}>
             إعادة التحقق
           </button>

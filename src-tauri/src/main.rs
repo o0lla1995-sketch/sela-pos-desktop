@@ -33,6 +33,12 @@ fn main() {
     let config = ConfigStore::open(sela_core::paths::config_path()).expect("تعذر فتح config.json");
 
     tauri::Builder::default()
+        // ── طبقة الشبكة عبر نواة Rust (v57.2) ─────────────────────
+        // طلبات HTTP كلها تنفَّذ من العملية الأصلية لا من WebView:
+        // سياسة CSP وسلوك CORS الخاصين بالمتصفح لا ينطبقان عليها —
+        // نفس سلوك OkHttp في تطبيق الأندرويد (سيرفر التفعيل لا يرسل
+        // ترويسات CORS أصلاً، وهذا هو الجذر الذي منع التفعيل قبلها).
+        .plugin(tauri_plugin_http::init())
         .manage(AppState {
             conn: Mutex::new(conn),
             config: Mutex::new(config),
