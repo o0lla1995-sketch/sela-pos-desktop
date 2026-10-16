@@ -429,6 +429,25 @@ function rowsOf(result: {
   return (result.rows ?? []) as Record<string, unknown>[];
 }
 
+/** v58: استعلام محصّن — لا تسقط النسخة كلها بسبب جدول/عمود مفقود في
+ *  قاعدة قديمة؛ يُسجّل التحذير في التشخيصات ويُكمل الباقي (جذر
+ *  «خطأ النسخ الاحتياطي المتعلق بقاعدة البيانات»). */
+function safeQuery(
+  label: string,
+  run: () => Promise<{rows?: unknown[]}>,
+): Promise<{rows?: unknown[]}> {
+  return run().catch(error => {
+    logDiag(
+      'backup',
+      `تخطّي «${label}» في النسخة: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      'warn',
+    );
+    return {rows: []};
+  });
+}
+
 function nowLocal(): string {
   return new Date().toISOString().slice(0, 19).replace('T', ' ');
 }
@@ -466,35 +485,42 @@ export const BackupService = {
       campaignDebts,
       campaignSettlements,
     ] = await Promise.all([
-      db.execute('SELECT id, name, store_mode FROM categories'),
-      db.execute('SELECT id, name, short_name, sort_order, kind, store_mode FROM units'),
-      db.execute(
-        'SELECT id, name, cost_price, retail_price, wholesale_price, stock_quantity, category_id, image_uri, low_stock_threshold, barcode, sold_by_weight, is_archived, expiry_date, style_group, variant_size, variant_color, has_variants, base_unit_name, stock_untracked, sizes_count, created_at FROM products',
-      ),
-      db.execute(
-        'SELECT product_id, unit_id, conversion, barcode, retail_price, wholesale_price FROM product_units',
-      ),
+      safeQuery('categories', () =>
+        db.execute('SELECT id, name, store_mode FROM categories')),
+      safeQuery('units', () =>
+        db.execute(
+          'SELECT id, name, short_name, sort_order, kind, store_mode FROM units')),
+      safeQuery('products', () =>
+        db.execute(
+          'SELECT id, name, cost_price, retail_price, wholesale_price, stock_quantity, category_id, image_uri, low_stock_threshold, barcode, sold_by_weight, is_archived, expiry_date, style_group, variant_size, variant_color, has_variants, base_unit_name, stock_untracked, sizes_count, created_at FROM products',
+        )),
+      safeQuery('product_units', () =>
+        db.execute(
+          'SELECT product_id, unit_id, conversion, barcode, retail_price, wholesale_price FROM product_units',
+        )),
       // v35 (الجولة 43): متغيرات المنتجات — تنتقل وتُعاد بترقيم
       //  جديد مع منتجاتها (ملابس لون×مقاس، مطعم أحجام بأسعارها).
-      db
-        .execute(
+      safeQuery('product_variants', () =>
+        db.execute(
           'SELECT id, product_id, kind, color, size, stock_quantity, retail_price, cost_price FROM product_variants',
-        )
-        .catch(() => ({rows: []})),
-      db.execute(
-        'SELECT product_id, angle_label, embedding_data, thumbnail_path FROM product_embeddings',
-      ),
-      db.execute(
-        'SELECT id, invoice_number, total_amount, total_cost, total_profit, discount, payment_type, created_at, returned_minor, return_kind FROM sales',
-      ),
-      db.execute(
-        'SELECT id, sale_id, product_id, quantity, unit_price, cost_price, total_line_price, unit_name, base_quantity, variant_label, variant_id FROM sale_items',
-      ),
+        )),
+      safeQuery('product_embeddings', () =>
+        db.execute(
+          'SELECT product_id, angle_label, embedding_data, thumbnail_path FROM product_embeddings',
+        )),
+      safeQuery('sales', () =>
+        db.execute(
+          'SELECT id, invoice_number, total_amount, total_cost, total_profit, discount, payment_type, created_at, returned_minor, return_kind FROM sales',
+        )),
+      safeQuery('sale_items', () =>
+        db.execute(
+          'SELECT id, sale_id, product_id, quantity, unit_price, cost_price, total_line_price, unit_name, base_quantity, variant_label, variant_id FROM sale_items',
+        )),
       // v23 (round-29 #2): the RETURNS — with the ORIGINAL invoice
       //  number (invoice_ref), NOT the internal sale id (ids get
       //  remapped on restore; invoice numbers are stable).
-      db
-        .execute(
+      safeQuery('sale_returns', () =>
+        db.execute(
           `SELECT sr.return_number, sr.invoice_ref AS sale_invoice_ref, sr.book,
                   sr.refund_method, sr.refund_minor, sr.debt_adjusted_minor,
                   sr.note, sr.created_at,
@@ -504,30 +530,35 @@ export const BackupService = {
            FROM sale_returns sr
            LEFT JOIN sale_return_items si ON si.return_id = sr.id
            ORDER BY sr.id ASC, si.id ASC`,
-        )
-        .catch(() => ({rows: []})),
-      db.execute(
-        'SELECT id, started_at, completed_at, status, note FROM stocktakes',
-      ),
-      db.execute(
-        'SELECT stocktake_id, product_id, variant_id, variant_label, system_qty, counted_qty FROM stocktake_items',
-      ),
-      db.execute(
-        `SELECT idempotency_key, customer_id, customer_name, customer_phone_last4,
+        )),
+      safeQuery('stocktakes', () =>
+        db.execute(
+          'SELECT id, started_at, completed_at, status, note FROM stocktakes',
+        )),
+      safeQuery('stocktake_items', () =>
+        db.execute(
+          'SELECT stocktake_id, product_id, variant_id, variant_label, system_qty, counted_qty FROM stocktake_items',
+        )),
+      safeQuery('sila_debt_queue', () =>
+        db.execute(
+          `SELECT idempotency_key, customer_id, customer_name, customer_phone_last4,
                 customer_card, offline_qr, amount_minor, currency, pos_invoice_ref,
                 description, scanned_at, credit_covered_minor, state, reference_code, transaction_id,
                 outstanding_after, synced_at, error_code, error_message, retry_count, created_at
-         FROM sila_debt_queue`,
-      ),
-      db.execute(
-        `SELECT customer_id, name, phone_last4, id_number, outstanding_minor,
+           FROM sila_debt_queue`,
+        ),
+        ),
+      safeQuery('sila_customers', () =>
+        db.execute(
+          `SELECT customer_id, name, phone_last4, id_number, outstanding_minor,
                 credit_minor,
                 pos_outstanding_minor, app_outstanding_minor, other_minor,
                 pos_purchases_minor, app_purchases_minor,
                 last_payment_at, last_payment_amount_minor,
                 reconcile_offset_minor, last_synced_at
-         FROM sila_customers`,
-      ),
+           FROM sila_customers`,
+        ),
+        ),
       db
         .execute(
           `SELECT idempotency_key, customer_id, customer_name, customer_phone_last4,

@@ -372,15 +372,16 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
         }
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        logDiag('backup', `فشلت النسخة التلقائية: ${message}`, 'warn');
-        if (!silent) {
-          toast(message, 'error', 5000);
-        }
+        logDiag('backup', `فشلت النسخة ${silent ? 'تلقائية' : 'يدوية'}: ${message}`, 'warn');
+        // v58: الفشل الصامت كان يختفي تماماً — الآن يظهر إشعاراً
+        // وتوستاً واضحين حتى يعرف التاجر أن النسخ لم يحدث.
+        notify('backup', 'فشلت النسخة الاحتياطية التلقائية', message);
+        toast(`فشلت النسخة الاحتياطية: ${message}`, 'error', 7000);
       } finally {
         setAutoBusy(false);
       }
     },
-    [autoFolder, toast],
+    [autoFolder, toast, notify],
   );
 
   const pickAutoFolder = useCallback(async () => {

@@ -1,11 +1,28 @@
 /**
  * tauri.ts — جسر الأوامر والأحداث (الطبقة الوحيدة التي تعرف Tauri).
  * كل نداء يعيد الأخطاء نصاً عربياً جاهزاً للعرض.
+ *
+ * وضع التطوير بلا نافذة Tauri (npm run dev في المتصفح): محاكٍ
+ * بالذاكرة يُعاين الواجهة — يُحذف كلياً من بناء الإنتاج.
  */
 import {invoke as tauriInvoke} from '@tauri-apps/api/core';
 import {listen, type UnlistenFn} from '@tauri-apps/api/event';
 
-export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+const isTauri =
+  typeof window !== 'undefined' &&
+  '__TAURI_INTERNALS__' in window;
+
+let mockReady: Promise<typeof import('./devMock')> | null = null;
+if (!isTauri && import.meta.env.DEV) {
+  // ديناميكي عمداً — Rollup يحذفه مع الفرع كاملاً عند import.meta.env.DEV=false
+  mockReady = import('./devMock');
+}
+
+export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (!isTauri && import.meta.env.DEV && mockReady != null) {
+    const mock = await mockReady;
+    return mock.mockInvoke(cmd, args ?? {}) as T;
+  }
   return tauriInvoke<T>(cmd, args);
 }
 

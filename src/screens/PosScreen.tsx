@@ -1,24 +1,33 @@
 /**
- * PosScreen.tsx — نقطة البيع v57 (منقولة من PosScreen الأندرويد):
- * شبكة المنتجات بالخصومات + متغيرات الملابس/الأحجام + منتجات الوزن
- * + خصم الفاتورة + سلة حية + بيع نقدي/دين صِلة/دين المتجر + صرف
- * القسائم على السلة + لوحة مبلغ داخلية + مسح باركود عام (منتج أو
- * رمز صِلة) + طباعة إيصال بعد البيع + فتح الدرج.
+ * PosScreen.tsx — نقطة البيع v58 (إعادة تصميم كاملة بمقاييس أنظمة
+ * POS العالمية — Square/Lightspeed/Loyverse):
+ *  • بلاطات منتجات بصور حقيقية (asset protocol) + حرف أول أنيق عند
+ *    غياب الصورة + شارات المخزون والخصم والمتغيرات فوق الصورة.
+ *  • ثلاثة أنماط عرض (شبكة/قائمة/بطاقات) — نفس إعداد الأندرويد
+ *    posProductView، منفذة فعلياً الآن مع زر تبديل سريع.
+ *  • شريط تصنيفات رقائق أفقي + بحث فوري + مفرق/جملة (F3).
+ *  • سلة كاشير محترفة: عدّاد كمية لكل صف، إجمالي السطر، حذف، خصم
+ *    الفاتورة، وزر إتمام ضخم (F9) + صف الدين/القسيمة.
+ *  • لوحة دفع كاشير: مبلغ ضخم، لوحة أرقام، أزرار نقد سريع
+ *    (20/50/100/200/كامل)، حساب الباقي لحظياً.
+ *  • إنشاء زبون دين متجر سريع بحقل الجوال (v58 — كان مفقوداً).
+ * كل منطق البيع الأصلي (باركود/متغيرات/وزن/ديون/قسائم) محفوظ حرفياً.
  */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {convertFileSrc} from '@tauri-apps/api/core';
 import {
   useCartStore,
   cartTotals,
-  applyProductDiscount,
   unitPriceFor,
 } from '../stores/cartStore';
 import {useCatalogStore, useToastStore} from '../state/appStores';
-import {useSettingsStore} from '../stores/settingsStore';
+import {useSettingsStore, type PosProductView} from '../stores/settingsStore';
 import {InvoiceService} from '../services/InvoiceService';
 import {ProductRepo} from '../database/repositories/ProductRepo';
 import {
   LocalDebtsRepo,
   isValidIdNumber,
+  isValidLocalPhone,
 } from '../database/repositories/LocalDebtsRepo';
 import {SilaRepo} from '../services/sila/SilaRepo';
 import {parseSilaQr} from '../services/sila/qr';
@@ -27,7 +36,6 @@ import {
   VoucherService,
   VoucherRedeemError,
 } from '../services/VoucherService';
-import {VouchersRepo} from '../services/sila/VouchersRepo';
 import {ThermalPrinterService} from '../services/printer/ThermalPrinterService';
 import {usePrinterStore} from '../stores/printerStore';
 import {setActiveBarcodeHandler, beep} from '../lib/scanner';
@@ -40,6 +48,7 @@ import {
   WEIGHT_QTY_DECIMALS,
 } from '../core/config';
 import {applyAmountKey, AMOUNT_KEYPAD_KEYS} from '../core/amountKeypad';
+import {Icon} from '../components/Icon';
 import type {
   CartLine,
   Product,
@@ -48,6 +57,11 @@ import type {
   LocalCustomerBalance,
 } from '../core/types';
 import './pos.css';
+
+/** يحفظ نمط العرض المختار في الإعدادات (يستمر بين الجلسات). */
+function persistView(view: PosProductView): void {
+  useSettingsStore.getState().update({posProductView: view});
+}
 
 /** إعدادات الإيصال من إعدادات المتجر (نفس لقطة الأندرويد). */
 function receiptSettings() {
@@ -85,6 +99,9 @@ interface DebtConfirmState {
   creditMinor?: number;
 }
 
+/** أزرار النقد السريع في لوحة الدفع. */
+const QUICK_CASH = [20, 50, 100, 200];
+
 export function PosScreen() {
   const toast = useToastStore(s => s.show);
   const settings = useSettingsStore(s => s.settings);
@@ -116,12 +133,11 @@ export function PosScreen() {
   // ── واجهة ──
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<number | 'all'>('all');
+  const [view, setView] = useState<PosProductView>(settings.posProductView);
   const [busy, setBusy] = useState(false);
   const [variantPick, setVariantPick] = useState<VariantPickState | null>(null);
   const [weightPick, setWeightPick] = useState<WeightPickState | null>(null);
   const [weightValue, setWeightValue] = useState('');
-  const [bundleColor, setBundleColor] = useState<string | null>(null);
-  const [bundleCount, setBundleCount] = useState('1');
   const [paySheet, setPaySheet] = useState<PayKind | null>(null);
   const [amountText, setAmountText] = useState('');
   const [debtConfirm, setDebtConfirm] = useState<DebtConfirmState | null>(null);
@@ -132,6 +148,10 @@ export function PosScreen() {
   const [localQuery, setLocalQuery] = useState('');
   const [localCreateName, setLocalCreateName] = useState('');
   const [localCreateId, setLocalCreateId] = useState('');
+  // v58: حقل الجوال كان مفقوداً من إنشاء الزبون السريع — الآن موجود
+  // ومُتحقق بنفس معيار جوال التسجيل (056/059) لكنه اختياري هنا.
+  const [localCreatePhone, setLocalCreatePhone] = useState('');
+  const [localCreateError, setLocalCreateError] = useState<string | null>(null);
   const [voucherCode, setVoucherCode] = useState('');
   const [voucherSheet, setVoucherSheet] = useState(false);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -300,10 +320,14 @@ export function PosScreen() {
         e.preventDefault();
         if (lines.length > 0 && !busy) setPaySheet('cash');
       } else if (e.key === 'Escape') {
+        // v58: Escape يغلق كل النوافذ المفتوحة — دفع/دين/متغير/وزن/
+        // اختيار زبون/قسيمة (كانت لوحتا الاختيار لا تُغلقان به).
         setPaySheet(null);
         setDebtConfirm(null);
         setVariantPick(null);
         setWeightPick(null);
+        setDebtSheet(null);
+        setVoucherSheet(false);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -431,6 +455,8 @@ export function PosScreen() {
       setLocalQuery('');
       setLocalCreateName('');
       setLocalCreateId('');
+      setLocalCreatePhone('');
+      setLocalCreateError(null);
       setLocalCustomers(list);
       setDebtSheet('local');
     } catch (error) {
@@ -441,23 +467,29 @@ export function PosScreen() {
   const createLocalAndDebt = useCallback(async () => {
     const name = localCreateName.trim();
     const idNumber = localCreateId.trim();
+    const phone = localCreatePhone.replace(/[\s-]/g, '');
     if (name.length < 2) {
-      toast('اكتب اسم الزبون', 'error');
+      setLocalCreateError('اكتب اسم الزبون');
       return;
     }
     if (!idNumber) {
-      toast('اكتب رقم هوية الزبون', 'error');
+      setLocalCreateError('اكتب رقم هوية الزبون');
       return;
     }
     if (!isValidIdNumber(idNumber)) {
-      toast('رقم الهوية غير صالح (9 خانات مع خانة تحقق)', 'error');
+      setLocalCreateError('رقم الهوية غير صالح (9 خانات مع خانة تحقق)');
+      return;
+    }
+    // v58: الجوال اختياري هنا — لكن إن كُتب فليكن بمعيار التسجيل.
+    if (phone.length > 0 && !isValidLocalPhone(phone)) {
+      setLocalCreateError('رقم الجوال 10 خانات يبدأ بـ 056 أو 059');
       return;
     }
     try {
       const customer = await LocalDebtsRepo.createCustomer({
         name,
         idNumber,
-        phone: null,
+        phone: phone.length > 0 ? phone : null,
         notes: 'أُنشئ أثناء البيع بالدين',
       });
       setDebtConfirm({
@@ -465,16 +497,18 @@ export function PosScreen() {
         customerId: null,
         localCustomerId: customer.id,
         customerName: customer.name,
-        customerPhoneLast4: null,
+        customerPhoneLast4: phone.length >= 4 ? phone.slice(-4) : null,
         customerCard: null,
         offlineQr: null,
         amountMinor: Math.round(totals.total * 100),
       });
       setDebtSheet(null);
     } catch (error) {
-      toast(error instanceof Error ? error.message : String(error), 'error');
+      setLocalCreateError(
+        error instanceof Error ? error.message : String(error),
+      );
     }
-  }, [localCreateName, localCreateId, toast, totals.total]);
+  }, [localCreateName, localCreateId, localCreatePhone, toast, totals.total]);
 
   // ── صرف قسيمة على السلة (v20) ──
   const redeemVoucherOnCart = useCallback(async () => {
@@ -544,22 +578,39 @@ export function PosScreen() {
     return Number.isFinite(paid) ? Math.max(0, paid - totals.total) : 0;
   }, [amountText, totals.total]);
 
+  const addQuickCash = useCallback((amount: number) => {
+    setAmountText(t => {
+      const current = t === '' ? 0 : Number(t) || 0;
+      return String(Math.round((current + amount) * 100) / 100);
+    });
+  }, []);
+
   return (
     <div className="pos-root">
       {/* ── الشريط العلوي ── */}
       <div className="pos-topbar">
-        <input
-          ref={searchRef}
-          className="pos-search"
-          placeholder="بحث بالاسم أو الباركود… (F2)"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
-        <div className="chip-toggle">
+        <div className="pos-search">
+          <span className="pos-search-icon">
+            <Icon name="search" size={17} />
+          </span>
+          <input
+            ref={searchRef}
+            placeholder="بحث بالاسم أو الباركود… (F2)"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          {search !== '' && (
+            <button className="pos-search-clear" onClick={() => setSearch('')}>
+              <Icon name="x" size={14} />
+            </button>
+          )}
+        </div>
+        <div className="seg" role="group" aria-label="نمط التسعير">
           <button
             className={pricingMode === 'RETAIL' ? 'on' : ''}
-            onClick={() => setPricingMode('RETAIL')}>
-            مفرق (F3)
+            onClick={() => setPricingMode('RETAIL')}
+            title="تبديل مفرق/جملة (F3)">
+            مفرق
           </button>
           <button
             className={pricingMode === 'WHOLESALE' ? 'on' : ''}
@@ -567,85 +618,123 @@ export function PosScreen() {
             جملة
           </button>
         </div>
-        <select
-          className="pos-category"
-          value={String(categoryId)}
-          onChange={e =>
-            setCategoryId(e.target.value === 'all' ? 'all' : Number(e.target.value))
-          }>
-          <option value="all">كل التصنيفات</option>
-          {categories.map(c => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <span className="pos-scanhint">المسح العام نشط — وجّه القارئ نحو أي مكان</span>
+        <div className="seg" role="group" aria-label="شكل العرض" title="شكل عرض المنتجات">
+          <button
+            className={view === 'grid' ? 'on' : ''}
+            onClick={() => {
+              setView('grid');
+              persistView('grid');
+            }}
+            aria-label="شبكة">
+            <Icon name="layoutGrid" size={16} />
+          </button>
+          <button
+            className={view === 'list' ? 'on' : ''}
+            onClick={() => {
+              setView('list');
+              persistView('list');
+            }}
+            aria-label="قائمة">
+            <Icon name="layoutList" size={16} />
+          </button>
+          <button
+            className={view === 'cards' ? 'on' : ''}
+            onClick={() => {
+              setView('cards');
+              persistView('cards');
+            }}
+            aria-label="بطاقات">
+            <Icon name="layoutCards" size={16} />
+          </button>
+        </div>
+        <span className="pos-scanhint">
+          <Icon name="scan" size={15} />
+          المسح العام نشط — وجّه القارئ نحو أي مكان
+        </span>
+      </div>
+
+      {/* ── شريط التصنيفات ── */}
+      <div className="pos-cats">
+        <button
+          className={`pos-cat-chip ${categoryId === 'all' ? 'on' : ''}`}
+          onClick={() => setCategoryId('all')}>
+          كل التصنيفات
+        </button>
+        {categories.map(c => (
+          <button
+            key={c.id}
+            className={`pos-cat-chip ${categoryId === c.id ? 'on' : ''}`}
+            onClick={() => setCategoryId(categoryId === c.id ? 'all' : c.id)}>
+            {c.name}
+          </button>
+        ))}
       </div>
 
       <div className="pos-body">
         {/* ── شبكة المنتجات ── */}
         <div className="pos-grid-wrap">
           {filtered.length === 0 && (
-            <div className="empty">لا منتجات مطابقة — أضف منتجات من المخزون.</div>
+            <div className="empty">
+              <span className="icon">
+                <Icon name="box" size={26} />
+              </span>
+              <div>
+                لا منتجات مطابقة — أضف منتجات من المخزون أو غيّر البحث
+                والتصنيف.
+              </div>
+            </div>
           )}
-          <div className="pos-grid">
-            {filtered.map(product => {
-              const price = priceOf(product);
-              const hasDiscount = product.discount_pct > 0;
-              const out =
-                product.stock_untracked !== 1 && product.stock_quantity <= 0;
-              return (
-                <button
+          {view === 'list' ? (
+            <div className="pos-list">
+              {filtered.map(product => (
+                <ProductListRow
                   key={product.id}
-                  className={`pos-tile ${out ? 'out' : ''}`}
-                  onClick={() => tryAdd(product)}>
-                  <div className="pos-tile-name">{product.name}</div>
-                  {product.has_variants === 1 && (
-                    <span className="chip brand">متغيرات</span>
-                  )}
-                  {product.sold_by_weight === 1 && (
-                    <span className="chip">وزن/كغ</span>
-                  )}
-                  {hasDiscount && (
-                    <span className="chip warn">خصم {product.discount_pct}%</span>
-                  )}
-                  <div className="pos-tile-prices">
-                    {hasDiscount && (
-                      <span className="pos-old-price">
-                        {formatMoney(
-                          pricingMode === 'WHOLESALE'
-                            ? product.wholesale_price
-                            : product.retail_price,
-                        )}
-                      </span>
-                    )}
-                    <span className="pos-price">{formatMoney(price)}</span>
-                  </div>
-                  <div className="pos-tile-stock">
-                    {product.stock_untracked === 1
-                      ? 'بلا تتبع'
-                      : out
-                      ? 'نفد'
-                      : `متوفر ${product.stock_quantity}`}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+                  product={product}
+                  price={priceOf(product)}
+                  pricingMode={pricingMode}
+                  onAdd={() => tryAdd(product)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className={`pos-grid ${view === 'cards' ? 'cards' : ''}`}>
+              {filtered.map(product => (
+                <ProductTile
+                  key={product.id}
+                  product={product}
+                  price={priceOf(product)}
+                  pricingMode={pricingMode}
+                  large={view === 'cards'}
+                  onAdd={() => tryAdd(product)}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         {/* ── السلة ── */}
         <aside className="pos-cart">
           <div className="pos-cart-head">
-            <b>السلة ({totals.itemsCount})</b>
-            <button className="btn ghost sm" onClick={() => clearCart()}>
-              تفريغ
-            </button>
+            <div className="pos-cart-title">
+              <Icon name="cart" size={18} />
+              <b>السلة</b>
+              {totals.itemsCount > 0 && (
+                <span className="chip brand sm">{totals.itemsCount} قطعة</span>
+              )}
+            </div>
+            {lines.length > 0 && (
+              <button className="btn ghost sm" onClick={() => clearCart()}>
+                <Icon name="trash" size={14} />
+                تفريغ
+              </button>
+            )}
           </div>
           <div className="pos-cart-lines">
             {lines.length === 0 && (
-              <div className="empty">اسحب منتجاً أو امسح باركوده…</div>
+              <div className="pos-cart-empty">
+                <Icon name="cart" size={30} />
+                <div>اضغط منتجاً لإضافته أو امسح باركوده…</div>
+              </div>
             )}
             {lines.map(line => (
               <CartRow
@@ -662,7 +751,9 @@ export function PosScreen() {
           </div>
           <div className="pos-cart-math">
             <label className="pos-discount-row">
-              <span>خصم الفاتورة (₪)</span>
+              <span>
+                <Icon name="percent" size={14} /> خصم الفاتورة (₪)
+              </span>
               <input
                 type="number"
                 min={0}
@@ -689,9 +780,10 @@ export function PosScreen() {
           </div>
           <div className="pos-cart-actions">
             <button
-              className="btn primary big"
+              className="pos-charge-btn"
               disabled={lines.length === 0 || busy}
               onClick={() => setPaySheet('cash')}>
+              <Icon name="check" size={20} />
               إتمام البيع — F9
             </button>
             <div className="pos-pay-row">
@@ -700,12 +792,14 @@ export function PosScreen() {
                 disabled={lines.length === 0 || busy || !silaPaired}
                 title={silaPaired ? '' : 'اربط صِلة أولاً من شاشة صِلة'}
                 onClick={() => void openSilaPicker()}>
+                <Icon name="link" size={15} />
                 دين صِلة
               </button>
               <button
                 className="btn"
                 disabled={lines.length === 0 || busy}
                 onClick={() => void openLocalPicker()}>
+                <Icon name="book" size={15} />
                 دين المتجر
               </button>
               <button
@@ -714,6 +808,7 @@ export function PosScreen() {
                   setVoucherCode('');
                   setVoucherSheet(true);
                 }}>
+                <Icon name="ticket" size={15} />
                 قسيمة
               </button>
             </div>
@@ -725,45 +820,80 @@ export function PosScreen() {
       {paySheet === 'cash' && (
         <div className="overlay" onClick={() => setPaySheet(null)}>
           <div className="modal pos-pay" onClick={e => e.stopPropagation()}>
-            <h3>الدفع نقدي</h3>
-            <div className="pos-pay-total">{formatMoney(totals.total)}</div>
-            <div className="pos-amount-display" dir="ltr">
-              {amountText === '' ? '0' : amountText} ₪
-            </div>
-            <div className="pos-amount-keys">
-              {AMOUNT_KEYPAD_KEYS.map((row, i) => (
-                <React.Fragment key={i}>
-                  {row.map(k => (
-                    <button
-                      key={k}
-                      className="pin-key"
-                      onClick={() => setAmountText(t => applyAmountKey(t, k))}>
-                      {k}
-                    </button>
-                  ))}
-                </React.Fragment>
-              ))}
-            </div>
-            {amountText !== '' && (
-              <div className="pos-change">
-                الباقي: <b>{formatMoney(change)}</b>
-              </div>
-            )}
-            <div className="pos-pay-buttons">
-              <button
-                className="btn primary"
-                disabled={busy}
-                onClick={() => void completeCashSale(amountText)}>
-                تأكيد البيع وطباعة الإيصال
+            <div className="modal-head">
+              <b>الدفع نقدي</b>
+              <button className="modal-x" onClick={() => setPaySheet(null)}>
+                <Icon name="x" size={15} />
               </button>
+            </div>
+            <div className="modal-body">
+              <div className="pos-pay-total">
+                <span>المطلوب</span>
+                <b>{formatMoney(totals.total)}</b>
+              </div>
+              <div className="pos-amount-display" dir="ltr">
+                {amountText === '' ? '0' : amountText} ₪
+              </div>
+              <div className="pos-quickcash">
+                {QUICK_CASH.map(amount => (
+                  <button
+                    key={amount}
+                    className="btn sm"
+                    dir="ltr"
+                    onClick={() => addQuickCash(amount)}>
+                    +{amount} ₪
+                  </button>
+                ))}
+                <button
+                  className="btn sm"
+                  onClick={() => setAmountText(String(totals.total))}>
+                  كامل المبلغ
+                </button>
+                <button className="btn sm ghost" onClick={() => setAmountText('')}>
+                  تصفير
+                </button>
+              </div>
+              <div className="pos-amount-keys">
+                {AMOUNT_KEYPAD_KEYS.map((row, i) => (
+                  <React.Fragment key={i}>
+                    {row.map(k => (
+                      <button
+                        key={k}
+                        className="pos-key"
+                        onClick={() => setAmountText(t => applyAmountKey(t, k))}>
+                        {k}
+                      </button>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </div>
+              {amountText !== '' && (
+                <div className={`pos-change ${change < 0 ? 'neg' : ''}`}>
+                  {change < 0 ? (
+                    <>الباقي على الزبون: <b>{formatMoney(-change)}</b></>
+                  ) : (
+                    <>الباقي للزبون: <b>{formatMoney(change)}</b></>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="modal-foot">
+              <button className="btn ghost" onClick={() => setPaySheet(null)}>
+                إلغاء
+              </button>
+              <span className="spacer" />
               <button
-                className="btn ghost"
+                className="btn"
                 disabled={busy}
                 onClick={() => void completeCashSale('')}>
                 بدون مبلغ (كامل)
               </button>
-              <button className="btn ghost" onClick={() => setPaySheet(null)}>
-                إلغاء
+              <button
+                className="btn primary lg"
+                disabled={busy}
+                onClick={() => void completeCashSale(amountText)}>
+                <Icon name="check" size={17} />
+                تأكيد البيع وطباعة الإيصال
               </button>
             </div>
           </div>
@@ -787,8 +917,6 @@ export function PosScreen() {
               if (!r.added && r.reason) toast(r.reason, 'error');
             }
             setVariantPick(null);
-            setBundleColor(null);
-            setBundleCount('1');
           }}
           onClose={() => setVariantPick(null)}
         />
@@ -797,42 +925,66 @@ export function PosScreen() {
       {/* ── لوحة الوزن ── */}
       {weightPick != null && (
         <div className="overlay" onClick={() => setWeightPick(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3>{weightPick.product.name} — وزن بالكيلو</h3>
-            <div className="pos-amount-display" dir="ltr">
-              {weightValue === '' ? '0' : weightValue} كغ
+          <div className="modal pos-pay" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <b>{weightPick.product.name} — وزن بالكيلو</b>
+              <button className="modal-x" onClick={() => setWeightPick(null)}>
+                <Icon name="x" size={15} />
+              </button>
             </div>
-            <div className="pos-amount-keys">
-              {AMOUNT_KEYPAD_KEYS.map((row, i) => (
-                <React.Fragment key={i}>
-                  {row.map(k => (
-                    <button
-                      key={k}
-                      className="pin-key"
-                      onClick={() =>
-                        setWeightValue(t =>
-                          applyAmountKey(t, k).slice(0, WEIGHT_QTY_DECIMALS + 2),
-                        )
-                      }>
-                      {k}
-                    </button>
-                  ))}
-                </React.Fragment>
-              ))}
-            </div>
-            <div className="pos-quickweights">
-              {QUICK_WEIGHTS.map(w => (
-                <button
-                  key={w.kg}
-                  className="btn sm"
-                  onClick={() => setWeightValue(String(w.kg))}>
-                  {w.label}
+            <div className="modal-body">
+              <div className="pos-amount-display" dir="ltr">
+                {weightValue === '' ? '0' : weightValue} كغ
+              </div>
+              <div className="pos-quickcash">
+                {QUICK_WEIGHTS.map(w => (
+                  <button
+                    key={w.kg}
+                    className="btn sm"
+                    onClick={() => setWeightValue(String(w.kg))}>
+                    {w.label}
+                  </button>
+                ))}
+                <button className="btn sm ghost" onClick={() => setWeightValue('')}>
+                  تصفير
                 </button>
-              ))}
+              </div>
+              <div className="pos-amount-keys">
+                {AMOUNT_KEYPAD_KEYS.map((row, i) => (
+                  <React.Fragment key={i}>
+                    {row.map(k => (
+                      <button
+                        key={k}
+                        className="pos-key"
+                        onClick={() =>
+                          setWeightValue(t =>
+                            applyAmountKey(t, k).slice(0, WEIGHT_QTY_DECIMALS + 2),
+                          )
+                        }>
+                        {k}
+                      </button>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </div>
+              {weightValue !== '' && (
+                <div className="pos-change">
+                  القيمة:{' '}
+                  <b>
+                    {formatMoney(
+                      (Number(weightValue) || 0) * priceOf(weightPick.product),
+                    )}
+                  </b>
+                </div>
+              )}
             </div>
-            <div className="pos-pay-buttons">
+            <div className="modal-foot">
+              <button className="btn ghost" onClick={() => setWeightPick(null)}>
+                إلغاء
+              </button>
+              <span className="spacer" />
               <button
-                className="btn primary"
+                className="btn primary lg"
                 onClick={() => {
                   const qty = Number(weightValue);
                   if (!Number.isFinite(qty) || qty <= 0) {
@@ -844,10 +996,8 @@ export function PosScreen() {
                   else if (r.reason) toast(r.reason, 'error');
                   setWeightPick(null);
                 }}>
+                <Icon name="plus" size={17} />
                 إضافة للسلة
-              </button>
-              <button className="btn ghost" onClick={() => setWeightPick(null)}>
-                إلغاء
               </button>
             </div>
           </div>
@@ -857,35 +1007,58 @@ export function PosScreen() {
       {/* ── تأكيد الدين ── */}
       {debtConfirm != null && (
         <div className="overlay" onClick={() => setDebtConfirm(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3>
-              {debtConfirm.kind === 'sila' ? 'بيع بالدين — صِلة' : 'بيع بالدين — دفتر المتجر'}
-            </h3>
-            <div className="pos-debt-customer">
-              <b>{debtConfirm.customerName}</b>
-              {debtConfirm.customerPhoneLast4 != null && (
-                <span> · هاتف ***{debtConfirm.customerPhoneLast4}</span>
-              )}
-            </div>
-            <div className="pos-math-row total">
-              <span>قيمة الدين</span>
-              <b>{formatMoney(debtConfirm.amountMinor / 100)}</b>
-            </div>
-            {debtConfirm.kind === 'sila' &&
-              (debtConfirm.creditMinor ?? 0) > 0 && (
-                <div className="dc-hint">
-                  رصيد مسبق في صِلة يغطي {formatMoney(Math.min(debtConfirm.creditMinor ?? 0, debtConfirm.amountMinor) / 100)} — سيُخصم تلقائياً عند الرفع.
-                </div>
-              )}
-            <div className="pos-pay-buttons">
-              <button
-                className="btn primary"
-                disabled={busy}
-                onClick={() => void completeDebtSale(debtConfirm)}>
-                تأكيد الدين وطباعة الإيصال
+          <div className="modal pos-pay" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <b>
+                {debtConfirm.kind === 'sila'
+                  ? 'بيع بالدين — صِلة'
+                  : 'بيع بالدين — دفتر المتجر'}
+              </b>
+              <button className="modal-x" onClick={() => setDebtConfirm(null)}>
+                <Icon name="x" size={15} />
               </button>
+            </div>
+            <div className="modal-body">
+              <div className="pos-debt-customer">
+                <span className="pos-debt-avatar">
+                  {debtConfirm.customerName.trim().charAt(0) || 'ز'}
+                </span>
+                <div>
+                  <b>{debtConfirm.customerName}</b>
+                  {debtConfirm.customerPhoneLast4 != null && (
+                    <span className="pos-debt-sub">
+                      هاتف ***{debtConfirm.customerPhoneLast4}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="pos-math-row total">
+                <span>قيمة الدين</span>
+                <b>{formatMoney(debtConfirm.amountMinor / 100)}</b>
+              </div>
+              {debtConfirm.kind === 'sila' &&
+                (debtConfirm.creditMinor ?? 0) > 0 && (
+                  <div className="pos-note">
+                    <Icon name="info" size={15} />
+                    رصيد مسبق في صِلة يغطي{' '}
+                    {formatMoney(
+                      Math.min(debtConfirm.creditMinor ?? 0, debtConfirm.amountMinor) / 100,
+                    )}{' '}
+                    — سيُخصم تلقائياً عند الرفع.
+                  </div>
+                )}
+            </div>
+            <div className="modal-foot">
               <button className="btn ghost" onClick={() => setDebtConfirm(null)}>
                 إلغاء
+              </button>
+              <span className="spacer" />
+              <button
+                className="btn primary lg"
+                disabled={busy}
+                onClick={() => void completeDebtSale(debtConfirm)}>
+                <Icon name="check" size={17} />
+                تأكيد الدين وطباعة الإيصال
               </button>
             </div>
           </div>
@@ -896,130 +1069,189 @@ export function PosScreen() {
       {debtSheet === 'sila' && (
         <div className="overlay" onClick={() => setDebtSheet(null)}>
           <div className="modal pos-picker" onClick={e => e.stopPropagation()}>
-            <h3>اختر زبون صِلة</h3>
-            <input
-              className="field"
-              placeholder="بحث بالاسم…"
-              value={silaQuery}
-              onChange={e => setSilaQuery(e.target.value)}
-            />
-            <div className="pos-picker-list">
-              {silaCustomers
-                .filter(c => c.name.includes(silaQuery.trim()))
-                .map(customer => (
-                  <button
-                    key={customer.customer_id}
-                    className="pos-picker-row"
-                    onClick={() => {
-                      setDebtConfirm({
-                        kind: 'sila',
-                        customerId: customer.customer_id,
-                        customerName: customer.name,
-                        customerPhoneLast4: customer.phone_last4,
-                        customerCard: null,
-                        offlineQr: null,
-                        amountMinor: Math.round(totals.total * 100),
-                        creditMinor: customer.credit_minor,
-                      });
-                      setDebtSheet(null);
-                    }}>
-                    <span>
-                      <b>{customer.name}</b>
-                      {customer.phone_last4 != null && (
-                        <span> · ***{customer.phone_last4}</span>
-                      )}
-                    </span>
-                    <span className="pos-picker-side">
-                      {customer.credit_minor > 0 && (
-                        <span className="chip ok">
-                          رصيد {formatMoney(customer.credit_minor / 100)}
-                        </span>
-                      )}
-                      <span className="chip">
-                        دين {formatMoney(customer.outstanding_minor / 100)}
-                      </span>
-                    </span>
-                  </button>
-                ))}
+            <div className="modal-head">
+              <b>اختر زبون صِلة</b>
+              <button className="modal-x" onClick={() => setDebtSheet(null)}>
+                <Icon name="x" size={15} />
+              </button>
             </div>
-            <button className="btn ghost sm" onClick={() => setDebtSheet(null)}>
-              إغلاق
-            </button>
+            <div className="modal-body">
+              <div className="pos-search">
+                <span className="pos-search-icon">
+                  <Icon name="search" size={16} />
+                </span>
+                <input
+                  placeholder="بحث بالاسم…"
+                  value={silaQuery}
+                  onChange={e => setSilaQuery(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div className="pos-picker-list">
+                {silaCustomers
+                  .filter(c => c.name.includes(silaQuery.trim()))
+                  .map(customer => (
+                    <button
+                      key={customer.customer_id}
+                      className="pos-picker-row"
+                      onClick={() => {
+                        setDebtConfirm({
+                          kind: 'sila',
+                          customerId: customer.customer_id,
+                          customerName: customer.name,
+                          customerPhoneLast4: customer.phone_last4,
+                          customerCard: null,
+                          offlineQr: null,
+                          amountMinor: Math.round(totals.total * 100),
+                          creditMinor: customer.credit_minor,
+                        });
+                        setDebtSheet(null);
+                      }}>
+                      <span className="pos-picker-name">
+                        <b>{customer.name}</b>
+                        {customer.phone_last4 != null && (
+                          <span className="pos-picker-sub">
+                            هاتف ***{customer.phone_last4}
+                          </span>
+                        )}
+                      </span>
+                      <span className="pos-picker-side">
+                        {customer.credit_minor > 0 && (
+                          <span className="chip ok">
+                            رصيد {formatMoney(customer.credit_minor / 100)}
+                          </span>
+                        )}
+                        <span className="chip">
+                          دين {formatMoney(customer.outstanding_minor / 100)}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn ghost" onClick={() => setDebtSheet(null)}>
+                إغلاق
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* ── اختيار زبون دفتر المتجر (+ إنشاء سريع) ── */}
+      {/* ── اختيار زبون دفتر المتجر (+ إنشاء سريع بجوال) ── */}
       {debtSheet === 'local' && (
         <div className="overlay" onClick={() => setDebtSheet(null)}>
           <div className="modal pos-picker" onClick={e => e.stopPropagation()}>
-            <h3>اختر زبون دفتر المتجر</h3>
-            <input
-              className="field"
-              placeholder="بحث بالاسم أو الهوية…"
-              value={localQuery}
-              onChange={e => setLocalQuery(e.target.value)}
-            />
-            <div className="pos-picker-list">
-              {localCustomers
-                .filter(
-                  c =>
-                    c.customer.name.includes(localQuery.trim()) ||
-                    c.customer.id_number.includes(localQuery.trim()),
-                )
-                .map(customer => (
-                  <button
-                    key={customer.customer.id}
-                    className="pos-picker-row"
-                    onClick={() => {
-                      setDebtConfirm({
-                        kind: 'local',
-                        customerId: null,
-                        localCustomerId: customer.customer.id,
-                        customerName: customer.customer.name,
-                        customerPhoneLast4:
-                          customer.customer.phone != null &&
-                          customer.customer.phone.length >= 4
-                            ? customer.customer.phone.slice(-4)
-                            : null,
-                        customerCard: null,
-                        offlineQr: null,
-                        amountMinor: Math.round(totals.total * 100),
-                      });
-                      setDebtSheet(null);
-                    }}>
-                    <span>
-                      <b>{customer.customer.name}</b>
-                      <span dir="ltr"> · {customer.customer.id_number}</span>
-                    </span>
-                    <span className="chip danger">
-                      قائم {formatMoney(customer.outstandingMinor / 100)}
-                    </span>
-                  </button>
-                ))}
-            </div>
-            <div className="pos-local-create">
-              <b>زبون جديد</b>
-              <input
-                className="field"
-                placeholder="الاسم"
-                value={localCreateName}
-                onChange={e => setLocalCreateName(e.target.value)}
-              />
-              <input
-                className="field"
-                dir="ltr"
-                placeholder="رقم الهوية (9 خانات)"
-                value={localCreateId}
-                onChange={e => setLocalCreateId(e.target.value)}
-              />
-              <button className="btn sm" onClick={() => void createLocalAndDebt()}>
-                إنشاء وتسجيل الدين
+            <div className="modal-head">
+              <div>
+                <b>اختر زبون دفتر المتجر</b>
+                <div className="sub">أو أنشئ زبوناً جديداً بالأسفل</div>
+              </div>
+              <button className="modal-x" onClick={() => setDebtSheet(null)}>
+                <Icon name="x" size={15} />
               </button>
             </div>
-            <button className="btn ghost sm" onClick={() => setDebtSheet(null)}>
-              إغلاق
-            </button>
+            <div className="modal-body">
+              <div className="pos-search">
+                <span className="pos-search-icon">
+                  <Icon name="search" size={16} />
+                </span>
+                <input
+                  placeholder="بحث بالاسم أو رقم الهوية…"
+                  value={localQuery}
+                  onChange={e => setLocalQuery(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div className="pos-picker-list">
+                {localCustomers
+                  .filter(
+                    c =>
+                      c.customer.name.includes(localQuery.trim()) ||
+                      c.customer.id_number.includes(localQuery.trim()) ||
+                      (c.customer.phone ?? '').includes(localQuery.trim()),
+                  )
+                  .map(customer => (
+                    <button
+                      key={customer.customer.id}
+                      className="pos-picker-row"
+                      onClick={() => {
+                        setDebtConfirm({
+                          kind: 'local',
+                          customerId: null,
+                          localCustomerId: customer.customer.id,
+                          customerName: customer.customer.name,
+                          customerPhoneLast4:
+                            customer.customer.phone != null &&
+                            customer.customer.phone.length >= 4
+                              ? customer.customer.phone.slice(-4)
+                              : null,
+                          customerCard: null,
+                          offlineQr: null,
+                          amountMinor: Math.round(totals.total * 100),
+                        });
+                        setDebtSheet(null);
+                      }}>
+                      <span className="pos-picker-name">
+                        <b>{customer.customer.name}</b>
+                        <span className="pos-picker-sub" dir="ltr">
+                          {customer.customer.id_number}
+                          {customer.customer.phone != null &&
+                            ` · ${customer.customer.phone}`}
+                        </span>
+                      </span>
+                      <span className="pos-picker-side">
+                        <span className="chip danger">
+                          قائم {formatMoney(customer.outstandingMinor / 100)}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+              </div>
+              <div className="pos-local-create">
+                <div className="pos-local-create-title">
+                  <Icon name="user" size={16} />
+                  زبون جديد
+                </div>
+                <div className="pos-local-create-grid">
+                  <input
+                    placeholder="الاسم الكامل"
+                    value={localCreateName}
+                    onChange={e => setLocalCreateName(e.target.value)}
+                  />
+                  <input
+                    dir="ltr"
+                    inputMode="numeric"
+                    maxLength={9}
+                    placeholder="رقم الهوية (9 خانات)"
+                    value={localCreateId}
+                    onChange={e => setLocalCreateId(e.target.value)}
+                  />
+                  <input
+                    dir="ltr"
+                    inputMode="tel"
+                    maxLength={10}
+                    placeholder="الجوال 056/059 (اختياري)"
+                    value={localCreatePhone}
+                    onChange={e => setLocalCreatePhone(e.target.value)}
+                  />
+                  <button
+                    className="btn primary"
+                    onClick={() => void createLocalAndDebt()}>
+                    <Icon name="plus" size={15} />
+                    إنشاء وتسجيل الدين
+                  </button>
+                </div>
+                {localCreateError != null && (
+                  <div className="pos-create-error">{localCreateError}</div>
+                )}
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn ghost" onClick={() => setDebtSheet(null)}>
+                إغلاق
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1027,38 +1259,204 @@ export function PosScreen() {
       {/* ── صرف قسيمة ── */}
       {voucherSheet && (
         <div className="overlay" onClick={() => setVoucherSheet(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3>صرف قسيمة حملة</h3>
-            <div className="dc-hint">
-              امسح رمز القسيمة بالقارئ (سيُلتقط تلقائياً) أو الصقه هنا. القسيمة
-              تغطي قيمة السلة والفرق يُحسب نقداً.
-            </div>
-            <input
-              className="field"
-              dir="ltr"
-              placeholder="SILAV1-… أو رمز QR كامل"
-              value={voucherCode}
-              onChange={e => setVoucherCode(e.target.value)}
-            />
-            <div className="pos-math-row total">
-              <span>قيمة السلة الحالية</span>
-              <b>{formatMoney(totals.total)}</b>
-            </div>
-            <div className="pos-pay-buttons">
-              <button
-                className="btn primary"
-                disabled={busy}
-                onClick={() => void redeemVoucherOnCart()}>
-                صرف القسيمة على السلة
+          <div className="modal pos-pay" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <b>صرف قسيمة حملة</b>
+              <button className="modal-x" onClick={() => setVoucherSheet(false)}>
+                <Icon name="x" size={15} />
               </button>
+            </div>
+            <div className="modal-body">
+              <div className="pos-note">
+                <Icon name="info" size={15} />
+                امسح رمز القسيمة بالقارئ (سيُلتقط تلقائياً) أو الصقه هنا.
+                القسيمة تغطي قيمة السلة والفرق يُحسب نقداً.
+              </div>
+              <input
+                className="pos-voucher-input"
+                dir="ltr"
+                placeholder="SILAV1-… أو رمز QR كامل"
+                value={voucherCode}
+                onChange={e => setVoucherCode(e.target.value)}
+                autoFocus
+              />
+              <div className="pos-math-row total">
+                <span>قيمة السلة الحالية</span>
+                <b>{formatMoney(totals.total)}</b>
+              </div>
+            </div>
+            <div className="modal-foot">
               <button className="btn ghost" onClick={() => setVoucherSheet(false)}>
                 إلغاء
+              </button>
+              <span className="spacer" />
+              <button
+                className="btn primary lg"
+                disabled={busy}
+                onClick={() => void redeemVoucherOnCart()}>
+                <Icon name="ticket" size={16} />
+                صرف القسيمة على السلة
               </button>
             </div>
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+// ──────────────────────────────────────────────── صورة منتج
+
+/** صورة المنتج عبر بروتوكول asset — أو حرف أول أنيق عند غيابها. */
+function ProductImage({
+  product,
+  className,
+}: {
+  product: Product;
+  className?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const showImage =
+    product.image_uri != null &&
+    product.image_uri.length > 0 &&
+    !failed;
+  if (!showImage) {
+    return (
+      <span className={`${className ?? ''} pos-img-fallback`}>
+        {product.name.trim().charAt(0) || '؟'}
+      </span>
+    );
+  }
+  return (
+    <img
+      className={className}
+      src={convertFileSrc(product.image_uri as string)}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+      draggable={false}
+    />
+  );
+}
+
+// ──────────────────────────────────────────────── بلاطة منتج
+
+function ProductTile({
+  product,
+  price,
+  pricingMode,
+  large,
+  onAdd,
+}: {
+  product: Product;
+  price: number;
+  pricingMode: 'RETAIL' | 'WHOLESALE';
+  large: boolean;
+  onAdd: () => void;
+}) {
+  const hasDiscount = product.discount_pct > 0;
+  const out =
+    product.stock_untracked !== 1 && product.stock_quantity <= 0;
+  return (
+    <button
+      className={`pos-tile ${out ? 'out' : ''} ${large ? 'large' : ''}`}
+      onClick={onAdd}>
+      <span className="pos-tile-img">
+        <ProductImage product={product} />
+        {hasDiscount && (
+          <span className="pos-tile-ribbon">خصم {product.discount_pct}%</span>
+        )}
+        {product.stock_untracked === 1 ? (
+          <span className="pos-tile-stock">بلا تتبع</span>
+        ) : (
+          <span className={`pos-tile-stock ${out ? 'neg' : product.stock_quantity <= 5 ? 'low' : ''}`}>
+            {out ? 'نفد' : `متوفر ${product.stock_quantity}`}
+          </span>
+        )}
+      </span>
+      <span className="pos-tile-name">{product.name}</span>
+      <span className="pos-tile-foot">
+        {product.has_variants === 1 && (
+          <span className="chip brand sm">متغيرات</span>
+        )}
+        {product.sold_by_weight === 1 && (
+          <span className="chip muted sm">وزن/كغ</span>
+        )}
+        <span className="pos-tile-prices">
+          {hasDiscount && (
+            <s className="pos-old-price">
+              {formatMoney(
+                pricingMode === 'WHOLESALE'
+                  ? product.wholesale_price
+                  : product.retail_price,
+              )}
+            </s>
+          )}
+          <b className="pos-price">{formatMoney(price)}</b>
+        </span>
+      </span>
+    </button>
+  );
+}
+
+// ──────────────────────────────────────────────── صف قائمة
+
+function ProductListRow({
+  product,
+  price,
+  pricingMode,
+  onAdd,
+}: {
+  product: Product;
+  price: number;
+  pricingMode: 'RETAIL' | 'WHOLESALE';
+  onAdd: () => void;
+}) {
+  const hasDiscount = product.discount_pct > 0;
+  const out =
+    product.stock_untracked !== 1 && product.stock_quantity <= 0;
+  return (
+    <button className={`pos-lrow ${out ? 'out' : ''}`} onClick={onAdd}>
+      <span className="pos-lrow-img">
+        <ProductImage product={product} />
+      </span>
+      <span className="pos-lrow-name">
+        {product.name}
+        <span className="pos-lrow-tags">
+          {product.has_variants === 1 && (
+            <span className="chip brand sm">متغيرات</span>
+          )}
+          {product.sold_by_weight === 1 && (
+            <span className="chip muted sm">وزن/كغ</span>
+          )}
+          {hasDiscount && (
+            <span className="chip warn sm">خصم {product.discount_pct}%</span>
+          )}
+        </span>
+      </span>
+      <span className="pos-lrow-prices">
+        {hasDiscount && (
+          <s className="pos-old-price">
+            {formatMoney(
+              pricingMode === 'WHOLESALE'
+                ? product.wholesale_price
+                : product.retail_price,
+            )}
+          </s>
+        )}
+        <b className="pos-price">{formatMoney(price)}</b>
+      </span>
+      <span className={`pos-lrow-stock ${out ? 'neg' : ''}`}>
+        {product.stock_untracked === 1
+          ? 'بلا تتبع'
+          : out
+          ? 'نفد'
+          : `${product.stock_quantity}`}
+      </span>
+      <span className="pos-lrow-add">
+        <Icon name="plus" size={16} />
+      </span>
+    </button>
   );
 }
 
@@ -1079,12 +1477,12 @@ function CartRow({
     <div className="pos-line">
       <div className="pos-line-main">
         <div className="pos-line-name">
-          {line.name}
+          <b>{line.name}</b>
           {line.variantLabel != null && line.variantLabel !== '' && (
-            <span className="chip sm"> {line.variantLabel} </span>
+            <span className="chip muted sm">{line.variantLabel}</span>
           )}
           {line.bundleColor != null && (
-            <span className="chip sm"> ربطة {line.bundleColor} </span>
+            <span className="chip muted sm">ربطة {line.bundleColor}</span>
           )}
         </div>
         <div className="pos-line-math" dir="ltr">
@@ -1092,10 +1490,19 @@ function CartRow({
           <b>{formatMoney(line.unitPrice * line.quantity)}</b>
         </div>
       </div>
-      <div className="pos-line-ctrl">
-        <button className="btn sm" onClick={onInc}>+</button>
-        <button className="btn sm" onClick={onDec}>−</button>
-        <button className="btn sm danger-ghost" onClick={onRemove}>حذف</button>
+      <div className="pos-line-side">
+        <div className="pos-stepper">
+          <button onClick={onDec} aria-label="إنقاص">
+            <Icon name="minus" size={14} />
+          </button>
+          <b className="pos-line-qty" dir="ltr">{line.quantity}</b>
+          <button onClick={onInc} aria-label="زيادة">
+            <Icon name="plus" size={14} />
+          </button>
+        </div>
+        <button className="pos-line-remove" onClick={onRemove} aria-label="حذف">
+          <Icon name="trash" size={14} />
+        </button>
       </div>
     </div>
   );
@@ -1145,32 +1552,39 @@ function VariantPicker({
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal pos-variant" onClick={e => e.stopPropagation()}>
-        <h3>{product.name}</h3>
-        {isClothing ? (
-          <>
-            <div className="pos-variant-colors">
-              {colors.map(c => (
-                <button
-                  key={c}
-                  className={`chip-toggle-btn ${c === color ? 'on' : ''}`}
-                  onClick={() => setColor(c)}>
-                  {c === '' ? 'بدون لون' : c}
-                </button>
-              ))}
-            </div>
-            <div className="pos-variant-sizes">
-              {sizesOfColor.map(v => (
-                <button
-                  key={v.id}
-                  className="pos-variant-size"
-                  onClick={() => onAdd(v, quantity, false, color)}>
-                  <b>{v.size === '' ? 'قياس واحد' : v.size}</b>
-                  <span>مخزون {v.stock_quantity}</span>
-                </button>
-              ))}
-            </div>
-            <div className="pos-bundle">
-              <label>
+        <div className="modal-head">
+          <b>{product.name}</b>
+          <button className="modal-x" onClick={onClose}>
+            <Icon name="x" size={15} />
+          </button>
+        </div>
+        <div className="modal-body">
+          {isClothing ? (
+            <>
+              <div className="pos-variant-label">اللون</div>
+              <div className="pos-variant-colors">
+                {colors.map(c => (
+                  <button
+                    key={c}
+                    className={`pos-color-chip ${c === color ? 'on' : ''}`}
+                    onClick={() => setColor(c)}>
+                    {c === '' ? 'بدون لون' : c}
+                  </button>
+                ))}
+              </div>
+              <div className="pos-variant-label">المقاس</div>
+              <div className="pos-variant-sizes">
+                {sizesOfColor.map(v => (
+                  <button
+                    key={v.id}
+                    className="pos-variant-size"
+                    onClick={() => onAdd(v, quantity, false, color)}>
+                    <b>{v.size === '' ? 'قياس واحد' : v.size}</b>
+                    <span>مخزون {v.stock_quantity}</span>
+                  </button>
+                ))}
+              </div>
+              <label className="pos-bundle-toggle">
                 <input
                   type="checkbox"
                   checked={bundleMode}
@@ -1182,7 +1596,6 @@ function VariantPicker({
                 <div className="pos-bundle-row">
                   <span>عدد الربط:</span>
                   <input
-                    className="field"
                     type="number"
                     min="1"
                     value={qty}
@@ -1191,28 +1604,31 @@ function VariantPicker({
                   <button
                     className="btn primary sm"
                     onClick={() => onAdd(sizesOfColor[0], quantity, true, color)}>
+                    <Icon name="plus" size={14} />
                     إضافة الربطة
                   </button>
                 </div>
               )}
+            </>
+          ) : (
+            <div className="pos-variant-sizes">
+              {sizeVariants.map(v => (
+                <button
+                  key={v.id}
+                  className="pos-variant-size"
+                  onClick={() => onAdd(v, quantity, false, '')}>
+                  <b>{v.size}</b>
+                  <span>{formatMoney(priceFor(v))}</span>
+                </button>
+              ))}
             </div>
-          </>
-        ) : (
-          <div className="pos-variant-sizes">
-            {sizeVariants.map(v => (
-              <button
-                key={v.id}
-                className="pos-variant-size"
-                onClick={() => onAdd(v, quantity, false, '')}>
-                <b>{v.size}</b>
-                <span>{formatMoney(priceFor(v))}</span>
-              </button>
-            ))}
-          </div>
-        )}
-        <button className="btn ghost sm" style={{marginTop: 10}} onClick={onClose}>
-          إلغاء
-        </button>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>
+            إلغاء
+          </button>
+        </div>
       </div>
     </div>
   );

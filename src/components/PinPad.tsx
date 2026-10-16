@@ -1,8 +1,11 @@
 /**
- * components/PinPad.tsx — لوحة رمز PIN (React DOM — مكافئة PinPad
- * الأندرويد v57): إدخال 4 خانات، تمويه كامل، اهتزاز عند الخطأ.
+ * components/PinPad.tsx — لوحة رمز PIN v58 (إعادة تصميم كاملة):
+ * بطاقة مركّزة بأيقونة قفل داخل دائرة هوية، نقاط ملء نابضة، مفاتيح
+ * كبيرة مريحة، اهتزاز عند الخطأ + رسالة واضحة، ودعم لوحة المفاتيح
+ * الفعلية (أرقام + Backspace + Enter) لسرعة الكاشير.
  */
 import React, {useEffect, useRef, useState} from 'react';
+import {Icon} from './Icon';
 
 interface PinPadProps {
   title: string;
@@ -53,20 +56,45 @@ export function PinPad({
     }
   }
 
+  // دعم لوحة المفاتيح الفعلية — أرقام/Backspace/Escape.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key >= '0' && e.key <= '9') {
+        press(e.key);
+      } else if (e.key === 'Backspace') {
+        setPin(p => p.slice(0, -1));
+      } else if (e.key === 'Escape' && cancelable) {
+        onCancel?.();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pin, cancelable]);
+
   return (
     <div className="pinpad-overlay">
       <div className={`pinpad ${shake ? 'shake' : ''}`}>
+        <div className="pinpad-lock">
+          <Icon name="lock" size={24} />
+        </div>
         <div className="pinpad-title">{title}</div>
         {subtitle != null && <div className="pinpad-sub">{subtitle}</div>}
         <div className="pin-dots" dir="ltr">
           {[0, 1, 2, 3].map(i => (
-            <span key={i} className={`pin-dot ${i < pin.length ? 'filled' : ''}`}>
-              {i < pin.length ? '•' : ''}
-            </span>
+            <span
+              key={i}
+              className={`pin-dot ${i < pin.length ? 'filled' : ''} ${
+                i === pin.length ? 'cursor' : ''
+              }`}
+            />
           ))}
         </div>
         {attempts > 0 && (
-          <div className="pinpad-error">رمز خاطئ — حاول مجدداً ({attempts})</div>
+          <div className="pinpad-error">
+            <Icon name="alert" size={14} />
+            رمز خاطئ — حاول مجدداً ({attempts})
+          </div>
         )}
         <div className="pin-keys">
           {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(d => (
@@ -74,17 +102,19 @@ export function PinPad({
               {d}
             </button>
           ))}
-          <span />
-          <button className="pin-key" onClick={() => press('0')}>0</button>
+          <span className="pin-key-spacer" />
+          <button className="pin-key" onClick={() => press('0')}>
+            0
+          </button>
           <button
-            className="pin-key"
+            className="pin-key pin-key-action"
             onClick={() => setPin(p => p.slice(0, -1))}
             aria-label="حذف">
-            ⌫
+            <Icon name="backspace" size={20} />
           </button>
         </div>
         {cancelable && (
-          <button className="btn ghost sm" style={{marginTop: 10}} onClick={onCancel}>
+          <button className="btn ghost sm" style={{marginTop: 8}} onClick={onCancel}>
             {cancelLabel}
           </button>
         )}

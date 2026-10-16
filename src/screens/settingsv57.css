@@ -366,10 +366,10 @@
   border-radius: var(--radius-sm);
   background: radial-gradient(
       500px 160px at 15% -60%,
-      rgba(234, 88, 12, 0.2),
+      var(--brand-soft),
       transparent
     ),
-    var(--bg);
+    var(--surface-2);
   border: 1px solid var(--line);
 }
 .sv57-hero .label {
@@ -411,19 +411,19 @@
   flex-shrink: 0;
 }
 .sv57-rank.gold {
-  background: rgba(234, 179, 8, 0.18);
-  color: #facc15;
-  border-color: rgba(234, 179, 8, 0.45);
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: var(--warn-soft);
 }
 .sv57-rank.silver {
   background: var(--surface-2);
-  color: #cbd5e1;
-  border-color: rgba(203, 213, 225, 0.4);
+  color: var(--ink-soft);
+  border-color: var(--line);
 }
 .sv57-rank.bronze {
-  background: rgba(180, 83, 9, 0.2);
-  color: #fdba74;
-  border-color: rgba(217, 119, 6, 0.4);
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  border-color: var(--brand-soft);
 }
 .sv57-top-line {
   display: flex;

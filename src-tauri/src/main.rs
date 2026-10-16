@@ -15,13 +15,14 @@ use sela_core::hardware;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 pub struct AppState {
     pub conn: Mutex<rusqlite::Connection>,
     pub config: Mutex<ConfigStore>,
-    /// جلسات المعاملات — اتصال مخصص لكل معاملة (BEGIN IMMEDIATE).
-    pub sessions: Mutex<HashMap<u64, rusqlite::Connection>>,
+    /// جلسات المعاملات — اتصال مخصص لكل معاملة (BEGIN IMMEDIATE)
+    /// مع لحظة الإنشاء لمرصد المسرّب منها (v58).
+    pub sessions: Mutex<HashMap<u64, sqlbridge::TxSession>>,
     pub next_tx: AtomicU64,
     pub db_path: std::path::PathBuf,
 }
@@ -33,6 +34,17 @@ fn main() {
     let config = ConfigStore::open(sela_core::paths::config_path()).expect("تعذر فتح config.json");
 
     tauri::Builder::default()
+        // ── مثيل واحد فقط (v58) ─────────────────────────────────────
+        // فتح التطبيق مرتين كان يفتح قاعدتي اتصال على نفس الملف —
+        // أقفال كتابة متزاحمة («database is locked») وتراكب كتابة
+        // config.json. الآن: النسخة الثانية تركّز نافذة الأولى وتخرج.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         // ── طبقة الشبكة عبر نواة Rust (v57.2) ─────────────────────
         // طلبات HTTP كلها تنفَّذ من العملية الأصلية لا من WebView:
         // سياسة CSP وسلوك CORS الخاصين بالمتصفح لا ينطبقان عليها —

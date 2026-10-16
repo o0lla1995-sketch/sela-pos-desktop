@@ -12,24 +12,87 @@ use tauri::{command, State};
 
 type CmdResult<T> = Result<T, String>;
 
+/// عمر جلسة المعاملة قبل اعتبارها مسرّبة (v58): أي معاملة صحية
+/// تكتمل خلال أجزاء من الثانية؛ جلسة تتجاوز هذه المدة معناها أن
+/// الواجهة سقطت قبل tx_commit/tx_rollback — واتصالها يحتجز قفل
+/// الكتابة (BEGIN IMMEDIATE) فيعطل كل الكتابات اللاحقة بخطأ
+/// «database is locked». الكنس التلقائي يتراجع عنها ويحرر القفل.
+const STALE_TX_AFTER: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// جلسة معاملة حية + لحظة إنشائها (لمرس الكنس التلقائي).
+pub struct TxSession {
+    pub conn: Connection,
+    pub created: std::time::Instant,
+}
+
+/// يتراجع عن كل الجلسات المسرّبة ويحرر أقفالها — يُستدعى قبل بدء
+/// أي معاملة جديدة (وأي إعادة محاولة بعد «database is locked»).
+fn sweep_stale_sessions(state: &AppState) -> usize {
+    let mut sessions = state.sessions.lock().unwrap();
+    let stale: Vec<u64> = sessions
+        .iter()
+        .filter(|(_, s)| s.created.elapsed() > STALE_TX_AFTER)
+        .map(|(id, _)| *id)
+        .collect();
+    for id in &stale {
+        if let Some(session) = sessions.remove(id) {
+            let _ = session.conn.execute_batch("ROLLBACK");
+        }
+    }
+    stale.len()
+}
+
 // ──────────────────────────────────────────────── تنفيذ مباشر (auto-commit)
 
 #[command]
 pub fn sql_run(state: State<AppState>, sql: String, params: Option<Vec<Value>>) -> CmdResult<Value> {
+    let bound = params.unwrap_or_default();
     let mut conn = state.conn.lock().unwrap();
-    sela_core::sqlbridge::run_on(&mut conn, &sql, &params.unwrap_or_default())
+    match sela_core::sqlbridge::run_on(&mut conn, &sql, &bound) {
+        Ok(result) => Ok(result),
+        Err(message) => {
+            // v58: أول «database is locked» يكنس الجلسات المسرّبة
+            // (قفل كتابة متروك من معاملة سقطت) ثم يعيد المحاولة
+            // مرة واحدة قبل تسليم الخطأ للمستخدم.
+            if !message.contains("locked") && !message.contains("busy") {
+                return Err(message);
+            }
+            drop(conn);
+            let freed = sweep_stale_sessions(&state);
+            let mut conn = state.conn.lock().unwrap();
+            match sela_core::sqlbridge::run_on(&mut conn, &sql, &bound) {
+                Ok(result) => {
+                    if freed > 0 {
+                        eprintln!(
+                            "[sela] حُرّرت {freed} جلسة معاملة مسرّبة كانت تحتجز قفل الكتابة"
+                        );
+                    }
+                    Ok(result)
+                }
+                Err(retry) => Err(retry),
+            }
+        }
+    }
 }
 
 // ──────────────────────────────────────────────── جلسات المعاملات
 
 #[command]
 pub fn tx_begin(state: State<AppState>) -> CmdResult<u64> {
+    // v58: قبل أي معاملة جديدة — تحرير أقفال الجلسات المسرّبة.
+    sweep_stale_sessions(&state);
     let id = state.next_tx.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let conn = sela_core::db::open_session(&state.db_path)
         .map_err(|e| format!("تعذر فتح جلسة معاملة: {e}"))?;
     conn.execute_batch("BEGIN IMMEDIATE")
         .map_err(|e| format!("تعذر بدء المعاملة: {e}"))?;
-    state.sessions.lock().unwrap().insert(id, conn);
+    state.sessions.lock().unwrap().insert(
+        id,
+        TxSession {
+            conn,
+            created: std::time::Instant::now(),
+        },
+    );
     Ok(id)
 }
 
@@ -41,34 +104,35 @@ pub fn tx_execute(
     params: Option<Vec<Value>>,
 ) -> CmdResult<Value> {
     let mut sessions = state.sessions.lock().unwrap();
-    let conn = sessions
+    let session = sessions
         .get_mut(&tx_id)
         .ok_or_else(|| "المعاملة غير موجودة أو انتهت".to_string())?;
-    sela_core::sqlbridge::run_on(conn, &sql, &params.unwrap_or_default())
+    sela_core::sqlbridge::run_on(&mut session.conn, &sql, &params.unwrap_or_default())
 }
 
 #[command]
 pub fn tx_commit(state: State<AppState>, tx_id: u64) -> CmdResult<()> {
-    let conn = state
+    let session = state
         .sessions
         .lock()
         .unwrap()
         .remove(&tx_id)
         .ok_or_else(|| "المعاملة غير موجودة أو انتهت".to_string())?;
-    conn.execute_batch("COMMIT")
-        .map_err(|e| format!("تعذر تثبيت المعاملة: {e}"))?;
-    Ok(())
+    session
+        .conn
+        .execute_batch("COMMIT")
+        .map_err(|e| format!("تعذر تثبيت المعاملة: {e}"))
 }
 
 #[command]
 pub fn tx_rollback(state: State<AppState>, tx_id: u64) -> CmdResult<()> {
-    let conn = state
+    let session = state
         .sessions
         .lock()
         .unwrap()
         .remove(&tx_id)
         .ok_or_else(|| "المعاملة غير موجودة أو انتهت".to_string())?;
-    let _ = conn.execute_batch("ROLLBACK");
+    let _ = session.conn.execute_batch("ROLLBACK");
     Ok(())
 }
 

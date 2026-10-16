@@ -30,6 +30,7 @@ import {SaleRepo} from '../database/repositories/SaleRepo';
 import {LocalDebtsRepo} from '../database/repositories/LocalDebtsRepo';
 import {SilaRepo} from '../services/sila/SilaRepo';
 import {OnlineRepo} from '../database/repositories/OnlineRepo';
+import {Icon, type IconName} from '../components/Icon';
 import {
   APP_NAME_AR,
   APP_VERSION_LABEL,
@@ -317,22 +318,22 @@ export function HomeScreen({goTo}: {goTo: (screen: string) => void}) {
         <button
           className="ih-quick-card accent"
           onClick={() => goTo('pos')}>
-          <span className="ih-quick-icon">🛒</span>
+          <span className="ih-quick-icon"><Icon name="cart" size={26} /></span>
           <span className="ih-quick-label">بيع جديد</span>
         </button>
         <button className="ih-quick-card" onClick={() => goTo('stocktake')}>
-          <span className="ih-quick-icon">📋</span>
+          <span className="ih-quick-icon"><Icon name="clipboard" size={26} /></span>
           <span className="ih-quick-label">جرد</span>
         </button>
         <button className="ih-quick-card" onClick={() => goTo('reports')}>
-          <span className="ih-quick-icon">📊</span>
+          <span className="ih-quick-icon"><Icon name="chart" size={26} /></span>
           <span className="ih-quick-label">تقارير</span>
         </button>
         {onlineEnabled && (
           <button
             className="ih-quick-card"
             onClick={() => goTo('online-orders')}>
-            <span className="ih-quick-icon">🛍️</span>
+            <span className="ih-quick-icon"><Icon name="basket" size={26} /></span>
             <span className="ih-quick-label">طلبات أونلاين</span>
             {onlineNewCount > 0 && (
               <span className="ih-online-badge">
@@ -379,11 +380,16 @@ export function HomeScreen({goTo}: {goTo: (screen: string) => void}) {
                 key={`${product.id}:${state}`}
                 className={`ih-alert-row ${tone}`}>
                 <span className={`ih-alert-icon ${tone}`}>
-                  {state === 'out'
-                    ? '📦'
-                    : state === 'expired' || state === 'expiring'
-                    ? '⏰'
-                    : '⚠️'}
+                  <Icon
+                    name={
+                      state === 'out'
+                        ? 'packageMinus'
+                        : state === 'expired' || state === 'expiring'
+                        ? 'clock'
+                        : 'alert'
+                    }
+                    size={20}
+                  />
                 </span>
                 <div className="ih-alert-texts">
                   <div className="ih-alert-name">{product.name}</div>

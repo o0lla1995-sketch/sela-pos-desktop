@@ -1,7 +1,11 @@
 /**
- * app.tsx — الهيكل العام v57: بوابة الترخيص → بوابة قفل PIN →
- * القشرة (شريط جانبي أيمن + الشاشات) + شريط حالة الاشتراك (grace)
- * + التوست + موجّه الباركود العام + إقلاع محرّكي صِلة والبيع أونلاين.
+ * app.tsx — الهيكل العام v58: بوابة الترخيص → بوابة قفل PIN →
+ * القشرة (شريط جانبي أيمن بأيقونات SVG + الشاشات) + شريط حالة
+ * الاشتراك (grace) + التوست + موجّه الباركود العام + إقلاع محرّكي
+ * صِلة والبيع أونلاين.
+ *
+ * v58: كل شاشة داخل ErrorBoundary — أي استثناء عرض يظهر بطاقة
+ * عربية واضحة بدل الشاشة البيضاء، وبقية النظام يواصل العمل.
  */
 import React, {useCallback, useEffect, useState} from 'react';
 import {evaluate, heartbeat, type LicenseStatus} from './license/LicenseService';
@@ -17,6 +21,8 @@ import {installGlobalScanner} from './lib/scanner';
 import {api} from './lib/tauri';
 import {APP_VERSION_LABEL} from './core/config';
 import {AppLockGate} from './components/AppLockGate';
+import {ErrorBoundary} from './components/ErrorBoundary';
+import {Icon, type IconName} from './components/Icon';
 import {ActivationScreen} from './screens/ActivationScreen';
 import {HomeScreen} from './screens/HomeScreen';
 import {PosScreen} from './screens/PosScreen';
@@ -51,19 +57,19 @@ type ScreenKey =
   | 'notifications'
   | 'settings';
 
-const NAV: {key: ScreenKey; label: string; icon: string}[] = [
-  {key: 'home', label: 'الرئيسية', icon: '🏠'},
-  {key: 'pos', label: 'نقطة البيع', icon: '🛒'},
-  {key: 'invoices', label: 'الفواتير', icon: '🧾'},
-  {key: 'online-orders', label: 'الطلبات أونلاين', icon: '🛍️'},
-  {key: 'inventory', label: 'المخزون', icon: '📦'},
-  {key: 'stocktake', label: 'الجرد', icon: '📋'},
-  {key: 'debts', label: 'ديون المتجر', icon: '📒'},
-  {key: 'cash', label: 'الخزينة', icon: '💰'},
-  {key: 'sila', label: 'صِلة والقسائم', icon: '🔗'},
-  {key: 'reports', label: 'التقارير', icon: '📊'},
-  {key: 'notifications', label: 'الإشعارات', icon: '🔔'},
-  {key: 'settings', label: 'الإعدادات', icon: '⚙️'},
+const NAV: {key: ScreenKey; label: string; icon: IconName}[] = [
+  {key: 'home', label: 'الرئيسية', icon: 'home'},
+  {key: 'pos', label: 'نقطة البيع', icon: 'cart'},
+  {key: 'invoices', label: 'الفواتير', icon: 'tag'},
+  {key: 'online-orders', label: 'الطلبات أونلاين', icon: 'basket'},
+  {key: 'inventory', label: 'المخزون', icon: 'box'},
+  {key: 'stocktake', label: 'الجرد', icon: 'clipboard'},
+  {key: 'debts', label: 'ديون المتجر', icon: 'book'},
+  {key: 'cash', label: 'الخزينة', icon: 'wallet'},
+  {key: 'sila', label: 'صِلة والقسائم', icon: 'link'},
+  {key: 'reports', label: 'التقارير', icon: 'chart'},
+  {key: 'notifications', label: 'الإشعارات', icon: 'bell'},
+  {key: 'settings', label: 'الإعدادات', icon: 'settings'},
 ];
 
 export function App() {
@@ -75,9 +81,30 @@ export function App() {
   const unread = useNotificationsStore(s => s.unreadCount);
   const settings = useSettingsStore(s => s.settings);
   const themeMode = useSettingsStore(s => s.themeMode);
+  const setThemeMode = useSettingsStore(s => s.setThemeMode);
   const silaPaired = useSilaStore(s => s.pairing != null);
 
   const refreshStatus = useCallback(() => {
+    // معاينة المتصفح في وضع التطوير فقط: حالة نشطة افتراضية كي
+    // تُعاين الشاشات — يُحذف الفرع كلياً من بناء الإنتاج.
+    if (import.meta.env.DEV && !('__TAURI_INTERNALS__' in window)) {
+      setStatus({
+        state: 'active',
+        license: {
+          v: 1,
+          keyId: 0,
+          plan: 'monthly',
+          deviceId: 'dev-preview',
+          activatedAt: Date.now(),
+          expiresAt: Date.now() + 30 * 86400_000,
+        },
+        remainingMs: 30 * 86400_000,
+        offlineHours: 0,
+        lockReason: null,
+        revoked: false,
+      });
+      return;
+    }
     void evaluate().then(setStatus);
   }, []);
 
@@ -142,12 +169,12 @@ export function App() {
 
   if (status == null || status.state === 'needs_activation' || status.state === 'locked') {
     return (
-      <>
+      <ErrorBoundary label="شاشة التفعيل">
         <ActivationScreen status={status} onRefresh={refreshStatus} />
         {toasts.map(t => (
           <div key={t.id} className={`toast ${t.kind}`}>{t.message}</div>
         ))}
-      </>
+      </ErrorBoundary>
     );
   }
 
@@ -155,8 +182,11 @@ export function App() {
     <AppLockGate>
       {status.state === 'grace' && (
         <div className="state-banner">
-          ⚠️ العمل دون إنترنت منذ {Math.round(status.offlineHours)} ساعة — يظل
-          النظام يعمل حتى 72 ساعة، بعدها يلزم الاتصال بالسيرفر مرة واحدة.
+          <Icon name="alert" size={17} />
+          <span>
+            العمل دون إنترنت منذ {Math.round(status.offlineHours)} ساعة — يظل
+            النظام يعمل حتى 72 ساعة، بعدها يلزم الاتصال بالسيرفر مرة واحدة.
+          </span>
         </div>
       )}
       <div className="app">
@@ -173,23 +203,30 @@ export function App() {
               key={item.key}
               className={`nav-item ${screen === item.key ? 'active' : ''}`}
               onClick={() => setScreen(item.key)}>
-              <span className="icon">{item.icon}</span>
-              <span>{item.label}</span>
+              <span className="icon">
+                <Icon name={item.icon} />
+              </span>
+              <span className="label">{item.label}</span>
               {item.key === 'notifications' && unread > 0 && (
-                <span className="chip brand" style={{marginInlineStart: 'auto'}}>
-                  {unread}
-                </span>
+                <span className="nav-badge">{unread > 99 ? '99+' : unread}</span>
               )}
               {item.key === 'sila' && silaPaired && (
-                <span
-                  className="dot-ok"
-                  title="مقترن بخدمة صِلة"
-                  style={{marginInlineStart: 'auto'}}
-                />
+                <span className="dot-ok" title="مقترن بخدمة صِلة" />
               )}
             </button>
           ))}
           <div className="nav-spacer" />
+          <button
+            className="nav-item"
+            onClick={() => setThemeMode(themeMode === 'dark' ? 'light' : 'dark')}
+            title={themeMode === 'dark' ? 'التبديل إلى الوضع الفاتح' : 'التبديل إلى الوضع الداكن'}>
+            <span className="icon">
+              <Icon name={themeMode === 'dark' ? 'sun' : 'moon'} />
+            </span>
+            <span className="label">
+              {themeMode === 'dark' ? 'الوضع الفاتح' : 'الوضع الداكن'}
+            </span>
+          </button>
           <div className="nav-meta">
             الترخيص:{' '}
             {status.state === 'active'
@@ -202,25 +239,81 @@ export function App() {
 
         <main className="main">
           {screen === 'pos' ? (
-            <PosScreen />
+            <ErrorBoundary label="نقطة البيع">
+              <PosScreen />
+            </ErrorBoundary>
           ) : (
             <div style={{flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0}}>
-              {screen === 'home' && <HomeScreen goTo={key => setScreen(key as ScreenKey)} />}
-              {screen === 'invoices' && <InvoicesScreen />}
-              {screen === 'online-orders' && <OnlineOrdersScreen />}
-              {screen === 'online-products' && <OnlineProductsScreen />}
-              {screen === 'online-selling' && (
-                <OnlineSellingScreen goTo={key => setScreen(key as ScreenKey)} />
+              {screen === 'home' && (
+                <ErrorBoundary label="الرئيسية">
+                  <HomeScreen goTo={key => setScreen(key as ScreenKey)} />
+                </ErrorBoundary>
               )}
-              {screen === 'inventory' && <InventoryScreen />}
-              {screen === 'stocktake' && <StocktakeScreen />}
-              {screen === 'debts' && <LocalDebtsScreen />}
-              {screen === 'cash' && <CashMovementsScreen />}
-              {screen === 'sila' && <SilaScreen />}
-              {screen === 'stock-alerts' && <StockAlertsScreen goTo={key => setScreen(key as ScreenKey)} />}
-              {screen === 'reports' && <ReportsScreen />}
-              {screen === 'notifications' && <NotificationsScreen />}
-              {screen === 'settings' && <SettingsScreen goTo={key => setScreen(key as ScreenKey)} />}
+              {screen === 'invoices' && (
+                <ErrorBoundary label="الفواتير">
+                  <InvoicesScreen />
+                </ErrorBoundary>
+              )}
+              {screen === 'online-orders' && (
+                <ErrorBoundary label="الطلبات أونلاين">
+                  <OnlineOrdersScreen />
+                </ErrorBoundary>
+              )}
+              {screen === 'online-products' && (
+                <ErrorBoundary label="منتجات أونلاين">
+                  <OnlineProductsScreen />
+                </ErrorBoundary>
+              )}
+              {screen === 'online-selling' && (
+                <ErrorBoundary label="البيع أونلاين">
+                  <OnlineSellingScreen goTo={key => setScreen(key as ScreenKey)} />
+                </ErrorBoundary>
+              )}
+              {screen === 'inventory' && (
+                <ErrorBoundary label="المخزون">
+                  <InventoryScreen />
+                </ErrorBoundary>
+              )}
+              {screen === 'stocktake' && (
+                <ErrorBoundary label="الجرد">
+                  <StocktakeScreen />
+                </ErrorBoundary>
+              )}
+              {screen === 'debts' && (
+                <ErrorBoundary label="ديون المتجر">
+                  <LocalDebtsScreen />
+                </ErrorBoundary>
+              )}
+              {screen === 'cash' && (
+                <ErrorBoundary label="الخزينة">
+                  <CashMovementsScreen />
+                </ErrorBoundary>
+              )}
+              {screen === 'sila' && (
+                <ErrorBoundary label="صِلة والقسائم">
+                  <SilaScreen />
+                </ErrorBoundary>
+              )}
+              {screen === 'stock-alerts' && (
+                <ErrorBoundary label="تنبيهات المخزون">
+                  <StockAlertsScreen goTo={key => setScreen(key as ScreenKey)} />
+                </ErrorBoundary>
+              )}
+              {screen === 'reports' && (
+                <ErrorBoundary label="التقارير">
+                  <ReportsScreen />
+                </ErrorBoundary>
+              )}
+              {screen === 'notifications' && (
+                <ErrorBoundary label="الإشعارات">
+                  <NotificationsScreen />
+                </ErrorBoundary>
+              )}
+              {screen === 'settings' && (
+                <ErrorBoundary label="الإعدادات">
+                  <SettingsScreen goTo={key => setScreen(key as ScreenKey)} />
+                </ErrorBoundary>
+              )}
             </div>
           )}
         </main>

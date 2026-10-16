@@ -551,7 +551,9 @@ export type NotificationKind =
   | 'sila_voucher'
   /** v20: a campaign settlement arrived / a campaign was fully
    *  settled (المؤسسة سدّدت حقك). */
-  | 'sila_campaign';
+  | 'sila_campaign'
+  /** v58: النسخ الاحتياطي التلقائي فشل — يجب أن يراه التاجر فوراً. */
+  | 'backup';
 
 export interface AppNotification {
   /** Stable id (timestamp-based). */
