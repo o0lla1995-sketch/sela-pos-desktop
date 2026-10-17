@@ -207,7 +207,10 @@ export function stopEngine(): void {
 /* ── التسجيل ───────────────────────────────────────────────────── */
 
 /** يسجل/يحدّث ملف المتجر على الخادم. التفعيل=true ينشر المنتجات،
- *  والتعطيل=false يخفيها فوراً (بلا حذف). */
+ *  والتعطيل=false يخفيها فوراً (بلا حذف).
+ *  v58 (الجولة 70): يرسل رقم المتجر المحفوظ مع الطلب — الخادم
+ *  يستعيد به المتجر الأصلي عند تغيير مفتاح الاشتراك أو الجهاز
+ *  (الحل المزدوج ضد ازدواج المتاجر: مفتاح + رقم متجر). */
 export async function registerStore(
   settings: OnlineSellingSettings,
 ): Promise<{storeNumber: string}> {
@@ -219,6 +222,7 @@ export async function registerStore(
       region: settings.region,
       phone: settings.phone,
       whatsapp: settings.whatsapp,
+      storeNumber: settings.storeNumber ?? null,
     },
     deliveryRegions: settings.deliveryRegions.map(r => ({
       name: r.name,

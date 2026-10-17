@@ -119,6 +119,10 @@ export interface OnlineStoreProfile {
   region: string;
   phone: string;
   whatsapp: string;
+  /** v58 (الجولة 70): رقم المتجر الدائم المحفوظ محلياً — يُرسع مع
+   *  register ليستعيد الخادم المتجر الأصلي عند تغيير مفتاح
+   *  الاشتراك أو الجهاز (الحل المزدوج: مفتاح + رقم متجر). */
+  storeNumber?: string | null;
 }
 
 export const OnlineApi = {
@@ -132,7 +136,19 @@ export const OnlineApi = {
       store: {storeNumber: string; published: boolean};
       serverTime: number;
     }>('/api/v1/store/register', {
-      store: input.store,
+      store: {
+        name: input.store.name,
+        description: input.store.description,
+        category: input.store.category,
+        region: input.store.region,
+        phone: input.store.phone,
+        whatsapp: input.store.whatsapp,
+        /* v58: رقم المتجر المحفوظ — حارس ازدواج المتاجر عند تغيير
+         * المفتاح/الجهاز؛ يُرسع فقط متى وُجد (خوادم أقدم تتجاهله). */
+        ...(input.store.storeNumber
+          ? {storeNumber: input.store.storeNumber}
+          : {}),
+      },
       deliveryRegions: input.deliveryRegions,
       published: input.published,
     });
