@@ -256,7 +256,7 @@ fn serve_connection(
 
     // انتظار رد الواجهة (أو المهلة).
     let guard = slot.response.lock().unwrap();
-    let (guard, _timed_out) = match slot
+    let (mut guard, _timed_out) = match slot
         .signal
         .wait_timeout(guard, Duration::from_millis(REQUEST_TIMEOUT_MS))
     {
