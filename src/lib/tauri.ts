@@ -12,6 +12,32 @@ const isTauri =
   typeof window !== 'undefined' &&
   '__TAURI_INTERNALS__' in window;
 
+/**
+ * تبديل ملء الشاشة الحقيقي (F11) — داخل نافذة Tauri فقط؛
+ * في معاينة المتصفح يُستخدم ملء شاشة المتصفح نفسه.
+ */
+export async function toggleFullscreen(): Promise<void> {
+  if (!isTauri) {
+    try {
+      if (document.fullscreenElement != null) {
+        await document.exitFullscreen();
+      } else {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch {
+      // المتصفح رفض — تجاهل.
+    }
+    return;
+  }
+  const {getCurrentWindow} = await import('@tauri-apps/api/window');
+  const win = getCurrentWindow();
+  if (await win.isFullscreen()) {
+    await win.setFullscreen(false);
+  } else {
+    await win.setFullscreen(true);
+  }
+}
+
 let mockReady: Promise<typeof import('./devMock')> | null = null;
 if (!isTauri && import.meta.env.DEV) {
   // ديناميكي عمداً — Rollup يحذفه مع الفرع كاملاً عند import.meta.env.DEV=false

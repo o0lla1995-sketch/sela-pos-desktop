@@ -18,7 +18,7 @@ import {
 } from './state/appStores';
 import {useSilaStore} from './stores/silaStore';
 import {installGlobalScanner} from './lib/scanner';
-import {api} from './lib/tauri';
+import {api, toggleFullscreen} from './lib/tauri';
 import {APP_VERSION_LABEL} from './core/config';
 import {AppLockGate} from './components/AppLockGate';
 import {ErrorBoundary} from './components/ErrorBoundary';
@@ -204,6 +204,19 @@ export function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [screen]);
+
+  // v65: F11 يبدّل ملء الشاشة الحقيقي — النافذة تفتح مكبَّرة تملأ
+  // الشاشة (طلب التاجر)، وF11 للمزيد: إخفاء شريط العنوان كلياً.
+  useEffect(() => {
+    const onFullscreenKey = (e: KeyboardEvent) => {
+      if (e.key === 'F11') {
+        e.preventDefault();
+        void toggleFullscreen();
+      }
+    };
+    window.addEventListener('keydown', onFullscreenKey);
+    return () => window.removeEventListener('keydown', onFullscreenKey);
+  }, []);
 
   if (!ready) {
     return (
