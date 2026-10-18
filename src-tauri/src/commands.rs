@@ -643,7 +643,7 @@ pub fn lan_status(state: State<AppState>) -> bool {
 pub fn lan_respond(state: State<AppState>, id: u64, status: u16, body: String) -> CmdResult<()> {
     let lan = state.lan.lock().unwrap();
     if let Some(entry) = lan.as_ref() {
-        entry.server.respond(id, status, body);
+        entry.server.responder().respond(id, status, body);
         Ok(())
     } else {
         Err("خادم الكاشير لا يعمل".into())
