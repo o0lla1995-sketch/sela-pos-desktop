@@ -43,6 +43,7 @@ import {
   syncProducts,
 } from '../services/online/OnlineStoreService';
 import {ProductFormModal} from './ProductFormModal';
+import {QuickProductSheet} from '../components/QuickProductSheet';
 import './inventoryv57.css';
 
 type CategoryFilter = number | 'all';
@@ -104,6 +105,8 @@ export function InventoryScreen() {
   // ── النموذج ──────────────────────────────────────────────────
   /** undefined = مغلق · null = منتج جديد · Product = تعديل. */
   const [editing, setEditing] = useState<Product | null | undefined>(undefined);
+  // v58 (الجولة 62): الإضافة السريعة لمود «نقطة البيع».
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   // ── إدارة التصنيفات ──────────────────────────────────────────
   const [catsOpen, setCatsOpen] = useState(false);
@@ -636,6 +639,13 @@ export function InventoryScreen() {
             aria-label="بحث في المنتجات"
           />
         </div>
+        {settings.storeMode === 'pos' ? (
+          <button
+            className="btn success"
+            onClick={() => setQuickAddOpen(true)}>
+            + سريع
+          </button>
+        ) : null}
         <button
           className="btn primary"
           onClick={() => setEditing(null)}>
@@ -999,6 +1009,12 @@ export function InventoryScreen() {
         {' — '}عند التعديل تفتح نافذة ملف المنتج بكامل قدراتها (خصم،
         متغيرات، وحدات، استلام بضاعة).
       </div>
+
+      {/* v58 (الجولة 62): نافذة الإضافة السريعة لمود نقطة البيع. */}
+      <QuickProductSheet
+        open={quickAddOpen}
+        onClose={() => setQuickAddOpen(false)}
+      />
 
       {/* نافذة ملف المنتج */}
       {editing !== undefined && (

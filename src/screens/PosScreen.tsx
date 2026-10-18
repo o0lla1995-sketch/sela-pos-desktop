@@ -50,6 +50,7 @@ import {
 } from '../core/config';
 import {applyAmountKey, AMOUNT_KEYPAD_KEYS} from '../core/amountKeypad';
 import {Icon} from '../components/Icon';
+import {QuickProductSheet} from '../components/QuickProductSheet';
 import type {
   CartLine,
   Product,
@@ -134,6 +135,8 @@ export function PosScreen() {
 
   // ── واجهة ──
   const [search, setSearch] = useState('');
+  // v58 (الجولة 62): الإضافة السريعة لمود «نقطة البيع».
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [categoryId, setCategoryId] = useState<number | 'all'>('all');
   const [view, setView] = useState<PosProductView>(settings.posProductView);
   const [busy, setBusy] = useState(false);
@@ -949,6 +952,14 @@ export function PosScreen() {
             <Icon name="layoutCards" size={16} />
           </button>
         </div>
+        {settings.storeMode === 'pos' ? (
+          <button
+            className="btn sm success"
+            onClick={() => setQuickAddOpen(true)}
+            title="إضافة منتج سريع (حبة/علبة/غرام)">
+            + سريع
+          </button>
+        ) : null}
         <span className="pos-scanhint">
           <Icon name="scan" size={15} />
           المسح العام نشط — وجّه القارئ نحو أي مكان
@@ -1583,6 +1594,12 @@ export function PosScreen() {
           </div>
         </div>
       )}
+
+      {/* v58 (الجولة 62): نافذة الإضافة السريعة لمود نقطة البيع. */}
+      <QuickProductSheet
+        open={quickAddOpen}
+        onClose={() => setQuickAddOpen(false)}
+      />
     </div>
   );
 }

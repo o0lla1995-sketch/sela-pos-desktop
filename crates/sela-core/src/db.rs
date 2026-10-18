@@ -156,7 +156,8 @@ CREATE TABLE IF NOT EXISTS sales (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   returned_minor REAL NOT NULL DEFAULT 0,
   return_kind TEXT
-    CHECK (return_kind IS NULL OR return_kind IN ('cash','sila','local','online'))
+    CHECK (return_kind IS NULL OR return_kind IN ('cash','sila','local','online')),
+  cashier_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS sale_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -188,7 +189,8 @@ CREATE TABLE IF NOT EXISTS sale_returns (
   is_exchange INTEGER NOT NULL DEFAULT 0,
   exchange_minor INTEGER NOT NULL DEFAULT 0,
   note TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  cashier_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS sale_return_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -469,6 +471,34 @@ CREATE TABLE IF NOT EXISTS online_order_items (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_online_items_variant_unique
  ON online_order_items(server_order_id, product_ref, COALESCE(variant, ''));
+-- ── v58 (الجولة 62): الكاشير على الشبكة المحلية (سيلّا كاشير) ──
+-- حسابات الكاشيرين (كلمة المرور SHA-512 مملّحة فقط) وأجهزتهم
+-- (أول اتصال pending حتى يوافق المدير).
+CREATE TABLE IF NOT EXISTS lan_cashiers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  salt TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  max_discount_pct REAL NOT NULL DEFAULT 10,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  last_seen_at TEXT
+);
+CREATE TABLE IF NOT EXISTS lan_devices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cashier_id INTEGER NOT NULL REFERENCES lan_cashiers(id) ON DELETE CASCADE,
+  device_id TEXT NOT NULL,
+  device_label TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending','approved','denied')),
+  token TEXT,
+  ip TEXT,
+  first_seen_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  last_seen_at TEXT,
+  UNIQUE (cashier_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS idx_landev_status ON lan_devices(status, cashier_id);
 "#;
 
 /// هل الجدول موجود؟
@@ -517,10 +547,12 @@ fn heal_v57(conn: &Connection) -> Result<()> {
         ("products", "online_listed", "INTEGER NOT NULL DEFAULT 0"),
         ("product_embeddings", "thumbnail_path", "TEXT"),
         ("sales", "returned_minor", "REAL NOT NULL DEFAULT 0"),
+        ("sales", "cashier_id", "INTEGER"),
         ("sale_items", "variant_label", "TEXT"),
         ("sale_items", "variant_id", "INTEGER"),
         ("sale_items", "variant_color", "TEXT"),
         ("sale_returns", "is_exchange", "INTEGER NOT NULL DEFAULT 0"),
+        ("sale_returns", "cashier_id", "INTEGER"),
         ("sale_returns", "exchange_minor", "INTEGER NOT NULL DEFAULT 0"),
         ("sila_debt_queue", "credit_covered_minor", "INTEGER NOT NULL DEFAULT 0"),
         ("sila_customers", "credit_minor", "INTEGER NOT NULL DEFAULT 0"),

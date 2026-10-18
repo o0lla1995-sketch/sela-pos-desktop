@@ -217,11 +217,22 @@ export const APP_NAME_AR = 'سيلا';
  * and in the release APK file name. Keep in sync with
  * android/app/build.gradle versionName/versionCode.
  */
-export const APP_VERSION = '61.0.0';
+export const APP_VERSION = '63.0.0';
 /** Build number — bump on EVERY release. */
-export const APP_BUILD_CODE = 7;
+export const APP_BUILD_CODE = 8;
 /** Human-readable version with build number, e.g. "57.0.0 (2)". */
 export const APP_VERSION_LABEL = `${APP_VERSION} (${APP_BUILD_CODE})`;
+
+// ─────────────────────────────────────────────────────────────
+// v58 (الجولة 62): الكاشير على الشبكة المحلية (سيلّا كاشير)
+// ─────────────────────────────────────────────────────────────
+
+/** منفذ خادم HTTP الافتراضي لتطبيق الكاشير. */
+export const LAN_DEFAULT_PORT = 8950;
+/** منفذ بث الاستكشاف (UDP) — نفسه في الأندرويد وتطبيق الكاشير. */
+export const LAN_DISCOVERY_PORT = 8951;
+/** عمر «متصل الآن» — آخر ظهور للجهاز خلال هذه المهلة يُعد متصلاً. */
+export const LAN_ONLINE_WINDOW_MS = 30000;
 /** منصة التشغيل — سطح المكتب (تظهر في التشخيص والترخيص). */
 export const APP_PLATFORM = 'desktop';
 

@@ -70,6 +70,12 @@ export interface AppSettings {
   scannerMinLength: number;
   /** سطح المكتب: طباعة رمز QR بالفاتورة (رقمها) — إضافة مكتبية. */
   printQrOnReceipt: boolean;
+  /** v58 (الجولة 62): تشغيل خادم الشبكة المحلية لتطبيق سيلّا
+   *  كاشير — يسمح لأجهزة الكاشيرين المعتمدين بالاتصال والبيع
+   *  باسمهم من نفس الشبكة. مطفأ افتراضياً. */
+  lanServerEnabled: boolean;
+  /** v58: منفذ خادم الكاشير (HTTP) — 8950 افتراضياً. */
+  lanPort: number;
 }
 
 /** قناة طابعة سطح المكتب (بديل بلوتوث الأندرويد). */
@@ -121,6 +127,8 @@ const DEFAULTS: AppSettings = {
   expiryAlertDays: DEFAULT_EXPIRY_ALERT_DAYS,
   systemNotificationsEnabled: true,
   posProductView: 'grid',
+  lanServerEnabled: false,
+  lanPort: 8950,
   scannerMinLength: 4,
   printQrOnReceipt: false,
 };

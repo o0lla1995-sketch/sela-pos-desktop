@@ -25,6 +25,14 @@ pub struct AppState {
     pub sessions: Mutex<HashMap<u64, sqlbridge::TxSession>>,
     pub next_tx: AtomicU64,
     pub db_path: std::path::PathBuf,
+    /// v58 (الجولة 62): خادم «سيلّا كاشير» على الشبكة المحلية —
+    /// None = مطفأ. الأوامر: lan_start/lan_stop/lan_status/lan_respond.
+    pub lan: Mutex<Option<LanEntry>>,
+}
+
+/// خادم الكاشير الحي (خيوط قبول HTTP + مستجيب بث الاستكشاف UDP).
+pub struct LanEntry {
+    pub server: std::sync::Arc<sela_core::lan::LanServer>,
 }
 
 fn main() {
@@ -57,6 +65,7 @@ fn main() {
             sessions: Mutex::new(HashMap::new()),
             next_tx: AtomicU64::new(1),
             db_path,
+            lan: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap,
@@ -106,6 +115,10 @@ fn main() {
             commands::scanner_set_enabled,
             commands::pick_product_image,
             commands::wipe_data,
+            commands::lan_start,
+            commands::lan_stop,
+            commands::lan_status,
+            commands::lan_respond,
             // ── جسر SQL العام (واجهة op-sqlite للخدمات المنقولة) ──
             sqlbridge::sql_run,
             sqlbridge::tx_begin,

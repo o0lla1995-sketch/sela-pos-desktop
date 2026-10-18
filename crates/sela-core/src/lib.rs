@@ -19,6 +19,7 @@ pub mod fsops;
 pub mod hardware;
 pub mod images;
 pub mod invoice;
+pub mod lan;
 pub mod models;
 pub mod paths;
 pub mod reports;

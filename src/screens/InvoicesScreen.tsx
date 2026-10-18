@@ -388,6 +388,13 @@ export function InvoicesScreen() {
                       {series}
                     </span>
                     {isDebt && <span className="chip warn">دين</span>}
+                    {/* v58 (الجولة 62): نسبة الفاتورة للكاشير (سيلّا
+                        كاشير عبر الشبكة المحلية). */}
+                    {row.cashier_name && (
+                      <span className="chip" title={`كاشير: ${row.cashier_name}`}>
+                        {row.cashier_name}
+                      </span>
+                    )}
                   </td>
                   <td>
                     <span

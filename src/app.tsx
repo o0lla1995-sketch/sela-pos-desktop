@@ -33,6 +33,7 @@ import {StocktakeScreen} from './screens/StocktakeScreen';
 import {ReportsScreen} from './screens/ReportsScreen';
 import {NotificationsScreen} from './screens/NotificationsScreen';
 import {SettingsScreen} from './screens/SettingsScreen';
+import {CashiersScreen} from './screens/CashiersScreen';
 import {LocalDebtsScreen} from './screens/LocalDebtsScreen';
 import {CashMovementsScreen} from './screens/CashMovementsScreen';
 import {SilaScreen} from './screens/SilaScreen';
@@ -56,6 +57,7 @@ type ScreenKey =
   | 'stock-alerts'
   | 'reports'
   | 'notifications'
+  | 'cashiers'
   | 'settings';
 
 const NAV: {key: ScreenKey; label: string; icon: IconName}[] = [
@@ -70,6 +72,7 @@ const NAV: {key: ScreenKey; label: string; icon: IconName}[] = [
   {key: 'sila', label: 'صِلة والقسائم', icon: 'link'},
   {key: 'reports', label: 'التقارير', icon: 'chart'},
   {key: 'notifications', label: 'الإشعارات', icon: 'bell'},
+  {key: 'cashiers', label: 'الكاشير', icon: 'user'},
   {key: 'settings', label: 'الإعدادات', icon: 'settings'},
 ];
 
@@ -137,6 +140,16 @@ export function App() {
           ensureEngineStarted();
         } catch {
           /* البيع أونلاين غير مفعّل */
+        }
+        // v58 (الجولة 62): خادم الكاشير على الشبكة المحلية — يعمل
+        // تلقائياً فقط إن فعّله المدير من شاشة الكاشير.
+        try {
+          const {LanServerService} = await import(
+            './services/lan/LanServerService'
+          );
+          void LanServerService.ensureStarted();
+        } catch {
+          /* خادم الكاشير غير مفعّل */
         }
       } catch (e) {
         toast(e instanceof Error ? e.message : String(e), 'error');
@@ -344,6 +357,11 @@ export function App() {
               {screen === 'notifications' && (
                 <ErrorBoundary label="الإشعارات">
                   <NotificationsScreen goTo={key => setScreen(key as ScreenKey)} />
+                </ErrorBoundary>
+              )}
+              {screen === 'cashiers' && (
+                <ErrorBoundary label="الكاشير">
+                  <CashiersScreen />
                 </ErrorBoundary>
               )}
               {screen === 'settings' && (

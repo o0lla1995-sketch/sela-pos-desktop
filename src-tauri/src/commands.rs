@@ -575,3 +575,77 @@ pub fn wipe_data(state: State<AppState>) -> CmdResult<()> {
     let mut conn = state.conn.lock().unwrap();
     sela_core::db::wipe_all(&mut conn).map_err(arabic)
 }
+
+// ────────────────────────────── v58 (الجولة 62): خادم الكاشير LAN
+
+use crate::LanEntry;
+use sela_core::lan::LanServer;
+use tauri::{AppHandle, Emitter};
+
+#[command]
+pub fn lan_start(
+    app: AppHandle,
+    state: State<AppState>,
+    port: u16,
+    store_name: String,
+) -> CmdResult<bool> {
+    // يعمل أصلاً — نجاح صامت.
+    {
+        let lan = state.lan.lock().unwrap();
+        if let Some(entry) = lan.as_ref() {
+            if entry.server.port() == port {
+                return Ok(true);
+            }
+        }
+    }
+    let server = {
+        let app_emit = app.clone();
+        LanServer::start(port, store_name.clone(), move |req, _responder| {
+            // بث فوري للواجهة — المعالجة كلها في TS (LanHandlers)
+            // والرد يعود عبر أمر lan_respond.
+            let _ = app_emit.emit(
+                "lan://request",
+                serde_json::json!({
+                    "id": req.id,
+                    "method": req.method,
+                    "path": req.path,
+                    "query": req.query,
+                    "body": req.body,
+                    "auth": req.auth,
+                    "ip": req.ip,
+                }),
+            );
+        })
+        .map_err(|e| format!("تعذر فتح منفذ الكاشير {}: {}", port, e))?
+    };
+    let entry = LanEntry {
+        server: std::sync::Arc::new(server),
+    };
+    *state.lan.lock().unwrap() = Some(entry);
+    Ok(true)
+}
+
+#[command]
+pub fn lan_stop(state: State<AppState>) -> CmdResult<bool> {
+    let entry = state.lan.lock().unwrap().take();
+    if let Some(entry) = entry {
+        entry.server.stop();
+    }
+    Ok(true)
+}
+
+#[command]
+pub fn lan_status(state: State<AppState>) -> bool {
+    state.lan.lock().unwrap().is_some()
+}
+
+#[command]
+pub fn lan_respond(state: State<AppState>, id: u64, status: u16, body: String) -> CmdResult<()> {
+    let lan = state.lan.lock().unwrap();
+    if let Some(entry) = lan.as_ref() {
+        entry.server.respond(id, status, body);
+        Ok(())
+    } else {
+        Err("خادم الكاشير لا يعمل".into())
+    }
+}
