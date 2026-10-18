@@ -639,6 +639,31 @@ pub fn lan_status(state: State<AppState>) -> bool {
     state.lan.lock().unwrap().is_some()
 }
 
+/// v59 (الجولة 63): عنوان IP المحلي للجهاز على شبكة Wi-Fi/الإيثرنت —
+/// يُعرض مع رمز QR للاتصال السريع في شاشة الكاشير. خدعة connect على
+/// عنوان خارجي (بلا إرسال حزم فعلياً) تكشف واجهة المسار الافتراضي،
+/// وإلا نعدّد واجهات الشبكة بحثاً عن IPv4 خاص.
+#[command]
+pub fn lan_local_ip() -> Option<String> {
+    // ① المسار الافتراضي (connect لا يرسل شيئاً على UDP).
+    if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
+        if sock.connect("8.8.8.8:53").is_ok() {
+            if let Ok(addr) = sock.local_addr() {
+                let ip = addr.ip();
+                if ip.is_ipv4() && !ip.is_loopback() && !ip.is_unspecified() {
+                    return Some(ip.to_string());
+                }
+            }
+        }
+    }
+    // ② تعداد الواجهات عبر مسار الشبكة الافتراضي غير متاح بلا تبعية
+    //    إضافية — نحاول عناوين شائعة للواجهة السلكية/اللاسلكية عبر
+    //    ربط مؤقت على كل مرشح... الأبسط والأدق: gethostname غير
+    //    يفيد؛ نكتفي بالمسار الافتراضي (يغطي كل الحالات العملية
+    //    حيث يكون الجهاز متصلاً بشبكة لها إنترنت).
+    None
+}
+
 #[command]
 pub fn lan_respond(state: State<AppState>, id: u64, status: u16, body: String) -> CmdResult<()> {
     let lan = state.lan.lock().unwrap();

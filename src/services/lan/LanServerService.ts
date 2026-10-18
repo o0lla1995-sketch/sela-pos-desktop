@@ -14,13 +14,67 @@
  */
 import {invoke} from '../../lib/tauri';
 import {listen, type UnlistenFn} from '@tauri-apps/api/event';
-import {handleLanRequest} from './LanHandlers';
+import {handleLanRequest, setLanEventSink, type LanEvent} from './LanHandlers';
 import {useLanStore} from '../../stores/lanStore';
 import {useSettingsStore} from '../../stores/settingsStore';
+import {notificationsStore} from '../../stores/notificationsStore';
+import {formatMoney} from '../../core/format';
 import {LAN_DEFAULT_PORT} from '../../core/config';
 
 let unlisten: UnlistenFn | null = null;
 let currentPort = LAN_DEFAULT_PORT;
+
+// ── v59 (الجولة 63): أحداث الخادم الحية → مركز الإشعارات +
+// النافذة العائمة. المدير يرى كل عملية كاشير لحظياً (بيع/مرتجع/
+// جهاز جديد ينتظر موافقته) دون أن يفتح شاشة الكاشير.
+function lanEventToNotification(event: LanEvent): void {
+  try {
+    if (event.kind === 'sale') {
+      const title = event.offline
+        ? `كاشير: بيع بعد انقطاع — ${event.cashierName}`
+        : `بيع من كاشير — ${event.cashierName}`;
+      const body = `فاتورة ${event.invoiceNumber} · ${event.itemCount} صنف · ${formatMoney(
+        event.total,
+      )}${event.debt ? ' · دين' : ''}`;
+      notificationsStore.push('cashier', title, body, {system: true});
+    } else if (event.kind === 'return') {
+      const title = event.isExchange
+        ? `استبدال من كاشير — ${event.cashierName}`
+        : `مرتجع من كاشير — ${event.cashierName}`;
+      const body = `إشعار ${event.returnNumber} · ${formatMoney(
+        event.refundMinor / 100,
+      )}${event.isExchange ? ' · استبدال' : ''}`;
+      notificationsStore.push('cashier', title, body, {system: true});
+    } else if (event.kind === 'device_pending') {
+      notificationsStore.push(
+        'cashier',
+        'جهاز كاشير ينتظر موافقتك',
+        `${event.cashierName} · ${event.deviceLabel}${
+          event.ip ? ` · ${event.ip}` : ''
+        } — افتح شاشة الكاشير للسماح أو الرفض`,
+        {system: true},
+      );
+    } else if (event.kind === 'login') {
+      notificationsStore.push(
+        'cashier',
+        `دخول كاشير — ${event.cashierName}`,
+        `${event.deviceLabel} سجّل الدخول الآن`,
+      );
+    }
+  } catch {
+    // إشعار فاشل لا يمس العملية نفسها أبداً.
+  }
+}
+setLanEventSink(lanEventToNotification);
+
+/** v59: عنوان IP المحلي (لرمز QR للاتصال السريع). */
+export async function lanLocalIp(): Promise<string | null> {
+  try {
+    return await invoke<string | null>('lan_local_ip');
+  } catch {
+    return null;
+  }
+}
 
 /** تحويل نص الاستعلام (?a=1&b=2) إلى خريطة. */
 function parseQuery(raw: string | null | undefined): Record<string, string> {

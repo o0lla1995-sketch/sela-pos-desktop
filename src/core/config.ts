@@ -217,7 +217,7 @@ export const APP_NAME_AR = 'سيلا';
  * and in the release APK file name. Keep in sync with
  * android/app/build.gradle versionName/versionCode.
  */
-export const APP_VERSION = '63.0.0';
+export const APP_VERSION = '64.0.0';
 /** Build number — bump on EVERY release. */
 export const APP_BUILD_CODE = 8;
 /** Human-readable version with build number, e.g. "57.0.0 (2)". */

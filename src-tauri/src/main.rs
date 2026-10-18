@@ -118,6 +118,7 @@ fn main() {
             commands::lan_start,
             commands::lan_stop,
             commands::lan_status,
+            commands::lan_local_ip,
             commands::lan_respond,
             // ── جسر SQL العام (واجهة op-sqlite للخدمات المنقولة) ──
             sqlbridge::sql_run,

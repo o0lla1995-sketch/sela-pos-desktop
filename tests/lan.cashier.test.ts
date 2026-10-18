@@ -372,3 +372,255 @@ describe('v58 — مود نقطة البيع (سطح المكتب)', () => {
     expect(result.stockBase).toBeCloseTo(0.5, 8);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// v59 (الجولة 63): الصلاحيات الدقيقة + ميزة العمل دون اتصال
+// (clientRef) + دفعة المزامنة + المتغيرات في الكتالوج.
+// ═══════════════════════════════════════════════════════════════
+describe('v59 — الصلاحيات والمزامنة دون اتصال', () => {
+  test('⑨ صلاحيات الدخول: perms تسلم مع الرمز وتُفرض من الخادم', async () => {
+    await CashiersRepo.createCashier({
+      username: 'sami',
+      password: 'pass1',
+      displayName: 'سامي',
+      maxDiscountPct: 10,
+      canDebt: false,
+      canReturn: false,
+    });
+    await handleLanRequest(loginRequest('sami', 'pass1', 's-ph'));
+    const pending = await CashiersRepo.pendingDevices();
+    await CashiersRepo.approveDevice(pending[0].id);
+    const body = JSON.parse(
+      (await handleLanRequest(loginRequest('sami', 'pass1', 's-ph'))).body,
+    );
+    expect(body.perms.canDebt).toBe(false);
+    expect(body.perms.canReturn).toBe(false);
+    expect(body.perms.maxDiscountPct).toBe(10);
+    const token = body.token as string;
+
+    const productId = await makeSeedProduct('خبز', 3, 40);
+
+    // دين مقفول → 403.
+    const debtRes = await handleLanRequest({
+      id: 'd1',
+      method: 'POST',
+      path: '/api/sale',
+      query: {},
+      body: JSON.stringify({
+        lines: [{productId, quantity: 1}],
+        paymentType: 'debt',
+        localCustomerId: 1,
+      }),
+      auth: `Bearer ${token}`,
+      ip: null,
+    });
+    expect(debtRes.status).toBe(403);
+    expect(JSON.parse(debtRes.body).error).toContain('الدين');
+
+    // مرتجع مقفول → 403 (بعد بيع نقدي سليم أولاً).
+    await handleLanRequest({
+      id: 's-ok',
+      method: 'POST',
+      path: '/api/sale',
+      query: {},
+      body: JSON.stringify({lines: [{productId, quantity: 1}]}),
+      auth: `Bearer ${token}`,
+      ip: null,
+    });
+    const invoiceRow = harnessDb()
+      .prepare('SELECT id FROM sales WHERE invoice_number LIKE ?')
+      .get('INV-%') as {id: number};
+    const retRes = await handleLanRequest({
+      id: 'r1',
+      method: 'POST',
+      path: '/api/return',
+      query: {},
+      body: JSON.stringify({
+        saleId: invoiceRow.id,
+        lines: [],
+      }),
+      auth: `Bearer ${token}`,
+      ip: null,
+    });
+    expect(retRes.status).toBe(403);
+    expect(JSON.parse(retRes.body).error).toContain('المرتجعات');
+  });
+
+  test('⑩ clientRef: إعادة المزامنة لا تُسجّل الفاتورة مرتين', async () => {
+    const token = await loginApproved('rania', 'r-ph');
+    const productId = await makeSeedProduct('حليب', 5, 30);
+    const payload = {
+      lines: [{productId, quantity: 2}],
+      clientRef: 'C-rania-1737000000-a1',
+      createdAt: '2026-01-15 09:30:00',
+    };
+    const first = JSON.parse(
+      (
+        await handleLanRequest({
+          id: 'x1',
+          method: 'POST',
+          path: '/api/sale',
+          query: {},
+          body: JSON.stringify(payload),
+          auth: `Bearer ${token}`,
+          ip: null,
+        })
+      ).body,
+    );
+    expect(first.ok).toBe(true);
+    expect(first.duplicate).toBeUndefined();
+    // زمن البيع الفعلي حُفظ (لا زمن المزامنة).
+    expect(first.invoice.createdAt).toBe('2026-01-15 09:30:00');
+
+    // إعادة إرسال نفس العملية (انقطعت الشبكة قبل وصول الرد).
+    const second = JSON.parse(
+      (
+        await handleLanRequest({
+          id: 'x2',
+          method: 'POST',
+          path: '/api/sale',
+          query: {},
+          body: JSON.stringify(payload),
+          auth: `Bearer ${token}`,
+          ip: null,
+        })
+      ).body,
+    );
+    expect(second.ok).toBe(true);
+    expect(second.duplicate).toBe(true);
+    expect(second.invoice.number).toBe(first.invoice.number);
+
+    // صف واحد فقط — المخزون خُصم مرة واحدة.
+    const db = harnessDb();
+    const count = db
+      .prepare('SELECT COUNT(*) AS c FROM sales WHERE client_ref = ?')
+      .get(payload.clientRef) as {c: number};
+    expect(count.c).toBe(1);
+    const stock = db
+      .prepare('SELECT stock_quantity FROM products WHERE id = ?')
+      .get(productId) as {stock_quantity: number};
+    expect(stock.stock_quantity).toBe(28);
+  });
+
+  test('⑪ sync/push: دفعة عمليات بنتائج مستقلة لكل عملية', async () => {
+    const token = await loginApproved('fadi', 'f-ph');
+    const p1 = await makeSeedProduct('شاي', 7, 60);
+    const p2 = await makeSeedProduct('قهوة', 22, 0);
+
+    const res = await handleLanRequest({
+      id: 'sync1',
+      method: 'POST',
+      path: '/api/sync/push',
+      query: {},
+      body: JSON.stringify({
+        ops: [
+          {
+            opId: 'op-1',
+            kind: 'sale',
+            payload: {
+              lines: [{productId: p1, quantity: 3}],
+              clientRef: 'C-fadi-1',
+              createdAt: '2026-01-16 11:00:00',
+            },
+          },
+          {
+            opId: 'op-2',
+            kind: 'sale',
+            payload: {
+              lines: [{productId: p2, quantity: 1}],
+              clientRef: 'C-fadi-2',
+            },
+          },
+        ],
+      }),
+      auth: `Bearer ${token}`,
+      ip: null,
+    });
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.results).toHaveLength(2);
+    expect(body.results[0].ok).toBe(true);
+    expect(body.results[0].invoice.number).toMatch(/^INV-/);
+    // نفد المخزون → رفض نظيف لهذه العملية وحدها.
+    expect(body.results[1].ok).toBe(false);
+    expect(body.results[1].error).toBeTruthy();
+  });
+
+  test('⑫ المتغيرات في الكتالوج والبيع بها', async () => {
+    const token = await loginApproved('zain', 'z-ph');
+    const db = harnessDb();
+    const info = db
+      .prepare(
+        `INSERT INTO products
+          (name, retail_price, wholesale_price, cost_price, stock_quantity, has_variants, category_id, created_at)
+         VALUES ('تيشيرت', 35, 30, 15, 3, 1, NULL, '2026-01-01 10:00:00')`,
+      )
+      .run();
+    const productId = Number(info.lastInsertRowid);
+    const vInfo = db
+      .prepare(
+        `INSERT INTO product_variants (product_id, kind, color, size, stock_quantity, created_at)
+         VALUES (?, 'variant', 'أسود', 'L', 4, '2026-01-01')`,
+      )
+      .run(productId);
+    const variantId = Number(vInfo.lastInsertRowid);
+
+    // الكتالوج يحمل المتغيرات كاملة.
+    const catalog = JSON.parse(
+      (
+        await handleLanRequest({
+          id: 'cat1',
+          method: 'GET',
+          path: '/api/catalog',
+          query: {},
+          body: '',
+          auth: `Bearer ${token}`,
+          ip: null,
+        })
+      ).body,
+    );
+    const product = catalog.products.find((p: {id: number}) => p.id === productId);
+    expect(product.hasVariants).toBe(true);
+    expect(product.variants).toHaveLength(1);
+    expect(product.variants[0].color).toBe('أسود');
+    expect(product.variants[0].size).toBe('L');
+
+    // بيع بلا متغير → طلب صريح لاختيار اللون/المقاس.
+    const noVar = await handleLanRequest({
+      id: 'nv',
+      method: 'POST',
+      path: '/api/sale',
+      query: {},
+      body: JSON.stringify({lines: [{productId, quantity: 1}]}),
+      auth: `Bearer ${token}`,
+      ip: null,
+    });
+    expect(noVar.status).toBe(400);
+
+    // بيع بمتغير صحيح → نفس معادلة نقطة البيع.
+    const withVar = JSON.parse(
+      (
+        await handleLanRequest({
+          id: 'wv',
+          method: 'POST',
+          path: '/api/sale',
+          query: {},
+          body: JSON.stringify({
+            lines: [{productId, quantity: 2, variantId}],
+            clientRef: 'C-zain-var-1',
+          }),
+          auth: `Bearer ${token}`,
+          ip: null,
+        })
+      ).body,
+    );
+    expect(withVar.ok).toBe(true);
+    expect(withVar.invoice.total).toBeCloseTo(70, 5);
+    const line = db
+      .prepare('SELECT variant_id, variant_label FROM sale_items WHERE sale_id = ?')
+      .get(withVar.invoice.id) as {variant_id: number; variant_label: string};
+    expect(line.variant_id).toBe(variantId);
+    expect(line.variant_label).toContain('أسود');
+    expect(line.variant_label).toContain('L');
+  });
+});

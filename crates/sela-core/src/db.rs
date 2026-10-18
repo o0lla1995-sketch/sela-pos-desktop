@@ -157,7 +157,9 @@ CREATE TABLE IF NOT EXISTS sales (
   returned_minor REAL NOT NULL DEFAULT 0,
   return_kind TEXT
     CHECK (return_kind IS NULL OR return_kind IN ('cash','sila','local','online')),
-  cashier_id INTEGER
+  cashier_id INTEGER,
+  -- v59 (الجولة 63): مرجع عملية الكاشير الفريد (ميزة العمل دون اتصال)
+  client_ref TEXT
 );
 CREATE TABLE IF NOT EXISTS sale_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -190,7 +192,9 @@ CREATE TABLE IF NOT EXISTS sale_returns (
   exchange_minor INTEGER NOT NULL DEFAULT 0,
   note TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  cashier_id INTEGER
+  cashier_id INTEGER,
+  -- v59 (الجولة 63): مرجع عملية المرتجع الفريد من جهاز الكاشير
+  client_ref TEXT
 );
 CREATE TABLE IF NOT EXISTS sale_return_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -482,6 +486,8 @@ CREATE TABLE IF NOT EXISTS lan_cashiers (
   display_name TEXT NOT NULL,
   is_active INTEGER NOT NULL DEFAULT 1,
   max_discount_pct REAL NOT NULL DEFAULT 10,
+  can_debt INTEGER NOT NULL DEFAULT 1,
+  can_return INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   last_seen_at TEXT
 );
@@ -570,6 +576,11 @@ fn heal_v57(conn: &Connection) -> Result<()> {
         ("sila_payment_queue", "kind", "TEXT NOT NULL DEFAULT 'repayment'"),
         ("cash_movements", "photo_path", "TEXT"),
         ("online_order_items", "variant", "TEXT"),
+        // ── v59 (الجولة 63): مزامنة الكاشير دون اتصال + الصلاحيات ──
+        ("sales", "client_ref", "TEXT"),
+        ("sale_returns", "client_ref", "TEXT"),
+        ("lan_cashiers", "can_debt", "INTEGER NOT NULL DEFAULT 1"),
+        ("lan_cashiers", "can_return", "INTEGER NOT NULL DEFAULT 1"),
     ];
     for (table, column, ddl) in upgrades {
         if !has_column(conn, table, column) {
@@ -614,7 +625,12 @@ fn heal_v57(conn: &Connection) -> Result<()> {
            ON stocktake_items(stocktake_id, product_id, IFNULL(variant_id, 0));
          CREATE INDEX IF NOT EXISTS idx_products_archived
            ON products(is_archived, name);
-         CREATE INDEX IF NOT EXISTS idx_sales_return_kind ON sales(return_kind);",
+         CREATE INDEX IF NOT EXISTS idx_sales_return_kind ON sales(return_kind);
+         -- v59: ميزة عمليات الكاشير (لا ازدواج عند إعادة المزامنة)
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_client_ref
+           ON sales(client_ref) WHERE client_ref IS NOT NULL;
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_sale_returns_client_ref
+           ON sale_returns(client_ref) WHERE client_ref IS NOT NULL;",
     )?;
     Ok(())
 }

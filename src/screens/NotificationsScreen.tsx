@@ -33,6 +33,7 @@ const KIND_META: Record<
   sale: {label: 'بيع', chip: 'brand', icon: 'cart', tone: 'brand'},
   stocktake: {label: 'جرد', chip: 'ok', icon: 'clipboard', tone: 'ok'},
   online_order: {label: 'طلب أونلاين', chip: 'brand', icon: 'basket', tone: 'brand'},
+  cashier: {label: 'عمليات الكاشيرين', chip: 'info', icon: 'user', tone: 'info'},
   license: {label: 'الاشتراك', chip: 'warn', icon: 'key', tone: 'warn'},
   sila_debt: {label: 'دين صِلة', chip: 'danger', icon: 'link', tone: 'danger'},
   sila_payment: {label: 'سداد صِلة', chip: 'ok', icon: 'link', tone: 'ok'},

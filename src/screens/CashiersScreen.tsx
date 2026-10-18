@@ -1,26 +1,39 @@
 /**
- * screens/CashiersScreen.tsx — الكاشير على الشبكة المحلية (v58).
+ * screens/CashiersScreen.tsx — v59 (الجولة 63): الكاشير على الشبكة
+ * المحلية — تصميم احترافي كامل (طلب التاجر حرفياً: الأزرار وبطاقات
+ * الحسابات وزر الخادم بهوية بصرية راقية).
  * ─────────────────────────────────────────────────────────────────
- * شاشة المدير لكل ما يتعلق بتطبيق «سيلّا كاشير» (نفس شاشة الأندرويد
- * بمكيفات سطح المكتب):
- *  ① مفتاح الخادم — تشغيل/إيقاف + المنفذ + المتصلون الآن.
- *  ② طلبات الاتصال المعلقة — كل جهاز جديد يظهر بانتظار الموافقة.
- *  ③ حسابات الكاشيرين — إنشاء/تعديل/السماح/المنع/سقف الخصم/حذف
- *     مع إحصاءات كل كاشير وأجهزته.
+ *  ① بطاقة الخادم — مفتاح تشغيل راقٍ + مؤشر نبض + رمز QR للاتصال
+ *     السريع (امسحه من تطبيق «سيلّا كاشير» فيتصل بلا إدخال يدوي).
+ *  ② طلبات الاتصال المعلقة — بطاقات بارزة بانتظار الموافقة.
+ *  ③ حسابات الكاشيرين — صورة رمزية بالأحرف الأولى، صلاحيات دقيقة
+ *     (بيع الدين / المرتجعات) بمفاتيح فورية، إحصاءاته، أجهزته،
+ *     وأزرار مهيكلة (تقرير/تعديل/منع/حذف).
+ *  ④ التقرير التفصيلي لكل كاشير — طبقة كاملة: فلترة زمنية
+ *     (اليوم/7/30/الكل)، مؤشرات، رسم يومي، أهم المنتجات، سجل
+ *     الفواتير، وطباعة حرارية.
  */
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import QRCode from 'qrcode';
+import {Icon} from '../components/Icon';
 import {
   CashiersRepo,
+  type CashierDetailedReport,
   type CashierDeviceRecord,
   type CashierRecord,
   type CashierStats,
 } from '../database/repositories/CashiersRepo';
-import {LanServerService} from '../services/lan/LanServerService';
+import {LanServerService, lanLocalIp} from '../services/lan/LanServerService';
+import {ThermalPrinterService} from '../services/printer/ThermalPrinterService';
+import {
+  buildCashierReportJob,
+} from '../services/printer/cashierReportReceipt';
 import {useLanStore} from '../stores/lanStore';
-import {useSettingsStore} from '../stores/settingsStore';
+import {useSettingsStore} from '../state/settingsStore';
 import {useToastStore} from '../state/appStores';
+import {formatMoney} from '../core/format';
 import {LAN_ONLINE_WINDOW_MS} from '../core/config';
-import './settingsv57.css';
+import './cashiers.css';
 
 function deviceOnline(device: CashierDeviceRecord): boolean {
   if (!device.last_seen_at) {
@@ -28,6 +41,22 @@ function deviceOnline(device: CashierDeviceRecord): boolean {
   }
   const seen = new Date(device.last_seen_at.replace(' ', 'T')).getTime();
   return Number.isFinite(seen) && Date.now() - seen < LAN_ONLINE_WINDOW_MS;
+}
+
+/** لون ثابت لكل كاشير من رقم حسابه (صور رمزية بالأحرف الأولى). */
+const AVATAR_COLORS = [
+  '#F97316', '#0EA5E9', '#8B5CF6', '#EC4899', '#14B8A6',
+  '#F59E0B', '#6366F1', '#10B981', '#EF4444', '#84CC16',
+];
+function avatarColor(id: number): string {
+  return AVATAR_COLORS[Math.abs(id) % AVATAR_COLORS.length];
+}
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2);
+  }
+  return (parts[0][0] ?? '') + (parts[1][0] ?? '');
 }
 
 export function CashiersScreen() {
@@ -46,6 +75,9 @@ export function CashiersScreen() {
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<CashierRecord | null>(null);
+  const [localIp, setLocalIp] = useState<string | null>(null);
+  const [qrSvg, setQrSvg] = useState<string>('');
+  const [reportFor, setReportFor] = useState<CashierRecord | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -73,6 +105,43 @@ export function CashiersScreen() {
     }, 4000);
     return () => clearInterval(timer);
   }, [refresh]);
+
+  // v59: IP المحلي + توليد رمز QR للاتصال السريع.
+  const port = settings.lanPort ?? 8950;
+  useEffect(() => {
+    if (!lanRunning) {
+      setLocalIp(null);
+      setQrSvg('');
+      return;
+    }
+    let alive = true;
+    const build = async () => {
+      const ip = await lanLocalIp();
+      if (!alive) {
+        return;
+      }
+      setLocalIp(ip);
+      if (ip) {
+        try {
+          const svg = await QRCode.toString(
+            `sela-cashier://${ip}:${port}`,
+            {type: 'svg', margin: 0, width: 176, color: {dark: '#17171D', light: '#FFFFFF'}},
+          );
+          if (alive) {
+            setQrSvg(svg);
+          }
+        } catch {
+          // توليد الرمز فشل — يبقى العنوان النصي متاحاً.
+        }
+      }
+    };
+    void build();
+    const timer = setInterval(build, 12000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [lanRunning, port]);
 
   const pendingDevices = useMemo(() => {
     const all: {cashier: CashierRecord; device: CashierDeviceRecord}[] = [];
@@ -144,6 +213,28 @@ export function CashiersScreen() {
     [refresh, toast],
   );
 
+  const togglePerm = useCallback(
+    async (cashier: CashierRecord, perm: 'debt' | 'returns') => {
+      const patch =
+        perm === 'debt'
+          ? {canDebt: cashier.can_debt !== 1}
+          : {canReturn: cashier.can_return !== 1};
+      await CashiersRepo.updateCashier(cashier.id, patch);
+      toast(
+        perm === 'debt'
+          ? patch.canDebt
+            ? `فُتح البيع بالدين لـ ${cashier.display_name}`
+            : `أُغلق البيع بالدين لـ ${cashier.display_name}`
+          : patch.canReturn
+          ? `فُتحت المرتجعات لـ ${cashier.display_name}`
+          : `أُغلقت المرتجعات لـ ${cashier.display_name}`,
+        'info',
+      );
+      void refresh();
+    },
+    [refresh, toast],
+  );
+
   const removeCashier = useCallback(
     (cashier: CashierRecord) => {
       if (
@@ -162,6 +253,8 @@ export function CashiersScreen() {
     [refresh, toast],
   );
 
+  const serverOn = settings.lanServerEnabled && lanRunning;
+
   return (
     <div className="screen">
       <h1>الكاشير على الشبكة المحلية</h1>
@@ -171,82 +264,109 @@ export function CashiersScreen() {
           : 'خادم مطفأ — فعّله ليتصل تطبيق «سيلّا كاشير» من نفس الشبكة'}
       </div>
 
-      {/* ① الخادم */}
-      <div className="toolbar">
-        <button
-          type="button"
-          className={`switch ${settings.lanServerEnabled && lanRunning ? 'on' : ''}`}
-          onClick={() => void toggleServer(!(settings.lanServerEnabled && lanRunning))}>
-          <span className="track" />
-          <b>{lanRunning ? 'الخادم يعمل' : 'الخادم مطفأ'}</b>
-        </button>
-        {lanRunning ? (
-          <>
-            <span className="chip">المنفذ {settings.lanPort ?? 8950}</span>
-            <span className={`chip ${connectedCount > 0 ? 'ok' : ''}`}>
-              {connectedCount > 0 ? `${connectedCount} متصل` : 'لا اتصالات'}
-            </span>
-          </>
-        ) : null}
-        <span className="grow" />
-        <button
-          className="btn sm ghost"
-          onClick={() => void refresh()}
-          disabled={loading}>
-          {loading ? 'جارٍ التحديث…' : 'تحديث'}
-        </button>
-      </div>
-      {lanStarting ? <div className="subtitle">جارٍ التشغيل…</div> : null}
-      {lanError ? (
-        <div className="state-banner" style={{marginBottom: 12}}>
-          {lanError}
+      {/* ① بطاقة الخادم + QR */}
+      <div className={`lan-hero ${serverOn ? '' : 'off'}`} style={{marginBottom: 20}}>
+        <div className="lan-hero-main">
+          <div className="lan-hero-head">
+            <div className={`lan-status-light ${serverOn ? 'on' : 'off'}`}>
+              <Icon name={serverOn ? 'store' : 'pause'} size={24} />
+            </div>
+            <div>
+              <div className="lan-hero-title">
+                {serverOn ? 'خادم الكاشير يعمل' : 'خادم الكاشير متوقف'}
+              </div>
+              <div className="lan-hero-sub">
+                كل عملية بيع أو إرجاع أو دين من تطبيق الكاشير تُسجَّل هنا
+                لحظياً باسم صاحبها في الفواتير والخزينة والمخزون — وتصلك
+                إشعاراً فورياً بكل عملية جديدة.
+              </div>
+            </div>
+          </div>
+          <div
+            className={`lan-server-toggle ${serverOn ? 'on' : ''}`}
+            onClick={() => void toggleServer(!serverOn)}>
+            <span className="switch-visual" />
+            <b>{lanStarting ? 'جارٍ التشغيل…' : serverOn ? 'الخادم يعمل' : 'الخادم مطفأ'}</b>
+          </div>
+          <div className="lan-chips">
+            {lanRunning ? (
+              <>
+                <span className="chip">المنفذ {port}</span>
+                <span className={`chip ${connectedCount > 0 ? 'ok' : ''}`}>
+                  {connectedCount > 0 ? `${connectedCount} جهاز متصل` : 'لا اتصالات'}
+                </span>
+                <span className="chip info">إشعارات لحظية مفعلة</span>
+              </>
+            ) : (
+              <span className="chip">فعّل الخادم ليتصل الكاشير</span>
+            )}
+          </div>
+          {lanError ? (
+            <div className="state-banner">{lanError}</div>
+          ) : null}
         </div>
-      ) : null}
-      <div className="subtitle" style={{marginBottom: 16}}>
-        أبقِ التطبيق مفتوحاً أثناء عمل الكاشير — كل عملية بيع أو إرجاع من
-        الكاشير تُسجَّل هنا لحظياً في الفواتير والخزينة والديون باسمه.
-        إن ظهر سؤال جدار حماية ويندوز عند أول تشغيل اختر «السماح».
+
+        {lanRunning ? (
+          <div className="lan-qr-panel">
+            {qrSvg ? (
+              <div
+                className="lan-qr-frame"
+                dangerouslySetInnerHTML={{__html: qrSvg}}
+              />
+            ) : (
+              <div className="lan-qr-frame" style={{padding: '34px 42px'}}>
+                <Icon name="qrFrame" size={72} />
+              </div>
+            )}
+            <div className="lan-qr-address">
+              {localIp ? `${localIp}:${port}` : '—'}
+            </div>
+            <div className="lan-qr-cap">
+              امسح الرمز من تطبيق «سيلّا كاشير» للاتصال فوراً — يظهر
+              متجرك كذلك تلقائياً في بحث الشبكة
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* ② طلبات اتصال معلقة */}
       {pendingDevices.length > 0 ? (
-        <>
-          <h1 style={{fontSize: 18}}>طلبات اتصال بانتظار موافقتك</h1>
-          <div className="subtitle">جهاز كاشير يحاول الدخول لأول مرة</div>
-          <div style={{display: 'grid', gap: 10, marginBottom: 20}}>
-            {pendingDevices.map(({cashier, device}) => (
-              <div
-                key={device.id}
-                className="st-report-grid"
-                style={{gridTemplateColumns: '1fr auto auto', alignItems: 'center'}}>
-                <div className="cell">
-                  <b>{cashier.display_name}</b>
-                  <span className="l">
-                    {device.device_label || 'جهاز'} · {device.ip ?? ''}
-                  </span>
-                </div>
-                <span className="chip warn">بانتظار الموافقة</span>
-                <div className="cell" style={{flexDirection: 'row', gap: 8}}>
-                  <button
-                    className="btn sm success"
-                    onClick={() => void approve(device)}>
-                    السماح
-                  </button>
-                  <button
-                    className="btn sm danger"
-                    onClick={() => void deny(device)}>
-                    الرفض
-                  </button>
+        <div className="lan-pending" style={{marginBottom: 20}}>
+          {pendingDevices.map(({cashier, device}) => (
+            <div key={device.id} className="lan-pending-card">
+              <div className="lan-pending-icon">
+                <Icon name="user" size={21} />
+              </div>
+              <div style={{minWidth: 0}}>
+                <b style={{fontSize: 14.5}}>{cashier.display_name}</b>
+                <div className="subtitle" style={{marginTop: 1}}>
+                  {device.device_label || 'جهاز'} · {device.ip ?? ''}
                 </div>
               </div>
-            ))}
-          </div>
-        </>
+              <span className="chip warn">بانتظار موافقتك</span>
+              <div style={{display: 'flex', gap: 8}}>
+                <button
+                  className="btn sm success"
+                  onClick={() => void approve(device)}>
+                  السماح
+                </button>
+                <button
+                  className="btn sm danger"
+                  onClick={() => void deny(device)}>
+                  الرفض
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       ) : null}
 
       {/* ③ الحسابات */}
       <div className="toolbar">
         <h1 style={{fontSize: 18, margin: 0}}>حسابات الكاشيرين</h1>
+        <span className="subtitle" style={{marginInlineStart: 10}}>
+          صلاحيات دقيقة لكل كاشير: البيع بالدين، المرتجعات، وسقف الخصم
+        </span>
         <span className="grow" />
         <button
           className="btn sm primary"
@@ -275,42 +395,58 @@ export function CashiersScreen() {
         {cashiers.map(cashier => (
           <div
             key={cashier.id}
-            style={{
-              border: '1px solid var(--line)',
-              borderRadius: 12,
-              padding: 14,
-              display: 'grid',
-              gap: 10,
-              background: 'var(--surface-1)',
-            }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-              }}>
-              <b style={{fontSize: 16}}>{cashier.display_name}</b>
-              <span style={{color: 'var(--muted)', fontSize: 13}}>
-                @{cashier.username} · خصم حتى {cashier.max_discount_pct}%
-              </span>
-              <span className="grow" />
+            className={`cashier-card ${cashier.is_active === 1 ? '' : 'blocked'}`}>
+            <div className="cashier-head">
+              <div
+                className="cashier-avatar"
+                style={{background: avatarColor(cashier.id)}}>
+                {initials(cashier.display_name)}
+              </div>
+              <div style={{flex: 1, minWidth: 0}}>
+                <div className="cashier-name">{cashier.display_name}</div>
+                <div className="cashier-meta">
+                  @{cashier.username} · خصم حتى {cashier.max_discount_pct}%
+                </div>
+              </div>
               <span className={`chip ${cashier.is_active === 1 ? 'ok' : 'danger'}`}>
                 {cashier.is_active === 1 ? 'مسموح' : 'ممنوع'}
               </span>
             </div>
 
-            <div className="st-report-grid" style={{gridTemplateColumns: 'repeat(3, 1fr)'}}>
-              <div className="cell">
+            {/* الصلاحيات — طلب التاجر: السماح أو إغلاق الدين والمرتجعات */}
+            <div className="perm-pills">
+              <div
+                className={`perm-pill ${cashier.can_debt === 1 ? 'on' : ''}`}
+                onClick={() => void togglePerm(cashier, 'debt')}>
+                <Icon name="tag" size={15} />
+                <span>
+                  {cashier.can_debt === 1 ? 'البيع بالدين مفتوح' : 'البيع بالدين مغلق'}
+                </span>
+                <span className="perm-dot" />
+              </div>
+              <div
+                className={`perm-pill ${cashier.can_return === 1 ? 'on' : ''}`}
+                onClick={() => void togglePerm(cashier, 'returns')}>
+                <Icon name="undo" size={15} />
+                <span>
+                  {cashier.can_return === 1 ? 'المرتجعات مفتوحة' : 'المرتجعات مغلقة'}
+                </span>
+                <span className="perm-dot" />
+              </div>
+            </div>
+
+            <div className="cashier-stats">
+              <div className="cashier-stat">
                 <span className="v">{stats[cashier.id]?.salesCount ?? 0}</span>
                 <span className="l">فاتورة</span>
               </div>
-              <div className="cell brand">
+              <div className="cashier-stat brand">
                 <span className="v">
                   {(stats[cashier.id]?.salesTotal ?? 0).toFixed(2)}
                 </span>
                 <span className="l">مبيعات ₪</span>
               </div>
-              <div className="cell">
+              <div className="cashier-stat">
                 <span className="v">
                   {Math.abs(stats[cashier.id]?.returnsTotal ?? 0).toFixed(2)}
                 </span>
@@ -318,74 +454,67 @@ export function CashiersScreen() {
               </div>
             </div>
 
-            {(devices[cashier.id] ?? []).map(device => (
-              <div
-                key={device.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  background: 'var(--surface-2)',
-                  borderRadius: 10,
-                  padding: '8px 12px',
-                }}>
-                <b style={{fontSize: 13.5}}>{device.device_label || 'جهاز'}</b>
-                <span style={{color: 'var(--muted)', fontSize: 12.5}}>
-                  {device.status === 'approved'
-                    ? deviceOnline(device)
-                      ? 'متصل الآن'
-                      : 'موافق عليه'
-                    : device.status === 'pending'
-                    ? 'بانتظار الموافقة'
-                    : 'مرفوض'}
-                </span>
-                <span className="grow" />
-                {device.status === 'pending' ? (
-                  <>
-                    <button
-                      className="btn sm success"
-                      onClick={() => void approve(device)}>
-                      سماح
-                    </button>
-                    <button
-                      className="btn sm danger"
-                      onClick={() => void deny(device)}>
-                      رفض
-                    </button>
-                  </>
-                ) : device.status === 'approved' ? (
-                  <button
-                    className="btn sm ghost"
-                    onClick={() => void revoke(device)}>
-                    قطع الثقة
-                  </button>
-                ) : (
-                  <button
-                    className="btn sm ghost"
-                    onClick={() => void approve(device)}>
-                    موافقة
-                  </button>
-                )}
+            {(devices[cashier.id] ?? []).length > 0 ? (
+              <div className="cashier-devices">
+                {(devices[cashier.id] ?? []).map(device => (
+                  <div key={device.id} className="cashier-device">
+                    <span
+                      className={`device-live-dot ${
+                        device.status === 'approved' && deviceOnline(device)
+                          ? 'on'
+                          : ''
+                      }`}
+                    />
+                    <b style={{fontSize: 13}}>{device.device_label || 'جهاز'}</b>
+                    <span style={{color: 'var(--muted)', fontSize: 12}}>
+                      {device.status === 'approved'
+                        ? deviceOnline(device)
+                          ? 'متصل الآن'
+                          : 'موافق عليه'
+                        : device.status === 'pending'
+                        ? 'بانتظار الموافقة'
+                        : 'مرفوض'}
+                    </span>
+                    <span className="grow" />
+                    {device.status === 'pending' ? (
+                      <>
+                        <button
+                          className="btn sm success"
+                          onClick={() => void approve(device)}>
+                          سماح
+                        </button>
+                        <button
+                          className="btn sm danger"
+                          onClick={() => void deny(device)}>
+                          رفض
+                        </button>
+                      </>
+                    ) : device.status === 'approved' ? (
+                      <button
+                        className="btn sm ghost"
+                        onClick={() => void revoke(device)}>
+                        قطع الثقة
+                      </button>
+                    ) : (
+                      <button
+                        className="btn sm ghost"
+                        onClick={() => void approve(device)}>
+                        موافقة
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : null}
 
-            <div style={{display: 'flex', gap: 8}}>
+            <div className="cashier-actions">
               <button
-                className="btn sm"
-                style={{flex: 1}}
-                onClick={() =>
-                  void (async () => {
-                    await CashiersRepo.updateCashier(cashier.id, {
-                      isActive: cashier.is_active === 1 ? 0 : 1,
-                    });
-                    void refresh();
-                  })()
-                }>
-                {cashier.is_active === 1 ? 'منع الاتصال' : 'السماح بالاتصال'}
+                className="btn primary"
+                onClick={() => setReportFor(cashier)}>
+                التقرير التفصيلي
               </button>
               <button
-                className="btn sm"
-                style={{flex: 1}}
+                className="btn"
                 onClick={() => {
                   setEditing(cashier);
                   setFormOpen(true);
@@ -393,8 +522,20 @@ export function CashiersScreen() {
                 تعديل
               </button>
               <button
-                className="btn sm danger"
-                style={{flex: 1}}
+                className="btn"
+                onClick={
+                  () =>
+                    void (async () => {
+                      await CashiersRepo.updateCashier(cashier.id, {
+                        isActive: cashier.is_active === 1 ? 0 : 1,
+                      });
+                      void refresh();
+                    })()
+                }>
+                {cashier.is_active === 1 ? 'منع الاتصال' : 'السماح'}
+              </button>
+              <button
+                className="btn danger"
                 onClick={() => removeCashier(cashier)}>
                 حذف
               </button>
@@ -413,11 +554,18 @@ export function CashiersScreen() {
           }}
         />
       ) : null}
+
+      {reportFor ? (
+        <CashierReportOverlay
+          cashier={reportFor}
+          onClose={() => setReportFor(null)}
+        />
+      ) : null}
     </div>
   );
 }
 
-/** نموذج إنشاء/تعديل حساب كاشير. */
+/** نموذج إنشاء/تعديل حساب كاشير — مع الصلاحيات. */
 function CashierFormModal({
   cashier,
   onClose,
@@ -435,6 +583,10 @@ function CashierFormModal({
   const [maxDiscount, setMaxDiscount] = useState(
     String(cashier?.max_discount_pct ?? 10),
   );
+  const [canDebt, setCanDebt] = useState(cashier ? cashier.can_debt === 1 : true);
+  const [canReturn, setCanReturn] = useState(
+    cashier ? cashier.can_return === 1 : true,
+  );
   const [busy, setBusy] = useState(false);
   const isEdit = cashier != null;
 
@@ -449,6 +601,8 @@ function CashierFormModal({
         await CashiersRepo.updateCashier(cashier.id, {
           displayName: displayName.trim() || cashier.display_name,
           maxDiscountPct: Number(maxDiscount) || 0,
+          canDebt,
+          canReturn,
           ...(password.length >= 4 ? {password} : {}),
         });
         toast('حُدِّث حساب الكاشير', 'success');
@@ -482,6 +636,8 @@ function CashierFormModal({
         password,
         displayName,
         maxDiscountPct: Number(maxDiscount) || 0,
+        canDebt,
+        canReturn,
       });
       toast(
         'أُنشئ حساب الكاشير — أعطه الاسم وكلمة المرور لتسجيل الدخول',
@@ -500,7 +656,7 @@ function CashierFormModal({
 
   return (
     <div className="overlay">
-      <div className="modal" style={{width: 'min(480px, 94vw)'}}>
+      <div className="modal" style={{width: 'min(500px, 94vw)'}}>
         <div className="modal-head">
           <b>{isEdit ? 'تعديل حساب الكاشير' : 'كاشير جديد'}</b>
           <button className="btn sm ghost" onClick={onClose}>
@@ -556,6 +712,23 @@ function CashierFormModal({
               placeholder="10"
             />
           </div>
+          {/* الصلاحيات */}
+          <div className="perm-pills" style={{marginTop: 4}}>
+            <div
+              className={`perm-pill ${canDebt ? 'on' : ''}`}
+              onClick={() => setCanDebt(v => !v)}>
+              <Icon name="tag" size={15} />
+              <span>السماح بالبيع بالدين</span>
+              <span className="perm-dot" />
+            </div>
+            <div
+              className={`perm-pill ${canReturn ? 'on' : ''}`}
+              onClick={() => setCanReturn(v => !v)}>
+              <Icon name="undo" size={15} />
+              <span>السماح بالمرتجعات والاستبدال</span>
+              <span className="perm-dot" />
+            </div>
+          </div>
         </div>
         <div className="modal-foot">
           <span className="spacer" />
@@ -568,6 +741,274 @@ function CashierFormModal({
             onClick={() => void save()}>
             {isEdit ? 'حفظ التعديلات' : 'إنشاء الحساب'}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** نوع الفترة الزمنية للتقرير. */
+type Period = 'today' | 'week' | 'month' | 'all';
+
+function periodRange(period: Period): {from: string | null; to: string | null} {
+  if (period === 'all') {
+    return {from: null, to: null};
+  }
+  const now = new Date();
+  const to = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+    now.getDate(),
+  ).padStart(2, '0')}`;
+  if (period === 'today') {
+    return {from: to, to};
+  }
+  const days = period === 'week' ? 6 : 29;
+  const start = new Date(now.getTime() - days * 86400000);
+  const from = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(
+    start.getDate(),
+  ).padStart(2, '0')}`;
+  return {from, to};
+}
+
+const PERIODS: {value: Period; label: string}[] = [
+  {value: 'today', label: 'اليوم'},
+  {value: 'week', label: '7 أيام'},
+  {value: 'month', label: '30 يوماً'},
+  {value: 'all', label: 'الكل'},
+];
+
+/** ④ التقرير التفصيلي — طبقة كاملة قابلة للطباعة. */
+function CashierReportOverlay({
+  cashier,
+  onClose,
+}: {
+  cashier: CashierRecord;
+  onClose: () => void;
+}) {
+  const toast = useToastStore(state => state.show);
+  const settings = useSettingsStore(state => state.settings);
+  const [period, setPeriod] = useState<Period>('today');
+  const [report, setReport] = useState<CashierDetailedReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [printing, setPrinting] = useState(false);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    void (async () => {
+      try {
+        const {from, to} = periodRange(period);
+        const data = await CashiersRepo.detailedReport(cashier.id, from, to);
+        if (alive) {
+          setReport(data);
+        }
+      } catch {
+        if (alive) {
+          toast('تعذر تحميل التقرير', 'error');
+        }
+      } finally {
+        if (alive) {
+          setLoading(false);
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [cashier.id, period, toast]);
+
+  const maxDaily = useMemo(() => {
+    if (!report || report.daily.length === 0) {
+      return 1;
+    }
+    return Math.max(1, ...report.daily.map(d => d.salesTotal));
+  }, [report]);
+
+  const print = useCallback(async () => {
+    if (!report) {
+      return;
+    }
+    setPrinting(true);
+    try {
+      const ops = buildCashierReportJob(
+        {report, cashierName: cashier.display_name},
+        {
+          storeName: settings.storeName,
+          storePhone: settings.storePhone,
+          footerMessage: settings.footerMessage,
+          storeLogoPath: settings.storeLogoPath,
+          paperWidth: settings.paperWidth,
+          codepage: settings.codepage,
+          showProfit: settings.showProfitOnReceipt,
+        },
+      );
+      await ThermalPrinterService.printJob(ops);
+      toast('طُبع تقرير الكاشير', 'success');
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : 'فشلت الطباعة',
+        'error',
+      );
+    } finally {
+      setPrinting(false);
+    }
+  }, [cashier.display_name, report, settings, toast]);
+
+  return (
+    <div className="cashier-report-overlay" onClick={onClose}>
+      <div
+        className="cashier-report-panel"
+        onClick={e => e.stopPropagation()}>
+        <div className="cashier-report-head">
+          <Icon name="chart" size={20} />
+          <div style={{flex: 1, minWidth: 0}}>
+            <b style={{fontSize: 15.5}}>تقرير: {cashier.display_name}</b>
+            <div className="subtitle" style={{marginTop: 1}}>
+              تقارير الكاشير التفصيلية — قابلة للطباعة والفلترة الزمنية
+            </div>
+          </div>
+          <div style={{display: 'flex', gap: 4}}>
+            {PERIODS.map(item => (
+              <button
+                key={item.value}
+                className={`btn sm ${period === item.value ? 'primary' : 'ghost'}`}
+                onClick={() => setPeriod(item.value)}>
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <button
+            className="btn sm primary"
+            disabled={printing || !report}
+            onClick={() => void print()}>
+            <Icon name="printer" size={15} /> طباعة
+          </button>
+          <button className="btn sm ghost" onClick={onClose}>
+            <Icon name="x" size={15} />
+          </button>
+        </div>
+        <div className="cashier-report-body" ref={bodyRef}>
+          {loading ? (
+            <div className="subtitle">جارٍ التحميل…</div>
+          ) : !report || (report.salesCount === 0 && report.returnsCount === 0) ? (
+            <div className="empty">
+              <div className="icon" />
+              <b>لا عمليات في هذه الفترة</b>
+              <span>لم يُسجِّل {cashier.display_name} مبيعات أو مرتجعات هنا</span>
+            </div>
+          ) : (
+            <>
+              <div className="report-kpis">
+                <div className="report-kpi brand">
+                  <span className="v">{formatMoney(report.salesTotal)}</span>
+                  <span className="l">مبيعات ({report.salesCount} فاتورة)</span>
+                </div>
+                <div className="report-kpi ok">
+                  <span className="v">{formatMoney(report.cashTotal)}</span>
+                  <span className="l">نقدي ({report.cashCount})</span>
+                </div>
+                <div className="report-kpi">
+                  <span className="v">{formatMoney(report.debtTotal)}</span>
+                  <span className="l">دين ({report.debtCount})</span>
+                </div>
+                <div className="report-kpi danger">
+                  <span className="v">{formatMoney(Math.abs(report.returnsTotal))}</span>
+                  <span className="l">مرتجعات ({report.returnsCount})</span>
+                </div>
+                <div className="report-kpi brand">
+                  <span className="v">{formatMoney(report.netTotal)}</span>
+                  <span className="l">الصافي</span>
+                </div>
+                <div className="report-kpi">
+                  <span className="v">{formatMoney(report.discountTotal)}</span>
+                  <span className="l">خصومات</span>
+                </div>
+              </div>
+
+              {report.daily.length > 0 ? (
+                <>
+                  <h1 style={{fontSize: 15, margin: 0}}>المبيعات اليومية</h1>
+                  <div className="report-bars">
+                    {[...report.daily].reverse().slice(-14).map(day => (
+                      <div
+                        key={day.day}
+                        className="report-bar-col"
+                        title={`${day.day} · ${formatMoney(day.salesTotal)}`}>
+                        <div
+                          className="report-bar"
+                          style={{
+                            height: `${Math.max(3, (day.salesTotal / maxDaily) * 100)}%`,
+                          }}
+                        />
+                        <span className="report-bar-label">{day.day.slice(5)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+
+              {report.topProducts.length > 0 ? (
+                <>
+                  <h1 style={{fontSize: 15, margin: 0}}>أهم المنتجات</h1>
+                  <div className="report-list">
+                    {report.topProducts.map((product, index) => (
+                      <div key={product.productId} className="report-row">
+                        <span className="rank">{index + 1}</span>
+                        <div style={{minWidth: 0}}>
+                          <div className="name">{product.name}</div>
+                          <div className="sub">الكمية {product.qty.toFixed(2)}</div>
+                        </div>
+                        <span className="grow" />
+                        <span className="val">{formatMoney(product.total)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+
+              <>
+                <h1 style={{fontSize: 15, margin: 0}}>
+                  سجل الفواتير ({report.invoices.length})
+                </h1>
+                <div className="report-list">
+                  {report.invoices.map(invoice => (
+                    <div key={invoice.id} className="report-row">
+                      <span className="rank">
+                        {invoice.kind === 'return'
+                          ? '↩'
+                          : invoice.kind === 'debt'
+                          ? 'د'
+                          : '₪'}
+                      </span>
+                      <div style={{minWidth: 0}}>
+                        <div className="name" style={{direction: 'ltr', textAlign: 'right'}}>
+                          {invoice.number}
+                        </div>
+                        <div className="sub">{invoice.createdAt.slice(0, 16)}</div>
+                      </div>
+                      <span
+                        className={`chip ${
+                          invoice.kind === 'return'
+                            ? 'danger'
+                            : invoice.kind === 'debt'
+                            ? 'info'
+                            : 'ok'
+                        }`}>
+                        {invoice.kind === 'return'
+                          ? 'مرتجع'
+                          : invoice.kind === 'debt'
+                          ? 'دين'
+                          : 'نقدي'}
+                      </span>
+                      <span className={`val ${invoice.kind === 'return' ? 'neg' : ''}`}>
+                        {formatMoney(invoice.total)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            </>
+          )}
         </div>
       </div>
     </div>
