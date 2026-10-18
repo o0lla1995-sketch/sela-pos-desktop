@@ -14,7 +14,13 @@
  */
 import {invoke} from '../../lib/tauri';
 import {listen, type UnlistenFn} from '@tauri-apps/api/event';
-import {handleLanRequest, setLanEventSink, type LanEvent} from './LanHandlers';
+import {
+  handleLanRequest,
+  setLanEventSink,
+  setPrinterStatusProvider,
+  type LanEvent,
+} from './LanHandlers';
+import {usePrinterStore} from '../../stores/printerStore';
 import {useLanStore} from '../../stores/lanStore';
 import {useSettingsStore} from '../../stores/settingsStore';
 import {notificationsStore} from '../../stores/notificationsStore';
@@ -66,6 +72,17 @@ function lanEventToNotification(event: LanEvent): void {
   }
 }
 setLanEventSink(lanEventToNotification);
+
+// v60: مزوّد حالة الطابعة — من متجر الطابعة (مشتق من إعدادات طباعة
+// سطح المكتب)؛ يغذي /api/printer-status وقرار طباعة فواتير الكاشير
+// من طابعة نقطة البيع عند البيع/الإرجاع.
+setPrinterStatusProvider(async () => {
+  const state = usePrinterStore.getState();
+  return {
+    connected: state.status === 'connected',
+    name: state.deviceName ?? null,
+  };
+});
 
 /** v59: عنوان IP المحلي (لرمز QR للاتصال السريع). */
 export async function lanLocalIp(): Promise<string | null> {
