@@ -540,7 +540,7 @@ mod tests {
         client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         client.read_to_string(&mut response).unwrap();
         assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
-        assert!(response.contains("Content-Length: 12"));
+        assert!(response.contains("Content-Length: 11")); // {"ok":true} = 11 بايت
         assert!(response.ends_with("{\"ok\":true}"));
 
         // طلب مهمل الرد → 503 بعد المهلة… لا ننتظر 30 ثانية في
