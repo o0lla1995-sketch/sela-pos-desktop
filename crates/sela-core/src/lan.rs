@@ -254,15 +254,20 @@ fn serve_connection(
         .insert(id, Arc::clone(&slot));
     on_request(request, responder.clone());
 
-    // انتظار رد الواجهة (أو المهلة).
-    let guard = slot.response.lock().unwrap();
-    let (mut guard, _timed_out) = match slot
-        .signal
-        .wait_timeout(guard, Duration::from_millis(REQUEST_TIMEOUT_MS))
-    {
-        Ok(out) => out,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    // انتظار رد الواجهة (أو المهلة) — مع فحص أولي قبل الانتظار:
+    // لو كُتب الرد قبل وصولنا هنا (استجابة فورية) فالإشارة قد ضاعت
+    // أصلاً لأن Condvar ليست لاصقة — الفحص تحت القفل يغلق هذه الثغرة.
+    let mut guard = slot.response.lock().unwrap();
+    if guard.is_none() {
+        let (g, _timed_out) = match slot
+            .signal
+            .wait_timeout(guard, Duration::from_millis(REQUEST_TIMEOUT_MS))
+        {
+            Ok(out) => out,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard = g;
+    }
     let response = guard.take().unwrap_or(LanHttpResponse {
         status: 503,
         body: "{\"ok\":false,\"error\":\"انتهت مهلة معالجة الطلب\"}".into(),
