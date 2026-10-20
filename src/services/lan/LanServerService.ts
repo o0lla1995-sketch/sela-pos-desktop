@@ -116,6 +116,76 @@ export async function lanLocalIp(): Promise<string | null> {
   }
 }
 
+// ── v69 (الجولة 73): التشغيل التلقائي + الاتصال عن بُعد ──────────
+// أغلفة رقيقة لأوامر Rust (reg/netsh/powershell) — كل شيء جاهز
+// للعرض في شاشة الكاشير بلا معرفة بأوامر النظام.
+
+/** هل هذه نسخة ويندوز (يدعم التشغيل التلقائي مع الإقلاع)؟ */
+export async function autostartSupported(): Promise<boolean> {
+  try {
+    return await invoke<boolean>('autostart_supported');
+  } catch {
+    return false;
+  }
+}
+
+/** هل التشغيل التلقائي مع ويندوز مفعّل الآن (مفتاح HKCU Run)؟ */
+export async function autostartStatus(): Promise<boolean> {
+  try {
+    return await invoke<boolean>('autostart_status');
+  } catch {
+    return false;
+  }
+}
+
+/** تفعيل التشغيل التلقائي مع ويندوز — يبدأ البرنامج مخفياً بعد
+ *  أي إعادة تشغيل ويشغّل الخادم وحده إن كان مفعّلاً. */
+export async function autostartEnable(): Promise<boolean> {
+  return invoke<boolean>('autostart_enable');
+}
+
+/** إلغاء التشغيل التلقائي مع ويندوز. */
+export async function autostartDisable(): Promise<boolean> {
+  return invoke<boolean>('autostart_disable');
+}
+
+export interface LanFirewallStatus {
+  tcp: boolean;
+  udp: boolean;
+  app: boolean;
+}
+
+/** حالة قواعد جدار حماية ويندوز لخادم الكاشير (بلا صلاحيات). */
+export async function lanFirewallStatus(): Promise<LanFirewallStatus> {
+  try {
+    return await invoke<LanFirewallStatus>('lan_firewall_status');
+  } catch {
+    return {tcp: true, udp: true, app: true};
+  }
+}
+
+/** فتح المنفذ في جدار الحماية لكل الشبكات (يشمل «العامة» التي
+ *  يعمل عليها Tailscale) — موافقة ويندوز (UAC) مرة واحدة. */
+export async function lanFirewallFix(port: number): Promise<boolean> {
+  return invoke<boolean>('lan_firewall_fix', {port});
+}
+
+export interface LanIpInfo {
+  ip: string;
+  /** lan | vpn (Tailscale/CGNAT 100.x) | other */
+  kind: string;
+}
+
+/** كل عناوين IPv4 للجهاز — التاجر يقرأ عنوان 100.x منها ويضعه في
+ *  تطبيق الكاشير للاتصال من أي مكان عبر Tailscale. */
+export async function lanAllIps(): Promise<LanIpInfo[]> {
+  try {
+    return await invoke<LanIpInfo[]>('lan_all_ips');
+  } catch {
+    return [];
+  }
+}
+
 /** تحويل نص الاستعلام (?a=1&b=2) إلى خريطة. */
 function parseQuery(raw: string | null | undefined): Record<string, string> {
   const out: Record<string, string> = {};

@@ -146,6 +146,21 @@ export function mockInvoke(cmd: string, args: Record<string, unknown> = {}): unk
       return 'dev-mock://product-image.jpg';
     case 'image_compress':
       return {base64: '', hash: '', ext: 'jpg', width: 1, height: 1};
+    // ── v69 (الجولة 73): معاينة شاشة الكاشير في المتصفح — القيم
+    // الهادئة فقط؛ لا سجل ولا netsh خارج ويندوز الحقيقي. ──
+    case 'autostart_supported':
+      return false;
+    case 'autostart_status':
+      return false;
+    case 'autostart_enable':
+    case 'autostart_disable':
+      return true;
+    case 'lan_firewall_status':
+      return {tcp: true, udp: true, app: true};
+    case 'lan_firewall_fix':
+      return true;
+    case 'lan_all_ips':
+      return [{ip: '192.168.1.20', kind: 'lan'}];
     default:
       throw new Error(`أمر غير متاح في محاكي التطوير: ${cmd}`);
   }

@@ -10,6 +10,12 @@
  *    النقطة بنقرة، إنهاء كامل من القائمة). منطق الطلبات كله في
  *    الواجهة (LanHandlers) لذا يجب أن تبقى العملية — لا الخادم
  *    وحده — حية، وهذا ما تفعله الآلية هنا بأقل تغيير ممكن.
+ *  • v69 (الجولة 73): الإقلاع الصامت مع ويندوز — مفتاح التشغيل
+ *    التلقائي (HKCU Run) يطلق البرنامج بوسيط --hidden بعد أي
+ *    إعادة تشغيل: النافذة تُخفى فوراً قبل أن تُرسم، البرنامج يعمل
+ *    من أيقونة الشريط، والواجهة تشغّل خادم الكاشير وحده إن كان
+ *    مفعّلاً — طلب التاجر نصاً: «بعد إعادة تشغيل الكمبيوتر لا
+ *    يعمل بشكل مباشر بعد بدء التشغيل».
  */
 
 mod commands;
@@ -170,6 +176,14 @@ fn main() {
             commands::lan_status,
             commands::lan_local_ip,
             commands::lan_respond,
+            // ── v69 (الجولة 73): التشغيل التلقائي + الاتصال عن بُعد ──
+            commands::autostart_supported,
+            commands::autostart_status,
+            commands::autostart_enable,
+            commands::autostart_disable,
+            commands::lan_firewall_status,
+            commands::lan_firewall_fix,
+            commands::lan_all_ips,
             // ── جسر SQL العام (واجهة op-sqlite للخدمات المنقولة) ──
             sqlbridge::sql_run,
             sqlbridge::tx_begin,
@@ -263,6 +277,21 @@ fn main() {
             }
             let tray = builder.build(app)?;
             app.manage(TrayState { tray });
+
+            // ── v69 (الجولة 73): الإقلاع الصامت (--hidden) ───────
+            // مفتاح التشغيل التلقائي يطلق البرنامج بهذا الوسيط عند
+            // إقلاع ويندوز: نخفي النافذة في setup — قبل دورة الأحداث
+            // الأولى فلا ترتسم أصلاً — ويبقى البرنامج كاملاً يعمل من
+            // أيقونة الشريط (الخادم تشغّله الواجهة عبر ensureStarted
+            // لأن WebView يعمل طبيعياً وهي مخفية). فتح النافذة: نقرة
+            // الأيقونة أو اختصار البرنامج (المثيل الواحد يُظهرها).
+            let boot_hidden = std::env::args().any(|a| a == "--hidden" || a == "/hidden");
+            if boot_hidden {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+                crate::refresh_tray_tooltip(app.handle());
+            }
 
             Ok(())
         })

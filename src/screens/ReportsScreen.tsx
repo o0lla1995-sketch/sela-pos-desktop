@@ -475,7 +475,10 @@ export function ReportsScreen() {
     topMode === 'revenue'
       ? (bundle?.topByRevenue ?? [])
       : (bundle?.topByProfit ?? []);
-  const topShown = topProducts.slice(0, 10);
+  /* v69 (الجولة 73): الخمسة الأوائل فقط — طلب التاجر نصاً «يظهر
+   * فقط أكثر خمسة منتجات فقط لا أكثر حتى لا تطول القائمة»، ونفس
+   * سلوك الأندرويد حرفياً (الجولة 34 #6) — البقية في تصدير CSV. */
+  const topShown = topProducts.slice(0, 5);
   const topMax = Math.max(
     ...topShown.map(p => Math.max(topMode === 'revenue' ? p.revenue : p.profit, 0)),
     0.0001,
@@ -1091,7 +1094,7 @@ export function ReportsScreen() {
               <div>
                 <div className="sv57-sec-title">الأكثر إيراداً وربحاً</div>
                 <div className="sv57-sec-hint">
-                  أفضل عشرة منتجات في الفترة — والبقية في تصدير CSV
+                  أفضل خمسة منتجات في الفترة — والبقية في تصدير CSV
                 </div>
               </div>
               <div className="sv57-seg">

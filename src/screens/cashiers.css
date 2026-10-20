@@ -603,3 +603,87 @@
 [dir='rtl'] .lan-keep-row.on .switch-visual::after {
   transform: translateX(-20px);
 }
+
+/* ── v69 (الجولة 73): بطاقة الاتصال عن بُعد (Tailscale / VPN) ──── */
+/* كل عناوين الجهاز (شبكة المحل + 100.x) مع اختيار عنوان QR، وحالة */
+/* جدار الحماية وزر فتحه لكل الشبكات — محوّل Tailscale يصنَّف «شبكة  */
+/* عامة» فقاعدة «الشبكات الخاصة» وحدها تحجب الاتصال عن بُعد.        */
+.lan-remote-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+}
+.lan-remote-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.lan-remote-head b {
+  font-size: 14.5px;
+  color: var(--ink);
+}
+.lan-remote-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background: var(--brand-soft, rgba(249, 115, 22, 0.13));
+  color: var(--brand);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.lan-remote-ips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.lan-ip-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 7px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  font-family: inherit;
+}
+.lan-ip-chip:hover {
+  border-color: var(--brand);
+}
+.lan-ip-chip.on {
+  border-color: var(--brand);
+  background: var(--brand-soft, rgba(249, 115, 22, 0.13));
+}
+.lan-ip-chip .lan-ip-kind {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.lan-ip-chip.vpn .lan-ip-kind {
+  color: #38bdf8;
+}
+.lan-ip-chip .lan-ip-val {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: 0.2px;
+}
+.lan-ip-chip .lan-ip-qr {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--brand);
+  white-space: nowrap;
+}
+.lan-remote-fw {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}

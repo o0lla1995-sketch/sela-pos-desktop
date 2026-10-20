@@ -12,6 +12,12 @@
  *  ④ التقرير التفصيلي لكل كاشير — طبقة كاملة: فلترة زمنية
  *     (اليوم/7/30/الكل)، مؤشرات، رسم يومي، أهم المنتجات، سجل
  *     الفواتير، وطباعة حرارية.
+ *  ⑤ v69 (الجولة 73): التشغيل التلقائي مع ويندوز + الاتصال عن بُعد
+ *     (Tailscale/VPN) — صف التشغيل التلقائي (مفتاح HKCU Run يطلق
+ *     البرنامج مخفياً بعد أي إعادة تشغيل)، ولوحة العناوين الكاملة
+ *     (شبكة محلية + 100.x) مع زر فتح جدار الحماية لكل الشبكات —
+ *     محوّل Tailscale يصنَّف «شبكة عامة» فتُحجب الاتصالات عن بُعد
+ *     مهما فُتح المنفذ يدوياً (طلب التاجر نصاً).
  */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import QRCode from 'qrcode';
@@ -24,6 +30,17 @@ import {
   type CashierStats,
 } from '../database/repositories/CashiersRepo';
 import {LanServerService, lanLocalIp} from '../services/lan/LanServerService';
+import {
+  autostartDisable,
+  autostartEnable,
+  autostartStatus,
+  autostartSupported,
+  lanAllIps,
+  lanFirewallFix,
+  lanFirewallStatus,
+  type LanFirewallStatus,
+  type LanIpInfo,
+} from '../services/lan/LanServerService';
 import {ThermalPrinterService} from '../services/printer/ThermalPrinterService';
 import {
   buildCashierReportJob,
@@ -78,6 +95,15 @@ export function CashiersScreen() {
   const [localIp, setLocalIp] = useState<string | null>(null);
   const [qrSvg, setQrSvg] = useState<string>('');
   const [reportFor, setReportFor] = useState<CashierRecord | null>(null);
+  // ── v69 (الجولة 73): التشغيل التلقائي + الاتصال عن بُعد ──
+  const [autostartOk, setAutostartOk] = useState(false);
+  const [autostartOn, setAutostartOn] = useState(false);
+  const [allIps, setAllIps] = useState<LanIpInfo[]>([]);
+  const [fwStatus, setFwStatus] = useState<LanFirewallStatus | null>(null);
+  const [fwBusy, setFwBusy] = useState(false);
+  /** عنوان QR المختار (المحلي افتراضياً — يتحول لعنوان Tailscale
+   *  بنقرة بطاقته فيتصل الكاشير عن بُعد بلا إدخال يدوي). */
+  const [qrTarget, setQrTarget] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -106,12 +132,15 @@ export function CashiersScreen() {
     return () => clearInterval(timer);
   }, [refresh]);
 
-  // v59: IP المحلي + توليد رمز QR للاتصال السريع.
+  // v59: IP المحلي + توليد رمز QR للاتصال السريع — v69: الرمز يعكس
+  // العنوان المختار (المحلي افتراضياً، أو عنوان Tailscale بنقرة
+  // بطاقته في لوحة العناوين) فيمكن للكاشير البعيد مسحه هو أيضاً.
   const port = settings.lanPort ?? 8950;
   useEffect(() => {
     if (!lanRunning) {
       setLocalIp(null);
       setQrSvg('');
+      setQrTarget(null);
       return;
     }
     let alive = true;
@@ -121,19 +150,8 @@ export function CashiersScreen() {
         return;
       }
       setLocalIp(ip);
-      if (ip) {
-        try {
-          const svg = await QRCode.toString(
-            `sela-cashier://${ip}:${port}`,
-            {type: 'svg', margin: 0, width: 176, color: {dark: '#17171D', light: '#FFFFFF'}},
-          );
-          if (alive) {
-            setQrSvg(svg);
-          }
-        } catch {
-          // توليد الرمز فشل — يبقى العنوان النصي متاحاً.
-        }
-      }
+      // أول عنوان يصل هو الافتراضي (المسار الافتراضي للشبكة).
+      setQrTarget(prev => prev ?? ip);
     };
     void build();
     const timer = setInterval(build, 12000);
@@ -141,7 +159,129 @@ export function CashiersScreen() {
       alive = false;
       clearInterval(timer);
     };
-  }, [lanRunning, port]);
+  }, [lanRunning]);
+
+  // v69: توليد الرمز فور تغيّر العنوان المستهدف (أو المنفذ أو حالة
+  // الخادم) — العنوان المختار في بطاقة الاتصال عن بُعد يحوّل الرمز
+  // لعنوان Tailscale فيتمكن الكاشير البعيد من مسحه بلا إدخال يدوي.
+  useEffect(() => {
+    if (!lanRunning || !qrTarget) {
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      try {
+        const svg = await QRCode.toString(
+          `sela-cashier://${qrTarget}:${port}`,
+          {type: 'svg', margin: 0, width: 176, color: {dark: '#17171D', light: '#FFFFFF'}},
+        );
+        if (alive) {
+          setQrSvg(svg);
+        }
+      } catch {
+        // العنوان النصي يبقى متاحاً.
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [lanRunning, port, qrTarget]);
+
+  // ── v69: حالة التشغيل التلقائي (سجل ويندوز) + كل عناوين الجهاز ──
+  // العناوين لا تتغير عملياً أثناء الجلسة (عنوان Tailscale ثابت بطبيعته)
+  // فتُقرأ مرة عند فتح الشاشة/اشتغال الخادم — لا كل 12 ثانية.
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const supported = await autostartSupported();
+      const on = supported ? await autostartStatus() : false;
+      if (!alive) {
+        return;
+      }
+      setAutostartOk(supported);
+      setAutostartOn(on);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!lanRunning) {
+      setAllIps([]);
+      setFwStatus(null);
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      const [ips, fw] = await Promise.all([lanAllIps(), lanFirewallStatus()]);
+      if (!alive) {
+        return;
+      }
+      setAllIps(ips);
+      setFwStatus(fw);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [lanRunning]);
+
+  /** v69: تفعيل/إلغاء التشغيل التلقائي مع إقلاع ويندوز. */
+  const toggleAutostart = useCallback(
+    async (enabled: boolean) => {
+      try {
+        if (enabled) {
+          await autostartEnable();
+          setAutostartOn(true);
+          toast(
+            'فُتح التشغيل التلقائي — سيبدأ سيلا مع ويندوز بالخلفية ويشتغل خادم الكاشير وحده بعد أي إعادة تشغيل',
+            'success',
+          );
+        } else {
+          await autostartDisable();
+          setAutostartOn(false);
+          toast('أُلغي التشغيل التلقائي — لن يبدأ سيلا مع ويندوز', 'info');
+        }
+      } catch (error) {
+        toast(
+          error instanceof Error
+            ? error.message
+            : 'تعذر تغيير التشغيل التلقائي',
+          'error',
+        );
+      }
+    },
+    [toast],
+  );
+
+  /** v69: فتح منفذ الخادم في جدار حماية ويندوز لكل الشبكات —
+   *  يحل اتصال Tailscale/VPN (محوّله يصنَّف «شبكة عامة»). موافقة
+   *  ويندوز (UAC) مرة واحدة. */
+  const fixFirewall = useCallback(async () => {
+    if (fwBusy) {
+      return;
+    }
+    setFwBusy(true);
+    try {
+      await lanFirewallFix(port);
+      const fresh = await lanFirewallStatus();
+      setFwStatus(fresh);
+      if (fresh.tcp && fresh.udp) {
+        toast('فُتح المنفذ في جدار الحماية لكل الشبكات — جرّب الاتصال من تطبيق الكاشير الآن', 'success');
+      } else {
+        toast('أُنفذ الأمر لكن القواعد لم تظهر — أعد المحاولة أو أضفها يدوياً', 'error');
+      }
+    } catch (error) {
+      toast(
+        error instanceof Error
+          ? error.message
+          : 'فشل فتح المنفذ في جدار الحماية',
+        'error',
+      );
+    } finally {
+      setFwBusy(false);
+    }
+  }, [fwBusy, port, toast]);
 
   const pendingDevices = useMemo(() => {
     const all: {cashier: CashierRecord; device: CashierDeviceRecord}[] = [];
@@ -177,13 +317,30 @@ export function CashiersScreen() {
           toast('تعذر تشغيل خادم الكاشير — تأكد من السماح عبر جدار الحماية', 'error');
         } else {
           toast('خادم الكاشير يعمل — ابحث عن المتجر من تطبيق الكاشير', 'success');
+          // v69 (الجولة 73): تشغيل الخادم يفتح التشغيل التلقائي مع
+          // ويندوز تلقائياً إن لم يكن مفعّلاً — طلب التاجر نصاً: بعد
+          // أي إعادة تشغيل يجب أن يعمل الخادم مباشرة بلا تدخّل. يمكنه
+          // إلغاءه من الصف المخصص إن أراد.
+          try {
+            if (autostartOk && !autostartOn) {
+              await autostartEnable();
+              setAutostartOn(true);
+              toast(
+                'فُتح التشغيل التلقائي مع ويندوز — الخادم سيبدأ وحده بعد أي إعادة تشغيل للجهاز',
+                'info',
+              );
+            }
+          } catch {
+            // التشغيل التلقائي فشل (سجل محمي؟) — الخادم يعمل، ولا
+            // نربك التاجر بخطأ هنا؛ الصف المخصص يوضح الحالة.
+          }
         }
       } else {
         await LanServerService.stop();
         toast('أُوقف خادم الكاشير', 'info');
       }
     },
-    [toast, updateSettings],
+    [autostartOk, autostartOn, toast, updateSettings],
   );
 
   const approve = useCallback(
@@ -323,6 +480,26 @@ export function CashiersScreen() {
             <span className="switch-visual" />
           </div>
 
+          {/* v69 (الجولة 73): التشغيل التلقائي مع إقلاع ويندوز — */}
+          {/* طلب التاجر نصاً: بعد إعادة تشغيل الكمبيوتر يجب أن */}
+          {/* يعمل الخادم مباشرة بلا فتح البرنامج يدوياً. */}
+          {autostartOk ? (
+            <div
+              className={`lan-keep-row ${autostartOn ? 'on' : ''}`}
+              onClick={() => void toggleAutostart(!autostartOn)}>
+              <div className="lan-keep-text">
+                <b>التشغيل التلقائي مع ويندوز</b>
+                <span>
+                  سيلا يبدأ مع إقلاع الجهاز بالخلفية (بلا نافذة) وخادم
+                  الكاشير يشتغل وحده بعد أي إعادة تشغيل — من أيقونة
+                  سيلا في شريط المهام تفتح النافذة متى شئت. يُفتح تلقائياً
+                  عند تشغيل الخادم ويمكنك إلغاؤه هنا.
+                </span>
+              </div>
+              <span className="switch-visual" />
+            </div>
+          ) : null}
+
           {lanError ? (
             <div className="state-banner">{lanError}</div>
           ) : null}
@@ -341,7 +518,7 @@ export function CashiersScreen() {
               </div>
             )}
             <div className="lan-qr-address">
-              {localIp ? `${localIp}:${port}` : '—'}
+              {qrTarget ? `${qrTarget}:${port}` : '—'}
             </div>
             <div className="lan-qr-cap">
               امسح الرمز من تطبيق «سيلّا كاشير» للاتصال فوراً — يظهر
@@ -350,6 +527,85 @@ export function CashiersScreen() {
           </div>
         ) : null}
       </div>
+
+      {/* v69 (الجولة 73): الاتصال عن بُعد (Tailscale / خارج الشبكة) — */}
+      {/* كل عناوين الجهاز + فتح جدار الحماية لكل الشبكات. طلب التاجر */}
+      {/* نصاً: عنوان Tailscale الثابت يفشل رغم فتح المنفذ — السبب أن */}
+      {/* محوّل Tailscale «شبكة عامة» وويندوز يحجبها بقاعدة «الخاصة». */}
+      {lanRunning ? (
+        <div className="lan-remote-card">
+          <div className="lan-remote-head">
+            <div className="lan-remote-icon">
+              <Icon name="globe" size={20} />
+            </div>
+            <div style={{minWidth: 0, flex: 1}}>
+              <b>الاتصال عن بُعد — خارج الشبكة (Tailscale / VPN)</b>
+              <div className="subtitle" style={{marginTop: 2}}>
+                شغّل Tailscale على هذا الجهاز وعلى هاتف الكاشير بنفس
+                الحساب، ثم استعمل أحد العناوين أدناه — يعمل من أي مكان
+                في العالم.
+              </div>
+            </div>
+          </div>
+
+          {allIps.length > 0 ? (
+            <div className="lan-remote-ips">
+              {allIps.map(entry => {
+                const selected = qrTarget === entry.ip;
+                return (
+                  <button
+                    key={entry.ip}
+                    className={`lan-ip-chip ${selected ? 'on' : ''} ${entry.kind}`}
+                    onClick={() => setQrTarget(entry.ip)}
+                    title="اختيار هذا العنوان لرمز QR">
+                    <span className="lan-ip-kind">
+                      {entry.kind === 'vpn'
+                        ? 'Tailscale/VPN'
+                        : entry.kind === 'lan'
+                        ? 'شبكة المحل'
+                        : 'شبكة أخرى'}
+                    </span>
+                    <span className="lan-ip-val" dir="ltr">
+                      {entry.ip}:{port}
+                    </span>
+                    {selected ? <span className="lan-ip-qr">QR ✓</span> : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="subtitle" style={{padding: '4px 2px'}}>
+              تعذّر قراءة عناوين الجهاز — العنوان المحلي معروض أعلى رمز
+              QR.
+            </div>
+          )}
+
+          <div className="lan-remote-fw">
+            {fwStatus != null && fwStatus.tcp && fwStatus.udp ? (
+              <span className="chip ok">جدار الحماية: المنفذ مفتوح لكل الشبكات ✓</span>
+            ) : (
+              <>
+                <span className="chip warn">
+                  جدار حماية ويندوز يحجب الاتصال عن بُعد
+                </span>
+                <button
+                  className="btn sm primary"
+                  disabled={fwBusy}
+                  onClick={() => void fixFirewall()}>
+                  {fwBusy ? 'جارٍ الفتح…' : 'فتح المنفذ الآن (موافقة ويندوز)'}
+                </button>
+              </>
+            )}
+          </div>
+          <div className="subtitle" style={{fontSize: 11.5, lineHeight: 1.8}}>
+            في تطبيق الكاشير على الهاتف: «إدخال يدوي للعنوان» ← ضع عنوان
+            Tailscale (يبدأ بـ100.) والمنفذ {port}. إن فشل الاتصال عن بُعد
+            بعد Tailscale فاضغط زر الفتح أعلاه — ويندوز يصنّف محوّل
+            Tailscale «شبكة عامة» فيحجبه رغم فتح المنفذ يدوياً؛ الزر يسمح
+            به لكل الشبكات دفعة واحدة.
+          </div>
+        </div>
+      ) : null}
 
       {/* ② طلبات اتصال معلقة */}
       {pendingDevices.length > 0 ? (

@@ -678,3 +678,327 @@ pub fn lan_respond(state: State<AppState>, id: u64, status: u16, body: String) -
         Err("خادم الكاشير لا يعمل".into())
     }
 }
+
+// ─────────────── v69 (الجولة 73): التشغيل التلقائي + الاتصال عن بُعد
+//
+// طلب التاجر نصاً: «بعد إعادة تشغيل الكمبيوتر لا يعمل (الخادم)
+// بشكل مباشر بعد بدء التشغيل» و«يفشل الاتصال عبر IP تطبيق
+// Tailscale رغم فتح المنفذ». الحلان معاً هنا بلا أي صندوق جديد
+// (reg.exe / netsh / powershell — كلها داخل ويندوز نفسه فلا يتغير
+// Cargo.lock إطلاقاً):
+//
+//  ① التشغيل التلقائي مع إقلاع ويندوز: مفتاح Run في سجل HKCU
+//     (بلا صلاحيات مدير) يطلق البرنامج بوسيط --hidden عند الإقلاع —
+//     نافذة مخفية + أيقونة شريط المهام، والواجهة تشغّل خادم الكاشير
+//     وحدها إن كان مفعّلاً (ensureStarted في app.tsx).
+//  ② جدار حماية ويندوز: قواعد للمنفذ 8950 (TCP) و8951 (UDP) على
+//     «كل ملفات التعريف» — محوّل Tailscale يصنَّف «شبكة عامة»
+//     فقاعدة «الشبكات الخاصة» وحدها (التي يضيفها سؤال السماح
+//     الأول) تحجب الاتصال عن بُعد مهما فتحتَ المنفذ يدوياً.
+//     المثبّت يضيفها (NSIS hooks) وهنا زر إصلاح مرفوع الصلاحيات
+//     للتثبيتات القائمة.
+
+/// اسم قاعدة جدار الحماية لمنفذ خادم الكاشير (TCP) — ثابت بين
+/// المثبّت وزر الإصلاح والفحص.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub const FW_RULE_TCP: &str = "Sela POS Cashier TCP";
+/// اسم قاعدة منفذ بث الاستكشاف (UDP 8951).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub const FW_RULE_UDP: &str = "Sela POS Cashier UDP";
+/// اسم قاعدة البرنامج نفسه (تسمح بأي منفذ غيّره التاجر).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub const FW_RULE_APP: &str = "Sela POS App";
+/// قيمة مفتاح التشغيل التلقائي في سجل ويندوز.
+#[cfg_attr(not(windows), allow(dead_code))]
+const AUTOSTART_REG_VALUE: &str = "SelaPOS";
+#[cfg_attr(not(windows), allow(dead_code))]
+const AUTOSTART_REG_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+
+/// ويندوز فقط؟ (الواجهة تخفي صف التشغيل التلقائي خارجه).
+#[command]
+pub fn autostart_supported() -> bool {
+    cfg!(windows)
+}
+
+/// هل التشغيل التلقائي مع ويندوز مفعّل الآن؟ (قراءة سجل HKCU —
+/// بلا صلاحيات، بلا نافذة أوامير وامضة).
+#[command]
+pub fn autostart_status() -> bool {
+    #[cfg(windows)]
+    {
+        run_hidden("reg", &["query", AUTOSTART_REG_KEY, "/v", AUTOSTART_REG_VALUE])
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// تفعيل التشغيل التلقائي مع إقلاع ويندوز: يكتب مسار البرنامج
+/// الحالي بوسيط --hidden — يبدأ سيلا بالخلفية (أيقونة الشريط) بعد
+/// أي إعادة تشغيل، والخادم يشتغل وحده إن كان مفعّلاً.
+#[command]
+pub fn autostart_enable() -> CmdResult<bool> {
+    #[cfg(windows)]
+    {
+        let exe = std::env::current_exe()
+            .map_err(|_| "تعذر معرفة مسار البرنامج".to_string())?
+            .to_string_lossy()
+            .to_string();
+        let value = format!("\"{}\" --hidden", exe);
+        run_hidden(
+            "reg",
+            &[
+                "add",
+                AUTOSTART_REG_KEY,
+                "/v",
+                AUTOSTART_REG_VALUE,
+                "/t",
+                "REG_SZ",
+                "/d",
+                &value,
+                "/f",
+            ],
+        )
+        .map_err(|e| format!("تعذر كتابة مفتاح التشغيل التلقائي: {}", e))?
+        .status
+        .success()
+        .then_some(true)
+        .ok_or_else(|| "تعذر تفعيل التشغيل التلقائي".to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        Err("التشغيل التلقائي متاح على ويندوز فقط".into())
+    }
+}
+
+/// إلغاء التشغيل التلقائي مع ويندوز.
+#[command]
+pub fn autostart_disable() -> CmdResult<bool> {
+    #[cfg(not(windows))]
+    {
+        Err("التشغيل التلقائي متاح على ويندوز فقط".into())
+    }
+    #[cfg(windows)]
+    {
+        run_hidden(
+            "reg",
+            &["delete", AUTOSTART_REG_KEY, "/v", AUTOSTART_REG_VALUE, "/f"],
+        )
+        .map_err(|e| format!("تعذر حذف مفتاح التشغيل التلقائي: {}", e))?
+        .status
+        .success()
+        .then_some(true)
+        .ok_or_else(|| "تعذر إلغاء التشغيل التلقائي".into())
+    }
+}
+
+/// هل قواعد جدار الحماية لخادم الكاشير موجودة؟ (قراءة netsh — بلا
+/// صلاحيات مدير؛ exit code موحّد بين اللغات: 0 = وُجدت القاعدة).
+#[command]
+pub fn lan_firewall_status() -> CmdResult<Value> {
+    #[cfg(windows)]
+    {
+        let tcp = rule_exists(FW_RULE_TCP);
+        let udp = rule_exists(FW_RULE_UDP);
+        let app = rule_exists(FW_RULE_APP);
+        Ok(json!({"tcp": tcp, "udp": udp, "app": app}))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(json!({"tcp": true, "udp": true, "app": true}))
+    }
+}
+
+/// إضافة قواعد جدار الحماية (كل ملفات التعريف — يشمل «العامة» التي
+/// يعمل عليها Tailscale) — تتطلب موافقة ويندوز (UAC) مرة واحدة.
+/// للتثبيتات القائمة قبل v69؛ التثبيت الجديد يضيفها تلقائياً.
+#[command]
+pub fn lan_firewall_fix(port: u16) -> CmdResult<bool> {
+    #[cfg(not(windows))]
+    {
+        let _ = port;
+        Err("جدار حماية ويندوز متاح على ويندوز فقط".into())
+    }
+    #[cfg(windows)]
+    {
+        let exe = std::env::current_exe()
+            .map_err(|_| "تعذر معرفة مسار البرنامج".to_string())?
+            .to_string_lossy()
+            .to_string();
+        // سلسلة واحدة لـ cmd المرفوع: حذف القواعد القديمة (إن وجدت)
+        // ثم إضافة الثلاث على «كل ملفات التعريف». آخر أمر يحدد رمز
+        // الخروج — ورفض UAC يجعل powershell نفسه يفشل (رمز ≠ 0).
+        let script = format!(
+            "Start-Process cmd -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '/c netsh advfirewall firewall delete rule name=\"{}\" & netsh advfirewall firewall delete rule name=\"{}\" & netsh advfirewall firewall delete rule name=\"{}\" & netsh advfirewall firewall add rule name=\"{}\" dir=in action=allow protocol=TCP localport={} profile=any & netsh advfirewall firewall add rule name=\"{}\" dir=in action=allow protocol=UDP localport=8951 profile=any & netsh advfirewall firewall add rule name=\"{}\" dir=in action=allow program=\"{}\" profile=any enable=yes'",
+            FW_RULE_TCP,
+            FW_RULE_UDP,
+            FW_RULE_APP,
+            FW_RULE_TCP,
+            port,
+            FW_RULE_UDP,
+            FW_RULE_APP,
+            exe,
+        );
+        run_hidden(
+            "powershell",
+            &["-NoProfile", "-NonInteractive", "-Command", &script],
+        )
+        .map_err(|e| format!("تعذر تشغيل أمر جدار الحماية: {}", e))
+        .and_then(|out| {
+            if out.status.success() {
+                Ok(true)
+            } else {
+                Err("فشل فتح المنفذ — إن رفضت نافذة الموافقة (UAC) أعد المحاولة واضغط «نعم»".into())
+            }
+        })
+    }
+}
+
+/// v69: كل عناوين IPv4 للجهاز (شبكة محلية + Tailscale/VPN + غيرها)
+/// لعرضها في شاشة الكاشير — التاجر يقرأ عنوان 100.x من هنا ويضعه
+/// في تطبيق الكاشير للاتصال من أي مكان. PowerShell JSON محايد
+/// للغة النظام (خلاف ipconfig المعرّب).
+#[derive(serde::Serialize)]
+pub struct LanIpInfo {
+    pub ip: String,
+    /// lan | vpn | other — الواجهة تعرضها بترتيب ووسم مناسبين.
+    pub kind: String,
+}
+
+#[command]
+pub fn lan_all_ips() -> Vec<LanIpInfo> {
+    #[cfg(windows)]
+    {
+        let script = "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne '127.0.0.1' -and $_.IPAddress -notlike '169.254*' } | Select-Object IPAddress, PrefixOrigin | ConvertTo-Json -Compress";
+        let output = run_hidden(
+            "powershell",
+            &["-NoProfile", "-NonInteractive", "-Command", script],
+        );
+        if let Ok(out) = output {
+            if out.status.success() {
+                let text = String::from_utf8_lossy(&out.stdout).to_string();
+                if let Ok(value) = serde_json::from_str::<Value>(text.trim()) {
+                    let mut list: Vec<LanIpInfo> = Vec::new();
+                    let items: Vec<Value> = match value {
+                        Value::Array(arr) => arr,
+                        one => vec![one],
+                    };
+                    for item in items {
+                        if let Some(ip) = item
+                            .get("IPAddress")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                        {
+                            // PrefixOrigin WellKnown = عناوين وهمية
+                            // (loopback التلقائية) — نتجاهلها.
+                            let origin = item
+                                .get("PrefixOrigin")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            if origin.eq_ignore_ascii_case("WellKnown") {
+                                continue;
+                            }
+                            let kind = classify_ip(&ip);
+                            if !list.iter().any(|e| e.ip == ip) {
+                                list.push(LanIpInfo { ip, kind });
+                            }
+                        }
+                    }
+                    if !list.is_empty() {
+                        // المسار الافتراضي أولاً (هو عنوان QR الرئيسي)
+                        // ثم Tailscale ثم البقية.
+                        let primary = default_route_ip();
+                        list.sort_by_key(|e| {
+                            let rank = if Some(&e.ip) == primary.as_ref() {
+                                0
+                            } else if e.kind == "lan" {
+                                1
+                            } else if e.kind == "vpn" {
+                                2
+                            } else {
+                                3
+                            };
+                            rank
+                        });
+                        return list;
+                    }
+                }
+            }
+        }
+        // تعذّر PowerShell (نسخة قديمة/سياسة) — عنوان المسار الافتراضي
+        // وحده إن وُجد، وإلا قائمة فارغة (الواجهة تعرض «—»).
+        default_route_ip()
+            .map(|ip| vec![LanIpInfo { ip, kind: "lan".into() }])
+            .unwrap_or_default()
+    }
+    #[cfg(not(windows))]
+    {
+        default_route_ip()
+            .map(|ip| vec![LanIpInfo { ip, kind: "lan".into() }])
+            .unwrap_or_default()
+    }
+}
+
+/// تصنيف العنوان: 100.64–100.127 هو نطاق Tailscale/CGNAT،
+/// والخاص (10/172.16-31/192.168) «lan»، وما عداهما «other».
+#[cfg_attr(not(windows), allow(dead_code))]
+fn classify_ip(ip: &str) -> String {
+    let parts: Vec<u32> = ip
+        .split('.')
+        .filter_map(|p| p.parse().ok())
+        .collect();
+    if parts.len() == 4 {
+        let [a, b, _, _] = [parts[0], parts[1], parts[2], parts[3]];
+        if a == 100 && (64..=127).contains(&b) {
+            return "vpn".into();
+        }
+        if a == 10 || a == 192 && b == 168 || a == 172 && (16..=31).contains(&b) {
+            return "lan".into();
+        }
+    }
+    "other".into()
+}
+
+/// عنوان IP للمسار الافتراضي (connect خادع على UDP — لا يرسل شيئا).
+fn default_route_ip() -> Option<String> {
+    if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
+        if sock.connect("8.8.8.8:53").is_ok() {
+            if let Ok(addr) = sock.local_addr() {
+                let ip = addr.ip();
+                if ip.is_ipv4() && !ip.is_loopback() && !ip.is_unspecified() {
+                    return Some(ip.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// تنفيذ أمر نظام بلا نافذة أوامير وامضة (CREATE_NO_WINDOW) —
+/// الوسيلة الوحيدة بلا تبعية crates خارجية.
+#[cfg(windows)]
+fn run_hidden(
+    program: &str,
+    args: &[&str],
+) -> std::io::Result<std::process::Output> {
+    use std::os::windows::process::CommandExt;
+    std::process::Command::new(program)
+        .args(args)
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .output()
+}
+
+/// هل قاعدة جدار حماية بهذا الاسم موجودة؟ netsh يرجع رمز خروج
+/// موحّداً بين لغات النظام (1 = لا قاعدة بهذا الاسم).
+#[cfg(windows)]
+fn rule_exists(name: &str) -> bool {
+    run_hidden(
+        "netsh",
+        &["advfirewall", "firewall", "show", "rule", &format!("name={}", name)],
+    )
+    .map(|o| o.status.success())
+    .unwrap_or(false)
+}
