@@ -301,6 +301,28 @@ export function CashiersScreen() {
               <span className="chip">فعّل الخادم ليتصل الكاشير</span>
             )}
           </div>
+
+          {/* v68 (الجولة 72): الاستمرار بالخلفية بعد إغلاق النافذة — */}
+          {/* إغلاق النافذة والخادم يعمل يخفيها لأيقونة شريط المهام. */}
+          <div
+            className={`lan-keep-row ${settings.lanKeepAliveOnClose ? 'on' : ''}`}
+            onClick={() =>
+              updateSettings({
+                lanKeepAliveOnClose: !settings.lanKeepAliveOnClose,
+              })
+            }>
+            <div className="lan-keep-text">
+              <b>الاستمرار بالخلفية بعد إغلاق النافذة</b>
+              <span>
+                عند إغلاق النافذة والخادم يعمل يبقى البرنامج يعمل من
+                أيقونة سيلا في شريط المهام — الكاشير لا ينقطع عن
+                البيع. للخروج الكامل: أيقونة سيلا ← «إنهاء كامل»، أو
+                أوقف الخادم أولاً ثم أغلق.
+              </span>
+            </div>
+            <span className="switch-visual" />
+          </div>
+
           {lanError ? (
             <div className="state-banner">{lanError}</div>
           ) : null}

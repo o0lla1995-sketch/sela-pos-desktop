@@ -51,22 +51,38 @@ function recount(items: AppNotification[]): number {
   return count;
 }
 
-/** Posts a local Android notification (best-effort, never throws). */
+/** Posts a local Android notification (best-effort, never throws).
+ *  v68 (الجولة 72): سطح المكتب — SelaNotificationsNative معدوم (وحدة
+ *  أندرويد لا تُبنى هنا) فكنا نسقط بصمت: لا إشعار نظام إطلاقاً،
+ *  وبخاصة أثناء عمل البرنامج بالخلفية (خادم الكاشير بعد إخفاء
+ *  النافذة) حيث لا يرى التاجر إشعارات الواجهة الداخلية. السقوط
+ *  الآن إلى Web Notification API في WebView2 — إشعار ويندوز حقيقي
+ *  بالعربية (dir rtl) إذا مُنح الإذن (يُطلب عند تشغيل خادم الكاشير). */
 async function postSystemNotification(
   notification: AppNotification,
 ): Promise<void> {
   try {
-    if (SelaNotificationsNative == null) {
+    if (SelaNotificationsNative != null) {
+      await SelaNotificationsNative.show(
+        (Math.abs(hashCode(notification.id)) % 100000) + 1,
+        notification.title,
+        notification.body,
+        notification.kind === 'out_of_stock' || notification.kind === 'low_stock'
+          ? 'stock'
+          : notification.kind,
+      );
       return;
     }
-    await SelaNotificationsNative.show(
-      (Math.abs(hashCode(notification.id)) % 100000) + 1,
-      notification.title,
-      notification.body,
-      notification.kind === 'out_of_stock' || notification.kind === 'low_stock'
-        ? 'stock'
-        : notification.kind,
-    );
+    if (
+      typeof Notification !== 'undefined' &&
+      Notification.permission === 'granted'
+    ) {
+      new Notification(notification.title, {
+        body: notification.body,
+        dir: 'rtl',
+        lang: 'ar',
+      });
+    }
   } catch (error) {
     logDiag(
       'notifications',

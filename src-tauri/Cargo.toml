@@ -1,6 +1,6 @@
 [package]
 name = "sela-pos-desktop"
-version = "66.0.0"
+version = "68.0.0"
 description = "سيلا POS لسطح المكتب — نظام نقاط بيع متكامل (ويندوز)"
 edition = "2021"
 
@@ -10,7 +10,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 sela-core = { path = "../crates/sela-core" }
 rusqlite = "0.32"
-tauri = { version = "2", features = ["protocol-asset"] }
+# v68 (الجولة 72): tray-icon — أيقونة شريط المهام للاستمرار بالخلفية
+# (إغلاق النافذة مع خادم كاشير يعمل يخفيها بدل إيقاف الخادم). الصناديق
+# (tray-icon/muda) موجودة أصلاً في Cargo.lock فلا يتغير القفل إطلاقاً.
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

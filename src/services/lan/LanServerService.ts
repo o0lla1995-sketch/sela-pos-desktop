@@ -30,6 +30,29 @@ import {LAN_DEFAULT_PORT} from '../../core/config';
 let unlisten: UnlistenFn | null = null;
 let currentPort = LAN_DEFAULT_PORT;
 
+// ── v68 (الجولة 72): إخفاء النافذة مع خادم حي ──────────────────────
+// Rust يمنع الإغلاق ويخفي النافذة (البرنامج يبقى من أيقونة شريط
+// المهام) — نُعلم التاجر فوراً بإشعار نظام واضح كي لا يظن أن
+// البرنامج أُغلق وفقد الكاشير اتصاله. يعمل مرة كل جلسة إخفاء.
+let trayNoticeShown = false;
+if (insideTauri()) {
+  void listen('app://hidden-to-tray', () => {
+    try {
+      if (!trayNoticeShown) {
+        trayNoticeShown = true;
+        notificationsStore.push(
+          'cashier',
+          'سيلا يعمل بالخلفية',
+          'أُخفيت نافذة نقطة البيع وخادم الكاشير مستمر بالعمل — استعد النافذة بنقرة أيقونة سيلا في شريط المهام (أو بفتح البرنامج مجدداً).',
+          {system: true},
+        );
+      }
+    } catch {
+      // إشعار فاشل لا يمس الخادم أبداً.
+    }
+  });
+}
+
 // ── v59 (الجولة 63): أحداث الخادم الحية → مركز الإشعارات +
 // النافذة العائمة. المدير يرى كل عملية كاشير لحظياً (بيع/مرتجع/
 // جهاز جديد ينتظر موافقته) دون أن يفتح شاشة الكاشير.
@@ -189,6 +212,20 @@ export const LanServerService = {
               });
             });
         });
+      }
+
+      // v68 (الجولة 72): طلب إذن إشعارات النظام من داخل نقرة المستخدم
+      // (مفتاح الخادم) — بدونه لا تصل إشعارات ويندوز أثناء العمل
+      // بالخلفية: بيع كاشير، جهاز ينتظر موافقة، إخفاء النافذة.
+      try {
+        if (
+          typeof Notification !== 'undefined' &&
+          Notification.permission === 'default'
+        ) {
+          void Notification.requestPermission();
+        }
+      } catch {
+        // أفضل جهد — الرفض لا يعطل شيئاً.
       }
       return true;
     } catch (error) {

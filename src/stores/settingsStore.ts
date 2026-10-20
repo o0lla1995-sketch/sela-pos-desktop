@@ -76,6 +76,12 @@ export interface AppSettings {
   lanServerEnabled: boolean;
   /** v58: منفذ خادم الكاشير (HTTP) — 8950 افتراضياً. */
   lanPort: number;
+  /** v68 (الجولة 72): الاستمرار بالخلفية بعد إغلاق النافذة —
+   *  إغلاق النافذة مع خادم الكاشير يعمل يخفي البرنامج في أيقونة
+   *  شريط المهام بدل إيقاف الخادم والخروج (طلب التاجر نصاً: يجب
+   *  أن تبقى نقطة البيع تعمل حتى بعد إغلاق البرنامج). الخروج
+   *  الكامل من قائمة أيقونة سيلا أو بإيقاف الخادم أولاً. */
+  lanKeepAliveOnClose: boolean;
 }
 
 /** قناة طابعة سطح المكتب (بديل بلوتوث الأندرويد). */
@@ -129,6 +135,7 @@ const DEFAULTS: AppSettings = {
   posProductView: 'grid',
   lanServerEnabled: false,
   lanPort: 8950,
+  lanKeepAliveOnClose: true,
   scannerMinLength: 4,
   printQrOnReceipt: false,
 };

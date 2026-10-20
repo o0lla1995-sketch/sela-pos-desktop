@@ -536,3 +536,70 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ── v68 (الجولة 72): صف «الاستمرار بالخلفية» داخل بطاقة الخادم ── */
+/* نفس لغة مفتاح الخادم بصرياً لكن بحد متقطع (سلوك اختياري لا تشغيلي
+   أساسي) — شرح واضح للخروج الكامل كي لا يشعر التاجر أن البرنامج
+   «علق» بعد إغلاق النافذة. */
+.lan-keep-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface-2);
+  border: 1px dashed var(--line);
+  border-radius: 13px;
+  padding: 10px 14px;
+  margin-top: 10px;
+  cursor: pointer;
+  user-select: none;
+  width: 100%;
+}
+.lan-keep-row:hover {
+  border-color: var(--brand);
+}
+.lan-keep-row .lan-keep-text {
+  flex: 1;
+  min-width: 0;
+}
+.lan-keep-row .lan-keep-text b {
+  display: block;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.lan-keep-row .lan-keep-text span {
+  display: block;
+  font-size: 12px;
+  color: var(--muted, #9a9aa5);
+  margin-top: 3px;
+  line-height: 1.7;
+}
+.lan-keep-row .switch-visual {
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--surface-3, #3a3a44);
+  position: relative;
+  transition: background 0.18s;
+  flex-shrink: 0;
+}
+.lan-keep-row.on .switch-visual {
+  background: var(--brand);
+}
+.lan-keep-row .switch-visual::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  inset-inline-start: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.18s;
+}
+.lan-keep-row.on .switch-visual::after {
+  transform: translateX(20px);
+}
+/* RTL: نفس قاعدة مفتاح الخادم — الانزلاق لليسار (الجولة 64). */
+[dir='rtl'] .lan-keep-row.on .switch-visual::after {
+  transform: translateX(-20px);
+}

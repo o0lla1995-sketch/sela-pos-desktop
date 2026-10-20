@@ -622,15 +622,19 @@ pub fn lan_start(
         server: std::sync::Arc::new(server),
     };
     *state.lan.lock().unwrap() = Some(entry);
+    // v68: نص أيقونة شريط المهام يعكس حالة الخادم لحظياً.
+    crate::refresh_tray_tooltip(&app);
     Ok(true)
 }
 
 #[command]
-pub fn lan_stop(state: State<AppState>) -> CmdResult<bool> {
+pub fn lan_stop(app: AppHandle, state: State<AppState>) -> CmdResult<bool> {
     let entry = state.lan.lock().unwrap().take();
     if let Some(entry) = entry {
         entry.server.stop();
     }
+    // v68: تحديث أيقونة الشريط — الخادم توقف فلا وعد بالخلفية.
+    crate::refresh_tray_tooltip(&app);
     Ok(true)
 }
 
