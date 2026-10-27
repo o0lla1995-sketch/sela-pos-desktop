@@ -130,18 +130,19 @@ pub fn list_input_devices() -> Vec<InputDeviceInfo> {
 
 #[cfg(windows)]
 fn list_input_devices_windows() -> Vec<InputDeviceInfo> {
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        GetRawInputDeviceList, GetRawInputDeviceInfoW, HRAWINPUT, RAWINPUTDEVICELIST,
+    // windows 0.58: كل دوال Raw Input في Win32::UI::Input نفسه
+    // (ميزة Win32_UI_Input) والمقبض HANDLE من Foundation.
+    use windows::Win32::UI::Input::{
+        GetRawInputDeviceList, GetRawInputDeviceInfoW, RAWINPUTDEVICELIST,
         RIDI_DEVICENAME, RIM_TYPEHID, RIM_TYPEKEYBOARD, RIM_TYPEMOUSE,
     };
 
     let mut devices: Vec<InputDeviceInfo> = Vec::new();
     unsafe {
-        // ① عدد الأجهزة أولاً.
+        // ① عدد الأجهزة أولاً (استدعاء بلا مخزن يعيد العدد).
         let mut count: u32 = 0;
         let needed = GetRawInputDeviceList(
-            Some(std::ptr::null_mut()),
+            None,
             &mut count,
             std::mem::size_of::<RAWINPUTDEVICELIST>() as u32,
         );
@@ -150,7 +151,7 @@ fn list_input_devices_windows() -> Vec<InputDeviceInfo> {
         }
         let mut list: Vec<RAWINPUTDEVICELIST> = Vec::with_capacity(count as usize);
         let got = GetRawInputDeviceList(
-            list.as_mut_ptr(),
+            Some(list.as_mut_ptr()),
             &mut count,
             std::mem::size_of::<RAWINPUTDEVICELIST>() as u32,
         );
@@ -161,20 +162,19 @@ fn list_input_devices_windows() -> Vec<InputDeviceInfo> {
 
         for device in list {
             let kind = match device.dwType {
-                t if t == RIM_TYPEKEYBOARD.0 => "Keyboard",
-                t if t == RIM_TYPEHID.0 => "HID",
-                t if t == RIM_TYPEMOUSE.0 => "Mouse",
+                t if t == RIM_TYPEKEYBOARD => "Keyboard",
+                t if t == RIM_TYPEHID => "HID",
+                t if t == RIM_TYPEMOUSE => "Mouse",
                 _ => "Other",
             };
-            // ② اسم الجهاز (طول المحتوى بالحروف الواسعة).
-            let handle = HRAWINPUT(device.hRawInput.0);
+            // ② اسم الجهاز (طول المحتوى بالحروف الواسعة ثم القراءة).
+            let handle = device.hDevice;
+            if handle.is_invalid() {
+                continue;
+            }
             let mut size: u32 = 0;
-            if GetRawInputDeviceInfoW(
-                handle,
-                RIDI_DEVICENAME,
-                None,
-                &mut size,
-            ) == u32::MAX
+            if GetRawInputDeviceInfoW(handle, RIDI_DEVICENAME, None, &mut size)
+                == u32::MAX
                 || size == 0
             {
                 continue;
@@ -186,24 +186,19 @@ fn list_input_devices_windows() -> Vec<InputDeviceInfo> {
                 Some(buffer.as_mut_ptr().cast()),
                 &mut size,
             );
-            if written == u32::MAX {
+            if written == u32::MAX || written == 0 {
                 continue;
             }
             let name = String::from_utf16_lossy(&buffer[..written as usize]);
             if name.is_empty() {
                 continue;
             }
-            // تكرار شائع: RDP وأجهزة النظام الافتراضية — تُستبعد.
-            if name.contains("Root") && name.starts_with("\\\\?\\") == false {
-                // أسماء Root تخص أجهزة محاكاة — لكن لوحات المفاتيح
-                // الفعلية قد تحملها أيضاً؛ نبقيها كلها للعرض الصادق.
-            }
             devices.push(InputDeviceInfo {
                 name,
                 kind: kind.to_string(),
             });
         }
-        // استبعاد أجهزة الفأرة من قائمة مرشحي الماسح — الماسح دائماً
+        // استبعاد الفأرة من قائمة مرشحي الماسح — الماسح دائماً
         // Keyboard/HID؛ والفأرة ضجيج لا يفيد التاجر.
         devices.retain(|d| d.kind != "Mouse");
     }

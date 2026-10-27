@@ -21,6 +21,9 @@ features = [
   "Win32_Graphics_Gdi",
   "Win32_Graphics_Printing",
   "Win32_UI_WindowsAndMessaging",
+  # v70 (الجولة 74 #5): تعداد أجهزة الإدخال (ماسحات الباركود)
+  # عبر Raw Input API.
+  "Win32_UI_Input",
   "Win32_System_SystemInformation",
   "Win32_System_Registry",
 ]
