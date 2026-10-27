@@ -258,6 +258,9 @@ export interface SaleRecord {
   total_profit: number;
   discount: number;
   payment_type: PricingMode;
+  /** v70 (الجولة 74 #2): طريقة الدفع (بنك/محفظة/نقدي) لتتبع
+   *  الأرصدة — فارغ/null = نقدي (المبيعات قبل v70). */
+  payment_method?: string | null;
   created_at: string;
   /** v23 (round-29 #2): cumulative value (agora) returned against
    *  THIS invoice — «مرتجع» badge + remaining-value math. */
@@ -323,6 +326,9 @@ export interface SaleReturnRecord {
   exchange_minor: number;
   note: string | null;
   created_at: string;
+  /** v70 (الجولة 74 #2): طريقة الدفع الأصلية للفاتورة المرجَعة
+   *  (يُرَد المبلغ لنفس الحساب/المحفظة) — فارغ = نقدي. */
+  payment_method?: string | null;
 }
 
 /** A returned line — snapshot kept even if the product is later

@@ -32,10 +32,16 @@ export interface AmountKeyboardOptions {
   onCancel: () => void;
   /** هل يوجد حقل نصي داخل اللوحة؟ عندها الأرقام تذهب للحقل نفسه. */
   hasTextInput?: boolean;
+  /** v70 (الجولة 74 #3): الأسهم — التنقل بين خيارات الدفع داخل
+   *  اللوحة (بنوك ومحافظ). delta موجب = التالي بالترتيب البصري
+   *  (RTL: اليسار)، سالب = السابق. بلا معالج تُترك الأسهم
+   *  للنظام (تحريك المؤشر داخل الحقول). */
+  onArrow?: (delta: number) => void;
 }
 
 export function useAmountKeyboard(options: AmountKeyboardOptions): void {
-  const {active, onKey, text, onConfirm, onCancel, hasTextInput = false} = options;
+  const {active, onKey, text, onConfirm, onCancel, hasTextInput = false, onArrow} =
+    options;
 
   useEffect(() => {
     if (!active) {
@@ -77,6 +83,20 @@ export function useAmountKeyboard(options: AmountKeyboardOptions): void {
         onCancel();
         return;
       }
+      // v70: الأسهم تنتقل بين خيارات الدفع (بنوك/محافظ) — داخل حقول
+      // الإدخال تُترك لتحريك مؤشر الكتابة كالمعتاد.
+      if (onArrow != null && !insideInput) {
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          onArrow(1);
+          return;
+        }
+        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+          event.preventDefault();
+          onArrow(-1);
+          return;
+        }
+      }
       // داخل حقل نصي: الأرقام تكتب بشكل طبيعي في الحقل نفسه.
       if (insideInput && hasTextInput) {
         return;
@@ -100,5 +120,5 @@ export function useAmountKeyboard(options: AmountKeyboardOptions): void {
     };
     window.addEventListener('keydown', onKeydown, true);
     return () => window.removeEventListener('keydown', onKeydown, true);
-  }, [active, text, onKey, onConfirm, onCancel, hasTextInput]);
+  }, [active, text, onKey, onConfirm, onCancel, hasTextInput, onArrow]);
 }

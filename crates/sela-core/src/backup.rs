@@ -482,6 +482,7 @@ mod tests {
                 }],
                 discount: 1.0,
                 payment_type: "RETAIL",
+                payment_method: None,
             },
         )
         .unwrap();

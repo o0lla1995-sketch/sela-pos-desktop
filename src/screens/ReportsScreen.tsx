@@ -46,6 +46,11 @@ import {
 import type {ReportRangeKey} from '../core/types';
 import {Icon} from '../components/Icon';
 import './settingsv57.css';
+import {
+  PAYMENT_KIND_LABELS,
+  paymentMethodById,
+} from '../core/paymentMethods';
+import {PaymentMethodIcon} from '../components/PaymentMethodIcon';
 
 /* ──────────────────────────────────────────────────────────────
  * الرسوم البيانية — مكونات SVG صغيرة مضمّنة (بلا أي مكتبات).
@@ -287,6 +292,11 @@ export function ReportsScreen() {
   const [treasury, setTreasury] = useState<TreasurySnapshot | null>(null);
   const [debt, setDebt] = useState<DebtSalesSummary | null>(null);
   const [detail, setDetail] = useState<SalesDetailRow>([]);
+  /** v70 (الجولة 74 #2): أرصدة طرق الدفع بالفترة — كم دخل كل بنك/
+   *  محفظة/الخزينة النقدية وكم رُدّ منه. */
+  const [payMethods, setPayMethods] = useState<
+    Awaited<ReturnType<typeof ReportRepo.paymentMethodTotals>>
+  >([]);
   const [loading, setLoading] = useState(true);
   const [exportBusy, setExportBusy] = useState(false);
 
@@ -306,17 +316,19 @@ export function ReportsScreen() {
         rangeKey === 'custom' ? {from, to} : undefined;
       const key: ReportRangeKey =
         rangeKey === 'custom' ? 'custom' : rangeKey;
-      const [nextBundle, nextTreasury, nextDebt, nextDetail] =
+      const [nextBundle, nextTreasury, nextDebt, nextDetail, nextPayMethods] =
         await Promise.all([
           ReportService.loadBundle(key, custom),
           ReportService.treasurySnapshot(),
           ReportRepo.debtSalesSummary(rangeFor(key, custom)),
           ReportService.salesDetail(key, custom),
+          ReportRepo.paymentMethodTotals(rangeFor(key, custom)),
         ]);
       setBundle(nextBundle);
       setTreasury(nextTreasury);
       setDebt(nextDebt);
       setDetail(nextDetail);
+      setPayMethods(nextPayMethods);
     } catch (e) {
       toast(
         e instanceof Error ? e.message : 'تعذر تحميل التقارير',
@@ -921,6 +933,63 @@ export function ReportsScreen() {
               <div className="sv57-note">
                 فواتير الدين بضاعة خرجت من مخزونك (داخل الإيراد) لكنها لم
                 تدخل الدرج نقداً — تدخل مع سدادّاتها ضمن «النقد المحصّل».
+              </div>
+            </div>
+          )}
+
+          {/* ── 5.5) أرصدة طرق الدفع (v70 — الجولة 74 #2) ──── */}
+          {payMethods.length > 0 && (
+            <div className="card sv57-sec">
+              <div className="sv57-sec-head">
+                <div>
+                  <div className="sv57-sec-title">أرصدة طرق الدفع</div>
+                  <div className="sv57-sec-hint">
+                    كم دخل كل حساب بنكي/محفظة إلكترونية/الخزينة النقدية
+                    خلال الفترة، وكم رُدّ منه — طابقه مع كشف حسابك البنكي
+                    والمحافظ
+                  </div>
+                </div>
+              </div>
+              <div className="sv57-kpis">
+                {payMethods.map(row => {
+                  const method = paymentMethodById(row.method);
+                  return (
+                    <div className="sv57-kpi" key={row.method}>
+                      <span
+                        className="label"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                        }}>
+                        <PaymentMethodIcon method={method} size={22} />
+                        {method.label}
+                      </span>
+                      <span
+                        className="value"
+                        style={{color: method.color}}
+                        title={PAYMENT_KIND_LABELS[method.kind]}>
+                        {formatMoney(row.net)}
+                      </span>
+                      <span className="sub">
+                        {row.invoices > 0
+                          ? `${row.invoices} فاتورة · دخل ${formatMoney(
+                              row.inflow,
+                            )}`
+                          : 'لا فواتير'}
+                        {row.refunded > 0
+                          ? ` · رُدّ ${formatMoney(row.refunded)}`
+                          : ''}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="sv57-note">
+                الأرقام من منظور حركة المال: الوارد بفواتير البيع بتاريخها
+                والمرتجعات بتاريخ معالجتها — فواتير الدين لا تدخل هنا لأن
+                لم يُدفع منها شيء بعد. المبيعات المسجلة قبل إصدار طرق الدفع
+                محسوبة نقدياً.
               </div>
             </div>
           )}

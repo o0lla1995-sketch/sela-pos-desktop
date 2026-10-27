@@ -162,6 +162,8 @@ fn main() {
             commands::open_drawer,
             commands::list_serial_ports,
             commands::list_spool_printers,
+            commands::hw_list_input_devices,
+            commands::hw_discover_printers,
             commands::save_printer_channel,
             commands::current_printer_channel,
             commands::pick_store_logo,
@@ -193,6 +195,7 @@ fn main() {
             sqlbridge::tx_sessions_alive,
             // ── ملفات النسخ/التصدير/الاستيراد ──
             sqlbridge::save_text_file,
+            sqlbridge::save_binary_file,
             sqlbridge::open_text_file,
             sqlbridge::pick_folder,
             sqlbridge::write_file_in_folder,

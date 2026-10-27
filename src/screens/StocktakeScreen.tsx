@@ -322,6 +322,7 @@ export function StocktakeScreen() {
             {session: target, items: targetItems, summary: targetSummary, interim},
             receiptSettings,
           ),
+          'report',
         );
         toast(
           interim

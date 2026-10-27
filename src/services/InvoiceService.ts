@@ -290,6 +290,10 @@ export interface CompleteSaleOptions {
   lines: CartLine[];
   discount: number;
   paymentType: PricingMode;
+  /** v70 (الجولة 74 #2): طريقة الدفع المختارة (بنك/محفظة/نقدي)
+   *  — تُحفظ مع الفاتورة وتُطبع على الإيصال وتُتتبع في الأرصدة.
+   *  فارغ/null = نقدي. */
+  paymentMethod?: string | null;
   /** Print the receipt right after a successful sale. */
   print: boolean;
   receiptSettings: ReceiptSettings;
@@ -359,6 +363,7 @@ export const InvoiceService = {
           lines: options.lines,
           discount: options.discount,
           paymentType: options.paymentType,
+          paymentMethod: options.paymentMethod ?? null,
           cashierId: options.cashierId ?? null,
           debtRow:
             options.debt == null
@@ -503,7 +508,7 @@ export const InvoiceService = {
                 },
                 options.receiptSettings,
               );
-        await ThermalPrinterService.printJob(job);
+        await ThermalPrinterService.printJob(job, 'receipt');
       } catch (error) {
         // The SALE IS SAVED — printing failure must never roll it back.
         const message = error instanceof Error ? error.message : String(error);
@@ -564,7 +569,7 @@ export const InvoiceService = {
         {ret, items: retItems},
         receiptSettings,
       );
-      await ThermalPrinterService.printJob(job);
+      await ThermalPrinterService.printJob(job, 'receipt');
       return;
     }
     // v20: VOUCHER redemptions (INV-V) reprint with the voucher
@@ -610,7 +615,7 @@ export const InvoiceService = {
         },
         receiptSettings,
       );
-      await ThermalPrinterService.printJob(job);
+      await ThermalPrinterService.printJob(job, 'receipt');
       return;
     }
     if (ref.startsWith('INV-L-')) {
@@ -638,7 +643,7 @@ export const InvoiceService = {
         },
         receiptSettings,
       );
-      await ThermalPrinterService.printJob(job);
+      await ThermalPrinterService.printJob(job, 'receipt');
       return;
     }
 
@@ -646,7 +651,7 @@ export const InvoiceService = {
       {sale: record, items, productNameById: names},
       receiptSettings,
     );
-    await ThermalPrinterService.printJob(job);
+    await ThermalPrinterService.printJob(job, 'receipt');
   },
 
   /**
@@ -706,7 +711,7 @@ export const InvoiceService = {
       },
       receiptSettings,
     );
-    await ThermalPrinterService.printJob(job);
+    await ThermalPrinterService.printJob(job, 'receipt');
   },
 
   /**
@@ -1408,7 +1413,7 @@ export const InvoiceService = {
           {ret: result, items, exchanges},
           input.receiptSettings,
         );
-        await ThermalPrinterService.printJob(job);
+        await ThermalPrinterService.printJob(job, 'receipt');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         logDiag('sale', `المرتجع سُجّل لكن الطباعة فشلت: ${message}`, 'warn');

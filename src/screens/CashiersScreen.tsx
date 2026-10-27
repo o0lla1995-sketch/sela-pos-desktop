@@ -1120,7 +1120,7 @@ function CashierReportOverlay({
           showProfit: settings.showProfitOnReceipt,
         },
       );
-      await ThermalPrinterService.printJob(ops);
+      await ThermalPrinterService.printJob(ops, 'report');
       toast('طُبع تقرير الكاشير', 'success');
     } catch (error) {
       toast(

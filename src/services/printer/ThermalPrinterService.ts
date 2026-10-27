@@ -8,6 +8,7 @@
  */
 import type {EscPosOp} from '../../native/nativeBridge';
 import {printJob as dispatchJob, kickDrawerIfEnabled} from '../../printing/dispatch';
+import type {PrinterRole} from '../HardwareService';
 import {api} from '../../lib/tauri';
 import {logDiag} from '../../core/diagnostics';
 
@@ -55,10 +56,12 @@ export const ThermalPrinterService = {
     return null;
   },
 
-  /** الطباعة الفعلية — ترميز البايتات في النواة (escpos.rs). */
-  async printJob(ops: EscPosOp[]): Promise<void> {
+  /** الطباعة الفعلية — ترميز البايتات في النواة (escpos.rs).
+   *  v70: دور الاستخدام (فواتير/تقارير/باركودات) يحدد القناة إن
+   *  عيّن التاجر طابعة مستقلة له — وإلا الرئيسية كما كان. */
+  async printJob(ops: EscPosOp[], role?: PrinterRole): Promise<void> {
     try {
-      await dispatchJob(ops as unknown as Parameters<typeof dispatchJob>[0]);
+      await dispatchJob(ops as unknown as Parameters<typeof dispatchJob>[0], role);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logDiag('printer', `فشل إرسال مهمة الطباعة: ${message}`, 'warn');

@@ -15,6 +15,7 @@ import {
 } from '../core/config';
 import type {PricingMode} from '../core/types';
 import type {StoreMode} from '../core/storeModes';
+import {defaultPaymentMethodsEnabled} from '../core/paymentMethods';
 
 /** v40 (الجولة 48 #5): شكل عرض المنتجات داخل نقطة البيع — الافتراض
  *  الشبكة الحالية (طلب التاجر: «اجعل الشكل الافتراضي هو الحالي»).
@@ -82,6 +83,10 @@ export interface AppSettings {
    *  أن تبقى نقطة البيع تعمل حتى بعد إغلاق البرنامج). الخروج
    *  الكامل من قائمة أيقونة سيلا أو بإيقاف الخادم أولاً. */
   lanKeepAliveOnClose: boolean;
+  /** v70 (الجولة 74 #2): طرق الدفع المفعّلة لدى التاجر — تظهر في
+   *  واجهة الدفع (بنوك ومحافظ فلسطينية). النقدي مقفول دائماً.
+   *  الخريطة جزئية الترقية = كل غير مذكور مفعّل. */
+  paymentMethodsEnabled: Record<string, boolean>;
 }
 
 /** قناة طابعة سطح المكتب (بديل بلوتوث الأندرويد). */
@@ -138,6 +143,7 @@ const DEFAULTS: AppSettings = {
   lanKeepAliveOnClose: true,
   scannerMinLength: 4,
   printQrOnReceipt: false,
+  paymentMethodsEnabled: defaultPaymentMethodsEnabled(),
 };
 
 interface SettingsState {

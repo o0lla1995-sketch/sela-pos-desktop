@@ -63,6 +63,9 @@ import {CashiersRepo} from '../../database/repositories/CashiersRepo';
 import {LocalDebtsRepo} from '../../database/repositories/LocalDebtsRepo';
 import {SaleRepo} from '../../database/repositories/SaleRepo';
 import {InvoiceService} from '../InvoiceService';
+import {ProductRepo} from '../../database/repositories/ProductRepo';
+import {UnitRepo} from '../../database/repositories/UnitRepo';
+import {injectBarcode} from '../../lib/scanner';
 import {getSettings} from '../../stores/settingsStore';
 import {getDb} from '../../database/connection';
 import {PlatformUtilsNative} from '../../native/nativeBridge';
@@ -688,6 +691,45 @@ export async function handleLanRequest(
     if (path === '/api/auth/logout' && method === 'POST') {
       await CashiersRepo.clearToken(authed.deviceId);
       return ok({ok: true});
+    }
+
+    // v70 (الجولة 74 #7): الماسح اللاسلكي — كاميرا جوال سيلّا كاشير
+    // ترسل الباركود المقروء فيُحقن في الموجّه العام لنقطة البيع
+    // (نفس مسار ماسح USB تماماً: إضافة للسلة عند البيع وتعبئة حقل
+    // الباركود عند إضافة المنتجات). مستقل تماماً عن مهام الكاشير
+    // المحلية — لا يلمس السلة ولا الفواتير في التطبيق إطلاقاً.
+    if (path === '/api/scan' && method === 'POST') {
+      let code = '';
+      try {
+        const body = JSON.parse(req.body || '{}') as {code?: unknown};
+        code = typeof body.code === 'string' ? body.code : '';
+      } catch {
+        return fail(400, 'طلب غير صالح');
+      }
+      if (code.trim().length < 4) {
+        return fail(400, 'باركود قصير جداً');
+      }
+      const injected = injectBarcode(code);
+      // هل المنتج معروف؟ للتغذية الراجعة على الجوال (صوت نجاح/تنبيه).
+      let known = false;
+      let productName: string | null = null;
+      try {
+        const hit = await ProductRepo.findByBarcode(code.trim());
+        if (hit != null) {
+          known = true;
+          productName = hit.name;
+        } else {
+          const unitHit = await UnitRepo.findByBarcode(code.trim());
+          if (unitHit != null) {
+            known = true;
+            const owner = await ProductRepo.getById(unitHit.productId);
+            productName = owner?.name ?? null;
+          }
+        }
+      } catch {
+        /* البحث أفضل جهد — الحقن نفسه هو المهم */
+      }
+      return ok({ok: true, injected, known, productName});
     }
 
     if (path === '/api/catalog' && method === 'GET') {

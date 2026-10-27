@@ -172,6 +172,14 @@ export const api = {
   openDrawer: () => invoke<{written: number}>('open_drawer'),
   listSerialPorts: () => invoke<string[]>('list_serial_ports'),
   listSpoolPrinters: () => invoke<string[]>('list_spool_printers'),
+
+  // ── v70 (الجولة 74 #5): طبقة تجريد العتاد — اكتشاف تلقائي ──
+  hwDiscoverPrinters: () =>
+    invoke<{host: string; port: number; latencyMs: number}[]>(
+      'hw_discover_printers',
+    ),
+  hwListInputDevices: () =>
+    invoke<{name: string; kind: string}[]>('hw_list_input_devices'),
   savePrinterChannel: (channel: unknown) =>
     invoke<void>('save_printer_channel', {channel}),
   currentPrinterChannel: () => invoke<unknown>('current_printer_channel'),

@@ -40,6 +40,23 @@ export function setActiveBarcodeHandler(handler: BarcodeHandler | null): void {
   activeHandler = handler;
 }
 
+/**
+ * v70 (الجولة 74 #7): حقن قراءة باركود من مصدر خارجي — الماسح
+ * اللاسلكي (كاميرا جوال «سيلّا كاشير» المتصل بالشبكة المحلية).
+ * نفس مسار التوجيه العام حرفياً: كتم لوحات المبالغ + حاجب التكرار
+ * + التوجيه للماسح النشط — فتعمل الكاميرا اللاسلكية تماماً كماسح
+ * USB مربوط بالكيبورد: إضافة للسلة عند البيع وتعبئة حقل الباركود
+ * عند إضافة المنتجات.
+ */
+export function injectBarcode(code: string): boolean {
+  const clean = code.trim();
+  if (clean.length < 4) {
+    return false;
+  }
+  route(clean);
+  return true;
+}
+
 function route(code: string): void {
   if (suppressedCount > 0) return; // لوحة مبالغ مفتوحة أو التطبيق مقفل.
   const clean = code.trim();

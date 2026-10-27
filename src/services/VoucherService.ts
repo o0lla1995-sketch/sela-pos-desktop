@@ -598,7 +598,7 @@ export const VoucherService = {
             },
             options.receiptSettings,
           );
-          await ThermalPrinterService.printJob(job);
+          await ThermalPrinterService.printJob(job, 'receipt');
         } catch (error) {
           // The redemption IS booked — printing failure must never
           // hide that (the receipt can be reprinted from القسائم).
@@ -773,7 +773,7 @@ export const VoucherService = {
           },
           receiptSettings,
         );
-        await ThermalPrinterService.printJob(job);
+        await ThermalPrinterService.printJob(job, 'receipt');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         logDiag('sila', `اكتمل الصرف لكن الطباعة فشلت: ${message}`, 'warn');
@@ -915,6 +915,6 @@ export const VoucherService = {
       },
       settings,
     );
-    await ThermalPrinterService.printJob(job);
+    await ThermalPrinterService.printJob(job, 'receipt');
   },
 };

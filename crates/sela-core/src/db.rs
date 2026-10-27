@@ -159,7 +159,10 @@ CREATE TABLE IF NOT EXISTS sales (
     CHECK (return_kind IS NULL OR return_kind IN ('cash','sila','local','online')),
   cashier_id INTEGER,
   -- v59 (الجولة 63): مرجع عملية الكاشير الفريد (ميزة العمل دون اتصال)
-  client_ref TEXT
+  client_ref TEXT,
+  -- v70 (الجولة 74 #2): طريقة الدفع المختارة (بنك/محفظة/نقدي)
+  -- لتتبع الأرصدة — NULL = نقدي (توافق المبيعات القديمة).
+  payment_method TEXT
 );
 CREATE TABLE IF NOT EXISTS sale_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -194,7 +197,10 @@ CREATE TABLE IF NOT EXISTS sale_returns (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   cashier_id INTEGER,
   -- v59 (الجولة 63): مرجع عملية المرتجع الفريد من جهاز الكاشير
-  client_ref TEXT
+  client_ref TEXT,
+  -- v70 (الجولة 74 #2): طريقة الدفع الأصلية للفاتورة المرجَعة
+  -- (يُرَد المبلغ لنفس الحساب/المحفظة) — NULL = نقدي.
+  payment_method TEXT
 );
 CREATE TABLE IF NOT EXISTS sale_return_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -581,6 +587,11 @@ fn heal_v57(conn: &Connection) -> Result<()> {
         ("sale_returns", "client_ref", "TEXT"),
         ("lan_cashiers", "can_debt", "INTEGER NOT NULL DEFAULT 1"),
         ("lan_cashiers", "can_return", "INTEGER NOT NULL DEFAULT 1"),
+        // ── v70 (الجولة 74 #2): طريقة الدفع لكل عملية (بنك/محفظة/
+        // نقدي) لتتبع الأرصدة الواردة — NULL = نقدي (المبيعات
+        // القديمة قبل v70 تبقى محسوبة نقداً بلا ترحيل).
+        ("sales", "payment_method", "TEXT"),
+        ("sale_returns", "payment_method", "TEXT"),
     ];
     for (table, column, ddl) in upgrades {
         if !has_column(conn, table, column) {

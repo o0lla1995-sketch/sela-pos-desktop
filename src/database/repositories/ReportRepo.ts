@@ -496,6 +496,58 @@ export const ReportRepo = {
     }));
   },
 
+  /** v70 (الجولة 74 #2): أرصدة طرق الدفع لفترة — كم دخل كل حساب
+   *  بنكي/محفظة/الخزينة النقدية وكم خرج منه (مرتجعات).
+   *  ────────────────────────────────────────────────────────────
+   *  منظور حركة المال (لا الإيراد المحاسبي): الوارد بفاتورة البيع
+   *  بتاريخها، والصادر بفترة معالجة المرتجع فعلياً — هكذا يطابق
+   *  الرقم ما يراه التاجر في كشف حسابه البنكي/محفظته في نفس
+   *  الأيام. المبيعات القديمة (قبل v70) بلا طريقة = نقدي.
+   *  الديون (INV-D/INV-L) لا تدخل هنا — لم يُدفع منها شيء بعد. */
+  async paymentMethodTotals(
+    range: DateRange,
+  ): Promise<
+    {
+      method: string;
+      inflow: number;
+      refunded: number;
+      net: number;
+      invoices: number;
+    }[]
+  > {
+    const [start, end] = rangeBounds(range);
+    const result = await getDb().execute(
+      `SELECT
+         COALESCE(s.payment_method, 'cash') AS method,
+         COALESCE(SUM(CASE WHEN s.return_kind IS NULL
+           THEN s.total_amount ELSE 0 END), 0) AS inflow,
+         COALESCE(SUM(CASE WHEN s.return_kind IS NOT NULL
+           THEN -s.total_amount ELSE 0 END), 0) AS refunded,
+         SUM(CASE WHEN s.return_kind IS NULL THEN 1 ELSE 0 END) AS invoices
+       FROM sales s
+       WHERE s.created_at >= ? AND s.created_at <= ?
+         AND s.invoice_number NOT LIKE 'INV-D-%'
+         AND s.invoice_number NOT LIKE 'INV-L-%'
+         AND s.invoice_number NOT LIKE 'INV-O-%'
+         AND s.invoice_number NOT LIKE 'INV-V-%'
+       GROUP BY COALESCE(s.payment_method, 'cash')
+       ORDER BY inflow DESC`,
+      [start, end],
+    );
+    const rows = result.rows ?? [];
+    return rows.map(row => {
+      const inflow = Number(row.inflow ?? 0);
+      const refunded = Number(row.refunded ?? 0);
+      return {
+        method: String(row.method ?? 'cash'),
+        inflow,
+        refunded,
+        net: inflow - refunded,
+        invoices: Number(row.invoices ?? 0),
+      };
+    });
+  },
+
   safeMessage(error: unknown): string {
     return toMessage(error);
   },

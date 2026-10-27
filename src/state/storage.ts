@@ -27,6 +27,8 @@ export const KEYS = {
   returnDay: 'return_day_v1',
   savedPrinter: 'saved_printer_v1',
   desktopPrinter: 'desktop_printer_v1',
+  /** v70 (الجولة 74 #5): تعيين طابعة لكل موضع استخدام (HAL). */
+  desktopPrinterRoles: 'desktop_printer_roles_v1',
   seededFlag: 'db_seeded_v1',
   notifications: 'notifications_v1',
   stockAlertLedger: 'stock_alert_ledger_v1',
@@ -80,8 +82,19 @@ export const KEYS = {
 
 let mirror: Record<string, unknown> = {};
 
+/** حارس التحميل الواحد — v70: initStorage تُستدعى من main.tsx قبل
+ * تقييم أي وحدة متجر، وapp.tsx يستدعيها مجدداً داخل إقلاعه (بلا
+ * ضرر): إعادة التحميل الفعلية تحدث مرة واحدة فقط كي لا تُستبدل
+ * المرآة بنسخة من القرص تسبق كتابة configSet جارية (سباق إقلاع
+ * نظري كان قد يعيد إعداداً قديماً). */
+let mirrorLoaded = false;
+
 /** تحميل المرآة عند الإقلاع (مرة واحدة). */
 export async function initStorage(): Promise<void> {
+  if (mirrorLoaded) {
+    return;
+  }
+  mirrorLoaded = true;
   mirror = await api.configGetAll();
 }
 

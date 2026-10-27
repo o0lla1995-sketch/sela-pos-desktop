@@ -368,7 +368,7 @@ export function InventoryScreen() {
           },
           {paperWidth: settings.paperWidth, codepage: settings.codepage},
         );
-        await ThermalPrinterService.printJob(job);
+        await ThermalPrinterService.printJob(job, 'label');
         toast(`طُبع ملصق ${product.name}`, 'success');
       } catch (error) {
         toast(

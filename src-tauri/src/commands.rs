@@ -252,6 +252,7 @@ pub fn checkout(
     lines: Vec<CartLine>,
     discount: f64,
     payment_type: String,
+    payment_method: Option<String>,
 ) -> CmdResult<SaleWithItems> {
     let mut conn = state.conn.lock().unwrap();
     checkout::create_sale(
@@ -261,6 +262,7 @@ pub fn checkout(
             lines: &lines,
             discount,
             payment_type: &payment_type,
+            payment_method: payment_method.as_deref(),
         },
     )
     .map_err(arabic)
@@ -467,6 +469,22 @@ pub fn list_serial_ports() -> CmdResult<Vec<String>> {
 #[command]
 pub fn list_spool_printers() -> CmdResult<Vec<String>> {
     Ok(hardware::list_spool_printers())
+}
+
+// ── v70 (الجولة 74 #5): طبقة تجريد العتاد — تعرف تلقائي ──────────
+
+/// مسح الشبكة المحلية بحثاً عن طابعات (منفذ JetDirect 9100) —
+/// متزامن الخيوط بمهلة قصيرة لكل عنوان، ويعيد الأقرب أولاً.
+#[command]
+pub fn hw_discover_printers() -> CmdResult<Vec<sela_core::hardware::discover::DiscoveredPrinter>> {
+    Ok(hardware::discover::discover_network_printers())
+}
+
+/// أجهزة الإدخال المتصلة (مرشحو ماسحات الباركود) — Raw Input
+/// enumeration على ويندوز؛ فارغ على بقية الأنظمة.
+#[command]
+pub fn hw_list_input_devices() -> CmdResult<Vec<sela_core::hardware::discover::InputDeviceInfo>> {
+    Ok(hardware::discover::list_input_devices())
 }
 
 #[command]

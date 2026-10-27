@@ -1,10 +1,39 @@
+/**
+ * main.tsx — نقطة الإقلاع v70 (الجولة 74 #1): مرآة config.json تُحمَّل
+ * قبل تقييم أي وحدة متجر.
+ * ─────────────────────────────────────────────────────────────────
+ * الجذر الذي كان يصفّر كل الإعدادات عند كل إقلاع: وحدات المتاجر
+ * (settingsStore وأخواتها) تقرأ المرآة **متزامناً وقت استيرادها**
+ * (create() ينفَّذ فور تقييم الوحدة)، بينما كانت initStorage() لا
+ * تُستدعى إلا داخل useEffect بعد أول رسم — فتُنشأ المتاجر كلها من
+ * مرآة فارغة: نمط المتجر يعود «بقالة»، خادم الكاشير يعود مطفأً
+ * (إعادة تفعيل يدوي كل يوم)، الطابعة والثيم والاقتران تُفقد.
+ *
+ * الإصلاح الجذري: app.tsx (وشجرة استيراداته كلها) تُحمَّل ديناميكياً
+ * **بعد** اكتمال initStorage() — فتقرأ المتاجر مرآة ممتلئة من أول
+ * لحظة، ويُستأنف كل شيء كما تُرك: النمط، الخادم، الطابعة، الثيم.
+ */
 import React from 'react';
 import {createRoot} from 'react-dom/client';
-import {App} from './app';
+import {initStorage} from './state/storage';
 import './styles.css';
 
-createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+async function bootstrap(): Promise<void> {
+  // ① المرآة أولاً — بلا استثناء: أي فشل هنا يعني إعدادات افتراضية
+  //    (لا نُسقط التطبيق كله لأجل ملف إعدادات؛ الرسالة تظهر لاحقاً).
+  try {
+    await initStorage();
+  } catch {
+    // المرآة تبقى فارغة — التطبيق يعمل بالافتراضات ويكشف الأخطاء
+    // الأعمق بنفسه من شاشاته.
+  }
+  // ② شجرة app (وكل المتاجر داخلها) تُقيَّم الآن والمرآة جاهزة.
+  const {App} = await import('./app');
+  createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  );
+}
+
+void bootstrap();

@@ -156,6 +156,19 @@ pub fn save_text_file(default_name: String, contents: String) -> CmdResult<Strin
     Ok(path.to_string_lossy().to_string())
 }
 
+/// v70 (الجولة 74 #4): حوار حفظ أصلي + كتابة بايتات (PDF ملصقات
+/// الباركود) — نفس مسار save_text_file لكن للثنائيات.
+#[command]
+pub fn save_binary_file(default_name: String, data: Vec<u8>) -> CmdResult<String> {
+    let picked = rfd::FileDialog::new()
+        .set_title("حفظ الملف")
+        .set_file_name(&default_name)
+        .save_file();
+    let path = picked.ok_or_else(|| "أُلغيت عملية الحفظ".to_string())?;
+    std::fs::write(&path, data).map_err(|e| format!("تعذر كتابة الملف: {e}"))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 /// حوار فتح أصلي + قراءة نص — للاستعادة.
 #[command]
 pub fn open_text_file() -> CmdResult<Value> {

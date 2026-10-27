@@ -127,7 +127,7 @@ async function printMovementSlip(
       {movement, drawerAfterMinor: Math.round(treasury.cashTotal * 100)},
       receiptSettings(),
     );
-    await ThermalPrinterService.printJob(job);
+    await ThermalPrinterService.printJob(job, 'receipt');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logDiag('cash', `فشلت طباعة سند ${movement.ref}: ${message}`, 'warn');
@@ -152,7 +152,7 @@ export const CashService = {
       {movement, drawerAfterMinor: Math.round(treasury.cashTotal * 100)},
       receiptSettings(),
     );
-    await ThermalPrinterService.printJob(job);
+    await ThermalPrinterService.printJob(job, 'receipt');
   },
 
   /** Records a business EXPENSE paid from the drawer. v27: the
@@ -378,7 +378,7 @@ export const CashService = {
       },
       receiptSettings(),
     );
-    await ThermalPrinterService.printJob(job);
+    await ThermalPrinterService.printJob(job, 'receipt');
   },
 };
 

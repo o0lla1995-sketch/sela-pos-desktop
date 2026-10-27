@@ -28,6 +28,9 @@ export interface CreateSaleInput {
   /** Absolute discount in ₪ applied to the whole invoice. */
   discount: number;
   paymentType: PricingMode;
+  /** v70 (الجولة 74 #2): طريقة الدفع المختارة (بنك/محفظة/نقدي)
+   *  لتتبع الأرصدة — فارغ/null = نقدي. */
+  paymentMethod?: string | null;
   /** v58 (الجولة 62): الكاشير صاحب الفاتورة عبر الشبكة المحلية
    *  (سيلّا كاشير) — null = بيع نقطة البيع نفسها (كما كان دائماً). */
   cashierId?: number | null;
@@ -84,6 +87,10 @@ function rowToSale(row: Record<string, unknown>): SaleRecord {
     total_profit: Number(row.total_profit ?? 0),
     discount: Number(row.discount ?? 0),
     payment_type: String(row.payment_type ?? 'RETAIL') as PricingMode,
+    payment_method:
+      row.payment_method == null || row.payment_method === undefined
+        ? null
+        : String(row.payment_method),
     created_at: String(row.created_at ?? ''),
     returned_minor: Number(row.returned_minor ?? 0),
     return_kind: (row.return_kind as SaleRecord['return_kind']) ?? null,
@@ -135,6 +142,10 @@ function rowToReturn(row: Record<string, unknown>): SaleReturnRecord {
     exchange_minor: Number(row.exchange_minor ?? 0),
     note: row.note == null ? null : String(row.note),
     created_at: String(row.created_at ?? ''),
+    payment_method:
+      row.payment_method == null || row.payment_method === undefined
+        ? null
+        : String(row.payment_method),
   };
 }
 
@@ -206,8 +217,8 @@ export const SaleRepo = {
     await db.transaction(async tx => {
       const insertSale = await tx.execute(
         `INSERT INTO sales
-          (invoice_number, total_amount, total_cost, total_profit, discount, payment_type, created_at, cashier_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          (invoice_number, total_amount, total_cost, total_profit, discount, payment_type, created_at, cashier_id, payment_method)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           input.invoiceNumber,
           totalAmount,
@@ -217,6 +228,9 @@ export const SaleRepo = {
           input.paymentType,
           createdAt,
           input.cashierId ?? null,
+          // v70: طريقة الدفع — فارغة تعني نقدياً (توافق كامل مع
+          // كل المبيعات القديمة والتقارير القائمة).
+          input.paymentMethod ?? null,
         ],
       );
       saleId = insertSale.insertId ?? -1;
@@ -623,14 +637,29 @@ export const SaleRepo = {
     let returnId = -1;
 
     await db.transaction(async tx => {
+      // v70 (الجولة 74 #2): طريقة دفع الفاتورة الأصلية — يُختم بها
+      // صف RET السالب وسجل المرتجع، فيُرَد المبلغ (محاسبياً) لنفس
+      // الحساب البنكي/المحفظة التي دخل منها، وتبقى أرصدة الطرق
+      // متوازنة في التقارير بلا أي مسار موازٍ.
+      const originalMethodRow = await tx.execute(
+        'SELECT payment_method FROM sales WHERE id = ?',
+        [input.saleId],
+      );
+      const originalPaymentMethod =
+        (
+          originalMethodRow.rows?.[0] as
+            | {payment_method?: string | null}
+            | undefined
+        )?.payment_method ?? null;
+
       // 1) The NEGATIVE invoice — every existing aggregation (revenue,
       //    cogs, profit, daily, hourly, top products) nets out with
       //    ZERO query changes; return_kind tells the debt buckets
       //    which side to net.
       const insertRet = await tx.execute(
         `INSERT INTO sales
-          (invoice_number, total_amount, total_cost, total_profit, discount, payment_type, created_at, return_kind, cashier_id)
-         VALUES (?, ?, ?, ?, 0, 'RETAIL', ?, ?, ?)`,
+          (invoice_number, total_amount, total_cost, total_profit, discount, payment_type, created_at, return_kind, cashier_id, payment_method)
+         VALUES (?, ?, ?, ?, 0, 'RETAIL', ?, ?, ?, ?)`,
         [
           input.returnNumber,
           // v40 (الجولة 48 #2): وضع الاستبدال يحمل الصافي —
@@ -647,6 +676,7 @@ export const SaleRepo = {
           createdAt,
           input.book,
           input.cashierId ?? null,
+          originalPaymentMethod,
         ],
       );
       const retSaleId = insertRet.insertId ?? -1;
@@ -726,8 +756,8 @@ export const SaleRepo = {
       //    + is_exchange=1 + exchange_minor؛ الدين لا يُمس إطلاقاً.
       const insertReturn = await tx.execute(
         `INSERT INTO sale_returns
-          (return_number, sale_id, invoice_ref, book, refund_method, refund_minor, debt_adjusted_minor, is_exchange, exchange_minor, note, created_at, cashier_id)
-         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+          (return_number, sale_id, invoice_ref, book, refund_method, refund_minor, debt_adjusted_minor, is_exchange, exchange_minor, note, created_at, cashier_id, payment_method)
+         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
         [
           input.returnNumber,
           input.saleId,
@@ -740,6 +770,7 @@ export const SaleRepo = {
           input.note?.trim() || null,
           createdAt,
           input.cashierId ?? null,
+          originalPaymentMethod,
         ],
       );
       returnId = insertReturn.insertId ?? -1;
@@ -1128,6 +1159,9 @@ export const SaleRepo = {
     /** v23: inclusive local-date bounds ('' = open). */
     fromDate?: string;
     toDate?: string;
+    /** v70 (الجولة 74 #2): تصفية بطريقة الدفع — 'cash' تشمل
+     *  المبيعات القديمة بلا طريقة (NULL) توافقاً كاملاً. */
+    paymentMethod?: 'all' | string;
   }): Promise<(SaleRecord & {itemsCount: number})[]> {
     const conditions: string[] = [];
     const params: (string | number)[] = [];
@@ -1200,6 +1234,17 @@ export const SaleRepo = {
     if (options.toDate) {
       conditions.push('date(s.created_at) <= date(?)');
       params.push(options.toDate);
+    }
+    // v70: تصفية طريقة الدفع — النقدي يشمل NULL (المبيعات القديمة).
+    if (options.paymentMethod != null && options.paymentMethod !== 'all') {
+      if (options.paymentMethod === 'cash') {
+        conditions.push(
+          "(s.payment_method IS NULL OR s.payment_method = '' OR s.payment_method = 'cash')",
+        );
+      } else {
+        conditions.push('s.payment_method = ?');
+        params.push(options.paymentMethod);
+      }
     }
 
     const where =

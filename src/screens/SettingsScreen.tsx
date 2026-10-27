@@ -44,6 +44,21 @@ import {useEnterConfirm} from '../lib/useEnterConfirm';
 import {Select} from '../components/Select';
 import {Icon} from '../components/Icon';
 import './settingsv57.css';
+import {PAYMENT_METHODS} from '../core/paymentMethods';
+import {PaymentMethodIcon} from '../components/PaymentMethodIcon';
+import {
+  HardwareService,
+  PRINTER_ROLES,
+  assignRolePrinter,
+  describeChannel,
+  rolePrinter,
+  type DiscoveredDevice,
+  type InputDevice,
+  type PrinterRole,
+  type RolePrinters,
+} from '../services/HardwareService';
+import type {DesktopPrinter} from '../stores/settingsStore';
+import {setActiveBarcodeHandler, beep} from '../lib/scanner';
 
 /* ── مفاتيح النسخ التلقائي إلى مجلد (سطح المكتب) ────────────────── */
 const AUTO_BACKUP_KEYS = {
@@ -132,6 +147,95 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
     getJson<string>(AUTO_BACKUP_KEYS.lastAt, ''),
   );
   const [autoBusy, setAutoBusy] = useState(false);
+
+  // ── الأجهزة الطرفية (v70 — طبقة التجريد HAL) ────────────────
+  const [hwScanning, setHwScanning] = useState(false);
+  const [hwDevices, setHwDevices] = useState<DiscoveredDevice[]>([]);
+  const [hwInputs, setHwInputs] = useState<InputDevice[]>([]);
+  const [hwTestingId, setHwTestingId] = useState<string | null>(null);
+  const [hwRoles, setHwRoles] = useState<RolePrinters>(() => ({
+    receipt: rolePrinter('receipt'),
+    report: rolePrinter('report'),
+    label: rolePrinter('label'),
+  }));
+  const [hwLastScan, setHwLastScan] = useState<string | null>(null);
+
+  /** مسح شامل للأجهزة — طابعات الشبكة تلقائياً + تسلسلي + نظام. */
+  const hwDiscover = useCallback(async () => {
+    if (hwScanning) {
+      return;
+    }
+    setHwScanning(true);
+    try {
+      const [devices, inputs] = await Promise.all([
+        HardwareService.discover(),
+        HardwareService.inputDevices(),
+      ]);
+      setHwDevices(devices);
+      setHwInputs(inputs);
+      notify(
+        'printer',
+        'اكتمل مسح الأجهزة',
+        devices.length > 0
+          ? `وُجدت ${devices.length} جهازاً جاهزاً للتعيين`
+          : 'لم تُعثر على طابعات — تأكد من تشغيلها واتصالها بنفس الشبكة',
+      );
+    } catch (e) {
+      notify(
+        'printer',
+        'فشل مسح الأجهزة',
+        e instanceof Error ? e.message : String(e),
+      );
+    } finally {
+      setHwScanning(false);
+    }
+  }, [hwScanning]);
+
+  /** طباعة اختبارية على جهاز مكتشف — قبل تعيينه. */
+  const hwTest = useCallback(
+    async (device: DiscoveredDevice) => {
+      if (hwTestingId != null) {
+        return;
+      }
+      setHwTestingId(device.id);
+      try {
+        await HardwareService.testChannel(device.channel);
+        notify('printer', 'نجحت الطباعة', `أُرسل اختبار إلى ${device.label}`);
+      } catch (e) {
+        notify(
+          'printer',
+          'فشل الاختبار',
+          e instanceof Error ? e.message : String(e),
+        );
+      } finally {
+        setHwTestingId(null);
+      }
+    },
+    [hwTestingId],
+  );
+
+  /** تعيين جهاز لموضع استخدام — أو إعادته للميراث الرئيسي (null). */
+  const hwAssign = useCallback(
+    (role: PrinterRole, printer: DesktopPrinter | null) => {
+      assignRolePrinter(role, printer);
+      setHwRoles({
+        receipt: rolePrinter('receipt'),
+        report: rolePrinter('report'),
+        label: rolePrinter('label'),
+      });
+    },
+    [],
+  );
+
+  // v70: مربع اختبار الماسح — أي مسح أثناء فتح الإعدادات يُعرض
+  // هنا حياً (الشاشة وحدها المركّبة فلا تنازع مع نقطة البيع).
+  useEffect(() => {
+    setActiveBarcodeHandler(code => {
+      setHwLastScan(`${code} — ${new Date().toLocaleTimeString('ar')}`);
+      beep('ok');
+    });
+    return () => setActiveBarcodeHandler(null);
+  }, []);
 
   // ── حول ──────────────────────────────────────────────────────
   const [deviceId, setDeviceId] = useState('');
@@ -785,6 +889,142 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
           </div>
         </div>
 
+        {/* ── v70 (الجولة 74 #5): الأجهزة الطرفية (HAL) ────────── */}
+        <div className="card sv57-sec">
+          <div className="sv57-sec-head">
+            <div>
+              <div className="sv57-sec-title">الأجهزة الطرفية (تعرف تلقائي)</div>
+              <div className="sv57-sec-hint">
+                مسح واحد يجد طابعات الشبكة والمنافذ وطابعات ويندوز — جرّب
+                أياها بطباعة اختبارية ثم عيّنها لموضع استخدامها: فواتير،
+                تقارير، أو باركودات. بلا تعيين ترث كل المواضع القناة
+                الرئيسية أعلاه.
+              </div>
+            </div>
+            <button
+              className="btn primary"
+              disabled={hwScanning}
+              onClick={() => void hwDiscover()}>
+              {hwScanning ? 'جارٍ مسح الشبكة…' : 'بحث تلقائي عن الأجهزة'}
+            </button>
+          </div>
+
+          {/* التعيينات الحالية لكل موضع استخدام */}
+          <div className="hw-roles-row">
+            {PRINTER_ROLES.map(({role, label, hint}) => (
+              <div className="hw-role-card" key={role}>
+                <b>{label}</b>
+                <span className="hw-role-sub">{hint}</span>
+                <span
+                  className={`hw-role-target ${
+                    hwRoles[role] != null ? 'dedicated' : ''
+                  }`}>
+                  {hwRoles[role] != null
+                    ? describeChannel(hwRoles[role] as DesktopPrinter)
+                    : 'القناة الرئيسية'}
+                </span>
+                {hwRoles[role] != null && (
+                  <button
+                    className="btn sm ghost"
+                    onClick={() => hwAssign(role, null)}>
+                    إرجاع للرئيسية
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* نتائج المسح */}
+          {hwDevices.length > 0 && (
+            <div className="hw-devices-list">
+              {hwDevices.map(device => (
+                <div className="hw-device-row" key={device.id}>
+                  <span
+                    className={`hw-device-kind ${device.kind}`}
+                    title={
+                      device.kind === 'network'
+                        ? 'طابعة شبكية (منفذ 9100)'
+                        : device.kind === 'serial'
+                        ? 'منفذ تسلسلي COM'
+                        : 'طابعة نظام ويندوز'
+                    }>
+                    {device.kind === 'network'
+                      ? 'شبكة'
+                      : device.kind === 'serial'
+                      ? 'تسلسلي'
+                      : 'نظام'}
+                  </span>
+                  <span className="hw-device-texts">
+                    <b>{device.label}</b>
+                    <span>{device.sub}</span>
+                  </span>
+                  <button
+                    className="btn sm"
+                    disabled={hwTestingId != null}
+                    onClick={() => void hwTest(device)}>
+                    {hwTestingId === device.id ? 'جارٍ الاختبار…' : 'طباعة اختبارية'}
+                  </button>
+                  <span className="hw-assign-group">
+                    {PRINTER_ROLES.map(({role, label}) => {
+                      const assigned =
+                        hwRoles[role] != null &&
+                        describeChannel(
+                          hwRoles[role] as DesktopPrinter,
+                        ) === describeChannel(device.channel);
+                      return (
+                        <button
+                          key={role}
+                          className={`btn sm ${assigned ? 'primary' : 'ghost'}`}
+                          onClick={() => hwAssign(role, device.channel)}>
+                          {assigned ? `✓ ${label}` : label}
+                        </button>
+                      );
+                    })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {hwScanning && (
+            <div className="sv57-sec-hint">
+              المسح يجري الآن — يفحص عنوان عنواناً على الشبكة وقد يأخذ حتى
+              نصف دقيقة حسب حجمها.
+            </div>
+          )}
+
+          {/* ماسحات الباركود — أجهزة الإدخال + مربع اختبار حي */}
+          <div className="hw-scanner-box">
+            <b>ماسحات الباركود</b>
+            <span className="sv57-sec-hint">
+              الماسح المتصل يظهر أدناه كجهاز إدخال — امسح أي باركود الآن
+              وسيعرض في مربع الاختبار أينما كان مؤشرك.
+            </span>
+            {hwInputs.length > 0 ? (
+              <div className="hw-input-list">
+                {hwInputs.slice(0, 8).map((device, index) => (
+                  <span className="hw-input-chip" key={`${device.name}-${index}`}>
+                    {device.kind === 'Keyboard' ? '⌨' : ' HID'}{' '}
+                    {device.name.length > 46
+                      ? `${device.name.slice(0, 46)}…`
+                      : device.name}
+                  </span>
+                ))}
+                {hwInputs.length > 8 && (
+                  <span className="hw-input-chip">+{hwInputs.length - 8} أخرى</span>
+                )}
+              </div>
+            ) : (
+              <div className="sv57-sec-hint">
+                لم تُكتشف أجهزة إدخال إضافية — الماسح المتصل بالكيبورد يعمل
+                مباشرة بلا أي إعداد.
+              </div>
+            )}
+            <div className="hw-scan-test" dir="ltr">
+              {hwLastScan ?? '— امسح باركوداً لتجربة الماسح —'}
+            </div>
+          </div>
+        </div>
+
         {/* ── 3) نمط المتجر ────────────────────────────────────── */}
         <div className="card sv57-sec">
           <div className="sv57-sec-head">
@@ -945,6 +1185,67 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
               </span>
               <span className="sv57-knob" />
             </button>
+          </div>
+        </div>
+
+        {/* ── v70 (الجولة 74 #2): طرق الدفع ────────────────────── */}
+        <div className="card sv57-sec">
+          <div className="sv57-sec-head">
+            <div>
+              <div className="sv57-sec-title">طرق الدفع</div>
+              <div className="sv57-sec-hint">
+                فعّل البنوك والمحافظ الإلكترونية المتاحة لديك فقط — تظهر
+                المفعّل منها في نافذة الدفع مع أيقونتها، وتُربط كل فاتورة
+                بطريقتها لتتبع الأرصدة من شاشة التقارير
+              </div>
+            </div>
+          </div>
+          <div className="pm-methods-grid">
+            {PAYMENT_METHODS.map(method => {
+              const enabled =
+                method.locked ||
+                (settings.paymentMethodsEnabled?.[method.id] ?? true);
+              return (
+                <button
+                  type="button"
+                  key={method.id}
+                  className={`pm-method-card ${enabled ? 'on' : ''}`}
+                  style={{borderColor: enabled ? method.color : undefined}}
+                  disabled={method.locked}
+                  onClick={() => {
+                    if (method.locked) {
+                      return;
+                    }
+                    update({
+                      paymentMethodsEnabled: {
+                        ...settings.paymentMethodsEnabled,
+                        [method.id]: !enabled,
+                      },
+                    });
+                  }}>
+                  <PaymentMethodIcon method={method} size={38} />
+                  <span className="pm-method-texts">
+                    <b>{method.label}</b>
+                    <span>
+                      {method.kind === 'cash'
+                        ? 'الخزينة النقدية — دائماً مفعّل'
+                        : method.kind === 'bank'
+                        ? 'حساب بنكي'
+                        : 'محفظة إلكترونية'}
+                    </span>
+                  </span>
+                  <span
+                    className={`pm-method-state ${enabled ? 'on' : ''}`}
+                    style={enabled ? {background: method.color} : undefined}>
+                    {enabled ? 'مفعّل' : 'معطّل'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="sv57-sec-hint" style={{marginTop: 10}}>
+            الاختصارات داخل نافذة الدفع: الأسهم للتنقل بين الطرق، Enter
+            للتأكيد، Esc للإلغاء.
           </div>
         </div>
 

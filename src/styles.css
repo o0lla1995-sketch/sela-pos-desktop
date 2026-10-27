@@ -1551,3 +1551,376 @@ button.primary > .pos-fkey,
     width: 190px;
   }
 }
+
+/* ═══════════════════ v70 (الجولة 74): طرق الدفع المتعددة ═══════════════════ */
+
+/* رقاقة أيقونة طريقة الدفع — لون العلامة وحرفاها. */
+.pmi {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: #fff;
+  position: relative;
+  flex-shrink: 0;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.18);
+}
+.pmi-mark {
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+.pmi-kind {
+  position: absolute;
+  bottom: 2px;
+  font-size: 7px;
+  font-weight: 700;
+  opacity: 0.85;
+  letter-spacing: 0;
+}
+
+/* شبكة بطاقات تفعيل الطرق (الإعدادات). */
+.pm-methods-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.pm-method-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1.5px solid var(--line);
+  background: var(--surface-2);
+  cursor: pointer;
+  text-align: start;
+  transition: border-color 0.15s, background 0.15s, transform 0.05s;
+  font: inherit;
+  color: inherit;
+}
+.pm-method-card:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+.pm-method-card:active:not(:disabled) {
+  transform: scale(0.985);
+}
+.pm-method-card:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+.pm-method-card.on {
+  background: var(--surface-3);
+}
+.pm-method-texts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.pm-method-texts b {
+  font-size: 13.5px;
+}
+.pm-method-texts span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.pm-method-state {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 99px;
+  background: var(--surface-4, var(--line));
+  color: #fff;
+}
+.pm-method-state.on {
+  color: #fff;
+}
+
+/* صف اختيار الطريقة داخل نافذة الدفع. */
+.pos-pay-methods {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px 8px;
+  margin-bottom: 4px;
+}
+.pos-pay-method {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 84px;
+  padding: 9px 8px 7px;
+  border-radius: 12px;
+  border: 1.5px solid var(--line);
+  background: var(--surface-2);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.12s, background 0.12s, transform 0.05s;
+  position: relative;
+}
+.pos-pay-method:hover {
+  background: var(--surface-3);
+}
+.pos-pay-method:active {
+  transform: scale(0.97);
+}
+.pos-pay-method.sel {
+  border-color: var(--brand);
+  background: var(--surface-3);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 25%, transparent);
+}
+.pos-pay-method .pm-name {
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pos-pay-method .pm-kbd-hint {
+  font-size: 9.5px;
+  color: var(--muted);
+}
+.pos-pay-method.sel .pm-kbd-hint {
+  color: var(--brand);
+  font-weight: 700;
+}
+.pos-pay-confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 6px 0;
+}
+.pos-pay-confirm .txts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+.pos-pay-confirm b {
+  font-size: 14px;
+}
+.pos-pay-confirm span {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* ═══════════════════ v70 (الجولة 74 #5): الأجهزة الطرفية (HAL) ═══════════════════ */
+.hw-roles-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.hw-role-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.hw-role-card b {
+  font-size: 13.5px;
+}
+.hw-role-sub {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.hw-role-target {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--muted);
+  direction: ltr;
+  unicode-bidi: embed;
+  text-align: right;
+}
+.hw-role-target.dedicated {
+  color: var(--ok, #16a34a);
+}
+.hw-devices-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.hw-device-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  flex-wrap: wrap;
+}
+.hw-device-kind {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 9px;
+  border-radius: 99px;
+  background: var(--surface-4, var(--line));
+  flex-shrink: 0;
+}
+.hw-device-kind.network {
+  background: #2563eb;
+  color: #fff;
+}
+.hw-device-kind.serial {
+  background: #b45309;
+  color: #fff;
+}
+.hw-device-kind.spool {
+  background: #0f766e;
+  color: #fff;
+}
+.hw-device-texts {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 160px;
+}
+.hw-device-texts b {
+  font-size: 13px;
+  direction: ltr;
+  unicode-bidi: embed;
+  text-align: right;
+}
+.hw-device-texts span {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.hw-assign-group {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.hw-scanner-box {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px dashed var(--line);
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hw-input-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hw-input-chip {
+  font-size: 10px;
+  direction: ltr;
+  unicode-bidi: embed;
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hw-scan-test {
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  color: var(--ink);
+}
+
+/* حقل عدد نسخ الباركود (PDF/حراري). */
+.pf-copies-input {
+  width: 74px;
+  text-align: center;
+  font-weight: 700;
+}
+.pf-pdf-btn {
+  border-color: #b91c1c;
+  color: #b91c1c;
+}
+.pf-pdf-btn:hover:not(:disabled) {
+  background: #b91c1c;
+  color: #fff;
+}
+
+/* v70 (الجولة 74 #8): شبكة تعديل قطع الربطة (لون × مقاس). */
+.pf-lotgrid-wrap {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pf-lotgrid-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pf-lotgrid {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  overflow-x: auto;
+}
+.pf-lotgrid-row {
+  display: flex;
+}
+.pf-lotgrid-row.head {
+  background: var(--surface-3);
+  font-size: 11px;
+  font-weight: 700;
+}
+.pf-lotgrid-cell {
+  flex: 1;
+  min-width: 58px;
+  padding: 5px 6px;
+  border-inline-start: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+.pf-lotgrid-row.head .pf-lotgrid-cell {
+  border-top: 0;
+}
+.pf-lotgrid-cell.corner,
+.pf-lotgrid-cell.color {
+  min-width: 92px;
+  flex: 1.2;
+  font-weight: 700;
+  background: var(--surface-2);
+}
+.pf-lotgrid-cell.total {
+  background: var(--surface-2);
+  font-weight: 800;
+}
+.pf-lotcell {
+  width: 100%;
+  text-align: center;
+  padding: 4px 2px;
+  font-weight: 700;
+}

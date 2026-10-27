@@ -40,6 +40,7 @@ import {useCatalogStore, useToastStore} from '../state/appStores';
 import {useSettingsStore, getPrinter} from '../stores/settingsStore';
 import {storeModeConfig} from '../core/storeModes';
 import {generateInternalEan13, isValidEan13} from '../services/BarcodeService';
+import {exportLabelsPdf} from '../services/BarcodePdfService';
 import {buildLabelJob} from '../services/printer/label';
 import {ThermalPrinterService} from '../services/printer/ThermalPrinterService';
 import {notifyCatalogChanged} from '../services/online/OnlineStoreService';
@@ -252,6 +253,13 @@ export function ProductFormModal({
 
   // ── الملصق (v9.1) ────────────────────────────────────────────
   const [labelCopies, setLabelCopies] = useState(1);
+  /** v70 (الجولة 74 #4): خيارات ملف ملصقات PDF — مقاس الملصق
+   *  المربع (40/50/60مم)، شكل الصفحة (مربعة افتراضياً بطلب التاجر
+   *  أو ورق A4)، وعرض السعر على الملصق. */
+  const [labelSizeMm, setLabelSizeMm] = useState<40 | 50 | 60>(50);
+  const [labelPageKind, setLabelPageKind] = useState<'square' | 'a4'>('square');
+  const [labelShowPrice, setLabelShowPrice] = useState(true);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [labelBusy, setLabelBusy] = useState(false);
 
   // ── الربطة / المتغيرات (v35) ─────────────────────────────────
@@ -516,7 +524,7 @@ export function ProductFormModal({
         },
         {paperWidth: settings.paperWidth, codepage: settings.codepage},
       );
-      await ThermalPrinterService.printJob(job);
+      await ThermalPrinterService.printJob(job, 'label');
       toast(`تم إرسال ${labelCopies} ملصق للطابعة`, 'success');
     } catch (error) {
       toast(
@@ -534,6 +542,60 @@ export function ProductFormModal({
     labelCopies,
     settings.paperWidth,
     settings.codepage,
+    toast,
+  ]);
+
+  /** v70 (الجولة 74 #4): تنزيل ملصقات الباركود كملف PDF — لمن
+   *  لا يملك طابعة باركود: يُطبع على أي طابعة ورقية ويقص بالمقص
+   *  على حدود متقطعة مرسومة لكل ملصق (هوامش اسم واضحة). */
+  const downloadLabelsPdf = useCallback(async () => {
+    const trimmed = barcode.trim();
+    if (trimmed.length === 0) {
+      toast('لا يوجد باركود للتنزيل', 'error');
+      return;
+    }
+    const labelName = name.trim() || 'منتج';
+    const retail = parseNumber(retailPrice);
+    const price = Number.isNaN(retail) ? null : retail;
+    setPdfBusy(true);
+    try {
+      const result = await exportLabelsPdf(
+        [
+          {
+            name: labelName,
+            barcode: trimmed,
+            price,
+            copies: labelCopies,
+          },
+        ],
+        {
+          labelMm: labelSizeMm,
+          pageKind: labelPageKind,
+          showPrice: labelShowPrice,
+        },
+      );
+      toast(
+        `تم حفظ ${result.totalLabels} ملصق في ${result.pages} صفحة PDF — ${result.path}`,
+        'success',
+        7000,
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      if (!message.includes('أُلغيت')) {
+        toast(message || 'فشل إنشاء ملف PDF', 'error');
+      }
+    } finally {
+      setPdfBusy(false);
+    }
+  }, [
+    barcode,
+    name,
+    retailPrice,
+    labelCopies,
+    labelSizeMm,
+    labelPageKind,
+    labelShowPrice,
     toast,
   ]);
 
@@ -1089,6 +1151,67 @@ export function ProductFormModal({
   };
   const bundlesCount = Math.max(1, Math.round(parseNumber(lotBundles) || 1));
 
+  /* ── v70 (الجولة 74 #8): تعديل القطع لكل (لون × مقاس) يدوياً ──
+   * مرونة كاملة للتاجر: الربطة تملأ كل الخلايا بعدد الربط، ثم
+   * يعدّل أي خلية مباشرة لتغطية النقص أو الزيادة (طلب التاجر
+   * نصاً: «ألا يكون مقيداً فقط بحاصل ضرب المقاسات بالربطة»).
+   *  • خلية جديدة (لون/مقاس أضيف) = عدد الربط الحالي.
+   *  • تغيير عدد الربط يعيد الملء كاملاً ما دام التاجر لم يعدّل
+   *    يدوياً؛ وبعد أي تعديل يدوي يظل صادراً وزر «إعادة الملء»
+   *    يعيد الجميع للربطة. */
+  const [lotDrafts, setLotDrafts] = useState<
+    {color: string; size: string; stock: number}[]
+  >([]);
+  const [lotManuallyEdited, setLotManuallyEdited] = useState(false);
+
+  const lotColorsWithCustom = useMemo(() => {
+    const colors = [...lotColors];
+    const custom = lotCustomColor.trim();
+    if (custom.length > 0 && !colors.includes(custom)) {
+      colors.push(custom);
+    }
+    return colors;
+  }, [lotColors, lotCustomColor]);
+
+  // إعادة بناء الشبكة عند تغيّر الألوان/المقاسات/الربطة.
+  useEffect(() => {
+    setLotDrafts(prev => {
+      const map = new Map(prev.map(d => [`${d.color}|${d.size}`, d.stock]));
+      const refillAll = !lotManuallyEdited;
+      const next: {color: string; size: string; stock: number}[] = [];
+      for (const color of lotColorsWithCustom) {
+        for (const size of lotSizes) {
+          const key = `${color}|${size}`;
+          const stock = map.has(key) && !refillAll ? (map.get(key) as number) : bundlesCount;
+          next.push({color, size, stock});
+        }
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lotColorsWithCustom, lotSizes, bundlesCount, lotManuallyEdited]);
+
+  const setLotCellStock = useCallback((color: string, size: string, stock: number) => {
+    setLotManuallyEdited(true);
+    setLotDrafts(prev =>
+      prev.map(d =>
+        d.color === color && d.size === size
+          ? {...d, stock: Math.min(99999, Math.max(0, Math.round(stock) || 0))}
+          : d,
+      ),
+    );
+  }, []);
+
+  const refillLotFromBundles = useCallback(() => {
+    setLotManuallyEdited(false);
+    setLotDrafts(prev => prev.map(d => ({...d, stock: bundlesCount})));
+  }, [bundlesCount]);
+
+  const lotPieces = useMemo(
+    () => lotDrafts.reduce((sum, d) => sum + Math.max(0, d.stock), 0),
+    [lotDrafts],
+  );
+
   /* ── محرّر المتغيرات (تعديل موديل — v35) ───────────────────── */
   const setVariantStock = (color: string, size: string, value: number) =>
     setVariantDrafts(prev =>
@@ -1221,7 +1344,16 @@ export function ProductFormModal({
 
     setBusy(true);
     try {
-      const totalPieces = colors.length * lotSizes.length * bundlesCount;
+      // v70 (الجولة 74 #8): المتغيرات من شبكة القطع القابلة للتعديل —
+      // الكمية الفعلية لكل (لون × مقاس) كما عبّأها التاجر (الربطة
+      // ملأت البداية والتعديل اليدوي غطى النقص والزيادة).
+      const drafts =
+        lotDrafts.length > 0
+          ? lotDrafts
+          : colors.flatMap(color =>
+              lotSizes.map(size => ({color, size, stock: bundlesCount})),
+            );
+      const totalPieces = drafts.reduce((sum, d) => sum + Math.max(0, d.stock), 0);
       const newId = await ProductRepo.create({
         name: modelName,
         cost_price: cost,
@@ -1249,19 +1381,16 @@ export function ProductFormModal({
       }
       await VariantRepo.replaceForProduct(
         newId,
-        colors.flatMap(color =>
-          lotSizes.map(size => ({
-            kind: 'variant' as const,
-            color,
-            size,
-            stock_quantity: bundlesCount,
-          })),
-        ),
+        drafts.map(d => ({
+          kind: 'variant' as const,
+          color: d.color,
+          size: d.size,
+          stock_quantity: Math.max(0, d.stock),
+        })),
       );
       await refreshCatalog();
       toast(
-        `تمت إضافة موديل ${modelName}: ${colors.length} لون × ` +
-          `${lotSizes.length} مقاس × ${bundlesCount} ربط = ${totalPieces} قطعة` +
+        `تمت إضافة موديل ${modelName}: ${drafts.length} متغير (لون × مقاس) = ${totalPieces} قطعة` +
           ' — ربطة الجملة تُباع من نافذة الموديل',
         'success',
         6000,
@@ -1289,6 +1418,7 @@ export function ProductFormModal({
     lotCustomColor,
     lotSizes,
     bundlesCount,
+    lotDrafts,
     costPrice,
     retailPrice,
     wholesalePrice,
@@ -2572,17 +2702,21 @@ export function ProductFormModal({
                       </button>
                     </div>
                     <div className="iv57-chips">
-                      <span className="iv57-hint">عدد الملصقات:</span>
-                      <MiniStepper
-                        value={labelCopies}
+                      <span className="iv57-hint">عدد النسخ لكل باركود:</span>
+                      <input
+                        className="iv57-num pf-copies-input"
+                        type="number"
                         min={1}
-                        max={20}
-                        onDecrement={() =>
-                          setLabelCopies(v => Math.max(1, v - 1))
-                        }
-                        onIncrement={() =>
-                          setLabelCopies(v => Math.min(20, v + 1))
-                        }
+                        max={500}
+                        inputMode="numeric"
+                        value={labelCopies}
+                        onChange={e => {
+                          const raw = Math.max(
+                            1,
+                            Math.min(500, Math.round(Number(e.target.value) || 1)),
+                          );
+                          setLabelCopies(raw);
+                        }}
                       />
                       <button
                         type="button"
@@ -2590,6 +2724,57 @@ export function ProductFormModal({
                         disabled={labelBusy || barcode.trim().length === 0}
                         onClick={() => void printLabel()}>
                         {labelBusy ? 'جارٍ الطباعة…' : (<><Icon name="printer" size={15} /> طباعة {labelCopies} ملصق</>)}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn sm pf-pdf-btn"
+                        disabled={pdfBusy || barcode.trim().length === 0}
+                        title="تنزيل الملصقات كملف PDF للطباعة على أي طابعة ورقية والقص بالمقص"
+                        onClick={() => void downloadLabelsPdf()}>
+                        {pdfBusy ? (
+                          'جارٍ التجهيز…'
+                        ) : (
+                          <>
+                            <Icon name="download" size={15} /> تحميل PDF (
+                            {labelCopies})
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    {/* v70 (الجولة 74 #4): خيارات ملف PDF — مقاس
+                        الملصق المربع وشكل الصفحة وعرض السعر. */}
+                    <div className="iv57-chips">
+                      <span className="iv57-hint">ملصق PDF:</span>
+                      <div className="sv57-seg" style={{margin: 0}}>
+                        {([40, 50, 60] as const).map(size => (
+                          <button
+                            type="button"
+                            key={size}
+                            className={labelSizeMm === size ? 'on' : ''}
+                            onClick={() => setLabelSizeMm(size)}>
+                            {size}مم
+                          </button>
+                        ))}
+                      </div>
+                      <div className="sv57-seg" style={{margin: 0}}>
+                        <button
+                          type="button"
+                          className={labelPageKind === 'square' ? 'on' : ''}
+                          onClick={() => setLabelPageKind('square')}>
+                          صفحات مربعة
+                        </button>
+                        <button
+                          type="button"
+                          className={labelPageKind === 'a4' ? 'on' : ''}
+                          onClick={() => setLabelPageKind('a4')}>
+                          ورق A4
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        className={`btn sm ${labelShowPrice ? '' : 'ghost'}`}
+                        onClick={() => setLabelShowPrice(v => !v)}>
+                        السعر {labelShowPrice ? 'ظاهر' : 'مخفي'}
                       </button>
                     </div>
                   </section>
@@ -2699,6 +2884,92 @@ export function ProductFormModal({
                             </span>
                           </div>
                         </div>
+
+                        {/* v70 (الجولة 74 #8): تعديل يدوي مباشر لعدد
+                            القطع لكل (لون × مقاس) — النقص والزيادة
+                            واقعيان، لا قيد بحاصل ضرب الربطة. */}
+                        {lotDrafts.length > 0 && (
+                          <div className="pf-lotgrid-wrap">
+                            <div className="pf-lotgrid-head">
+                              <span className="iv57-hint">
+                                عدد القطع لكل مقاس — الربطة ملأت البداية
+                                عدّل ما شئت: الإجمالي الفعلي{' '}
+                                <b>{lotPieces} قطعة</b>
+                              </span>
+                              {lotManuallyEdited && (
+                                <button
+                                  type="button"
+                                  className="btn sm ghost"
+                                  onClick={refillLotFromBundles}>
+                                  إعادة الملء من الربطة ({bundlesCount})
+                                </button>
+                              )}
+                            </div>
+                            <div className="pf-lotgrid">
+                              <div className="pf-lotgrid-row head">
+                                <span className="pf-lotgrid-cell corner">
+                                  اللون \ المقاس
+                                </span>
+                                {lotSizes.map(size => (
+                                  <span
+                                    className="pf-lotgrid-cell head"
+                                    key={`h-${size}`}>
+                                    {size}
+                                  </span>
+                                ))}
+                                <span className="pf-lotgrid-cell head total">
+                                  المجموع
+                                </span>
+                              </div>
+                              {lotColorsWithCustom.map(color => {
+                                const rows = lotDrafts.filter(
+                                  d => d.color === color,
+                                );
+                                const rowTotal = rows.reduce(
+                                  (sum, d) => sum + Math.max(0, d.stock),
+                                  0,
+                                );
+                                return (
+                                  <div
+                                    className="pf-lotgrid-row"
+                                    key={`row-${color}`}>
+                                    <span className="pf-lotgrid-cell color">
+                                      {color}
+                                    </span>
+                                    {lotSizes.map(size => {
+                                      const cell = rows.find(
+                                        d => d.size === size,
+                                      );
+                                      return (
+                                        <span
+                                          className="pf-lotgrid-cell"
+                                          key={`c-${color}-${size}`}>
+                                          <input
+                                            className="iv57-num pf-lotcell"
+                                            type="number"
+                                            min={0}
+                                            inputMode="numeric"
+                                            value={cell?.stock ?? 0}
+                                            onChange={e =>
+                                              setLotCellStock(
+                                                color,
+                                                size,
+                                                Number(e.target.value) || 0,
+                                              )
+                                            }
+                                          />
+                                        </span>
+                                      );
+                                    })}
+                                    <span className="pf-lotgrid-cell total">
+                                      {rowTotal}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
                         {lotSizes.length > 0 && wholesalePrice.trim() !== '' && (
                           <span className="iv57-hint">
                             ربطة الجملة ={' '}

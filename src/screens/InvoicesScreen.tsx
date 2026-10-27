@@ -62,6 +62,7 @@ import type {
   SilaDebtRow,
 } from '../core/types';
 import './invoiceshome.css';
+import {PAYMENT_METHODS, paymentMethodById} from '../core/paymentMethods';
 
 const PAGE_SIZE = 40;
 
@@ -138,6 +139,8 @@ export function InvoicesScreen() {
   const [from, setFrom] = useState(localDateShift(-6));
   const [to, setTo] = useState(localToday());
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
+  /** v70 (الجولة 74 #2): تصفية بطريقة الدفع (بنك/محفظة/نقدي). */
+  const [methodFilter, setMethodFilter] = useState<'all' | string>('all');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
@@ -173,8 +176,9 @@ export function InvoicesScreen() {
         kind: kindFilter,
         fromDate: from || undefined,
         toDate: to || undefined,
+        paymentMethod: methodFilter,
       }),
-    [debouncedSearch, kindFilter, from, to],
+    [debouncedSearch, kindFilter, from, to, methodFilter],
   );
 
   const reload = useCallback(async () => {
@@ -337,6 +341,29 @@ export function InvoicesScreen() {
         </button>
       </div>
 
+      {/* v70 (الجولة 74 #2): تصفية بطريقة الدفع — الأرصدة الواردة */}
+      <div className="ih-toolbar" style={{flexWrap: 'wrap'}}>
+        <span className="ih-label">طريقة الدفع:</span>
+        <button
+          className={`chip-toggle ${methodFilter === 'all' ? 'on' : ''}`}
+          onClick={() => setMethodFilter('all')}>
+          الكل
+        </button>
+        {PAYMENT_METHODS.map(method => (
+          <button
+            key={method.id}
+            className={`chip-toggle ${methodFilter === method.id ? 'on' : ''}`}
+            style={
+              methodFilter === method.id
+                ? {background: method.color, borderColor: method.color}
+                : undefined
+            }
+            onClick={() => setMethodFilter(method.id)}>
+            {method.label}
+          </button>
+        ))}
+      </div>
+
       {/* جدول الفواتير */}
       <div className="card ih-card-flat">
         <table className="ih-table">
@@ -403,6 +430,21 @@ export function InvoicesScreen() {
                       }`}>
                       {row.payment_type === 'WHOLESALE' ? 'جملة' : 'مفرق'}
                     </span>
+                    {/* v70 (الجولة 74 #2): طريقة الدفع غير النقدية — */}
+                    {/* شارة ملوّنة للبنك/المحفظة (النقدي هو المعتاد). */}
+                    {row.payment_method != null &&
+                      row.payment_method !== '' &&
+                      row.payment_method !== 'cash' && (
+                        <span
+                          className="chip"
+                          style={{
+                            background: `${paymentMethodById(row.payment_method).color}22`,
+                            color: paymentMethodById(row.payment_method).color,
+                            fontWeight: 700,
+                          }}>
+                          {paymentMethodById(row.payment_method).label}
+                        </span>
+                      )}
                   </td>
                   <td className="ih-mut">{row.itemsCount} صنف</td>
                   <td>
@@ -628,7 +670,7 @@ function DetailModal({
           {ret: full, items: retItems, exchanges},
           receiptSettings,
         );
-        await ThermalPrinterService.printJob(job);
+        await ThermalPrinterService.printJob(job, 'receipt');
         toast(`طُبع إشعار ${ret.return_number}`, 'success');
       } catch (e) {
         toast(

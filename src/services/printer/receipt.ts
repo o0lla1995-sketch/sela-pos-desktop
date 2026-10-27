@@ -7,6 +7,7 @@
  */
 import {ReceiptBuilder} from './escpos';
 import {formatDateTime} from '../../core/format';
+import {paymentMethodLabel} from '../../core/paymentMethods';
 import {APP_NAME, RECEIPT_WIDTH_58, RECEIPT_WIDTH_80} from '../../core/config';
 import type {SaleRecord, SaleItemRecord} from '../../core/types';
 
@@ -114,6 +115,18 @@ export function buildReceiptJob(data: ReceiptData, settings: ReceiptSettings) {
   if (settings.showProfit) {
     b.bold(true)
       .twoColumns(LABELS.profit, data.sale.total_profit, width)
+      .bold(false);
+  }
+
+  // ── v70 (الجولة 74 #2): طريقة الدفع غير النقدية — سطر عربي
+  // واضح تحت الإجمالي (النقدي هو المعتاد ولا يزيد سطراً على
+  // إيصارات المتجر القائمة). يعمل التاجر بها على تتبع ما دخل
+  // حسابه البنكي أو محفظته الإلكترونية.
+  const methodId = data.sale.payment_method ?? null;
+  if (methodId != null && methodId !== '' && methodId !== 'cash') {
+    b.align(2)
+      .bold(true)
+      .textLine(`طريقة الدفع: ${paymentMethodLabel(methodId)}`)
       .bold(false);
   }
 

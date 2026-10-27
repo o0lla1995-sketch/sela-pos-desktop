@@ -188,6 +188,7 @@ mod tests {
                     lines: &[line(pid, qty, 5.0, 2.0)],
                     discount: 0.0,
                     payment_type: "RETAIL",
+                payment_method: None,
                 },
             )
             .unwrap();

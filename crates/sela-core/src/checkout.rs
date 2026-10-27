@@ -16,6 +16,9 @@ pub struct CreateSaleInput<'a> {
     pub lines: &'a [CartLine],
     pub discount: f64,
     pub payment_type: &'a str,
+    /// v70 (الجولة 74 #2): طريقة الدفع (بنك/محفظة/نقدي) — خالية
+    /// تعني نقدياً (توافق المبيعات القديمة).
+    pub payment_method: Option<&'a str>,
 }
 
 pub fn create_sale(conn: &mut Connection, input: &CreateSaleInput) -> Result<SaleWithItems> {
@@ -32,8 +35,8 @@ pub fn create_sale(conn: &mut Connection, input: &CreateSaleInput) -> Result<Sal
     let tx = conn.transaction()?;
     tx.execute(
         "INSERT INTO sales
-         (invoice_number, total_amount, total_cost, total_profit, discount, payment_type, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+         (invoice_number, total_amount, total_cost, total_profit, discount, payment_type, created_at, payment_method)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             input.invoice_number,
             total_amount,
@@ -42,6 +45,7 @@ pub fn create_sale(conn: &mut Connection, input: &CreateSaleInput) -> Result<Sal
             discount,
             input.payment_type,
             created_at,
+            input.payment_method,
         ],
     )?;
     let sale_id = tx.last_insert_rowid();
@@ -173,6 +177,7 @@ mod tests {
                 lines: &[line(pid, 3.0, 4.5, 2.0, 1.0)],
                 discount: 5.0,
                 payment_type: "RETAIL",
+                payment_method: None,
             },
         )
         .unwrap();
@@ -198,6 +203,7 @@ mod tests {
                 lines: &[line(pid, 2.0, 4.5, 2.0, 1.0)],
                 discount: 999.0,
                 payment_type: "RETAIL",
+                payment_method: None,
             },
         )
         .unwrap();
@@ -216,6 +222,7 @@ mod tests {
                 lines: &[line(pid, 1.0, 90.0, 40.0, 24.0)],
                 discount: 0.0,
                 payment_type: "WHOLESALE",
+                payment_method: None,
             },
         )
         .unwrap_err();
@@ -252,6 +259,7 @@ mod tests {
                 lines: &[line(pid, 1.0, 4.5, 2.0, 1.0), line(pid2, 5.0, 1.0, 0.5, 1.0)],
                 discount: 0.0,
                 payment_type: "RETAIL",
+                payment_method: None,
             },
         )
         .unwrap_err();
@@ -272,6 +280,7 @@ mod tests {
                 lines: &[],
                 discount: 0.0,
                 payment_type: "RETAIL",
+                payment_method: None,
             },
         )
         .unwrap_err();

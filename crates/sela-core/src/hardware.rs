@@ -131,6 +131,7 @@ pub fn list_spool_printers() -> Vec<String> {
 
 pub mod spool;
 pub mod hook;
+pub mod discover;
 
 #[cfg(test)]
 mod tests {
