@@ -60,13 +60,9 @@ import {
 import type {DesktopPrinter} from '../stores/settingsStore';
 import {setActiveBarcodeHandler, beep} from '../lib/scanner';
 
-/* ── مفاتيح النسخ التلقائي إلى مجلد (سطح المكتب) ────────────────── */
-const AUTO_BACKUP_KEYS = {
-  folder: 'auto_backup_folder_v1',
-  enabled: 'auto_backup_enabled_v1',
-  intervalDays: 'auto_backup_interval_days_v1',
-  lastAt: 'auto_backup_last_at_v1',
-} as const;
+/* ── مفاتيح النسخ التلقائي إلى مجلد (سطح المكتب) — v71: انتقلت إلى
+   خدمة المجدول كي يشاركها التطبيق كله (المصدر الواحد للحقيقة). ── */
+import {AUTO_BACKUP_KEYS} from '../services/AutoBackupScheduler';
 
 const AUTO_INTERVALS: {value: number; label: string}[] = [
   {value: 1, label: 'يومياً'},

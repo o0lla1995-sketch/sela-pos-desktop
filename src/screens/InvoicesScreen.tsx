@@ -160,6 +160,8 @@ export function InvoicesScreen() {
   const [detailReload, setDetailReload] = useState(0);
   const [returnId, setReturnId] = useState<number | null>(null);
   const [reprintId, setReprintId] = useState<number | null>(null);
+  /** v71 (الجولة 75 #7): تصدير تقرير PDF للفواتير المفلطة. */
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   // بحث 300ms — استعلامات EXISTS لكل صف: الكتابة تبقى سلسة.
   useEffect(() => {
@@ -246,6 +248,78 @@ export function InvoicesScreen() {
     () => rows.reduce((sum, row) => sum + row.total_amount, 0),
     [rows],
   );
+
+  /** v71 (الجولة 75 #7): استخراج تقرير PDF جميل ومفصّل للفواتير
+   *  المفلطرة — طلب التاجر الصريح. تُجلب كل الصفوف المطابقة
+   *  (لا الصفحة المعروضة فقط) ثم تُبنى صفحات A4 على Canvas وتُحفظ
+   *  بحوار أصلي. */
+  const exportPdf = useCallback(async () => {
+    if (pdfBusy) {
+      return;
+    }
+    setPdfBusy(true);
+    try {
+      const allRows: InvoiceRow[] = [];
+      let offset = 0;
+      for (;;) {
+        const page = await queryPage(offset);
+        allRows.push(...page);
+        if (page.length < PAGE_SIZE) {
+          break;
+        }
+        offset += page.length;
+      }
+      if (allRows.length === 0) {
+        toast('لا فواتير تطابق الفلاتر الحالية', 'error');
+        return;
+      }
+      const kindLabel =
+        KIND_CHIPS.find(c => c.key === kindFilter)?.label ?? 'كل الأنواع';
+      const methodLabel =
+        methodFilter === 'all'
+          ? 'كل طرق الدفع'
+          : paymentMethodById(methodFilter).label;
+      const periodLabel =
+        from || to
+          ? `من ${from || 'البداية'} إلى ${to || 'اليوم'}`
+          : 'كل الفترات';
+      const filtersLabel = `${kindLabel} · ${methodLabel}${
+        debouncedSearch.trim() ? ` · بحث: «${debouncedSearch.trim()}»` : ''
+      }`;
+      const {exportInvoicesReportPdf} = await import(
+        '../services/InvoicesReportPdf'
+      );
+      const result = await exportInvoicesReportPdf({
+        storeName: settings.storeName || 'سيلا',
+        periodLabel,
+        filtersLabel,
+        rows: allRows.map(row => ({
+          invoice: row.invoice_number,
+          kindLabel: seriesLabel(row.invoice_number),
+          paymentMethod: row.payment_method ?? null,
+          itemsCount: row.itemsCount,
+          total: row.total_amount,
+          returned:
+            row.return_kind != null
+          ? 0
+          : (row.returned_minor ?? 0) / 100,
+          createdAt: row.created_at,
+        })),
+      });
+      toast(
+        `تم حفظ تقرير ${result.count} فاتورة في ${result.pages} صفحة: ${result.path}`,
+        'success',
+        7000,
+      );
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (!message.includes('أُلغيت')) {
+        toast(message, 'error', 6000);
+      }
+    } finally {
+      setPdfBusy(false);
+    }
+  }, [pdfBusy, queryPage, kindFilter, methodFilter, from, to, debouncedSearch, settings.storeName, toast]);
 
   // ── إعادة طباعة صف (تُحدد القالب من السلسلة داخل الخدمة) ────
   const reprintRow = useCallback(
@@ -336,6 +410,16 @@ export function InvoicesScreen() {
         <span className="grow" />
         <span className="chip brand">{formatMoney(visibleSum)}</span>
         <span className="chip muted">{rows.length} فاتورة</span>
+        {/* v71 (الجولة 75 #7): تقرير PDF للفواتير المفلطرة — طلب
+            التاجر: «زر لطباعة أو استخراج التقرير pdf بتقرير جميل
+            ومفصل وسهل القراءة». */}
+        <button
+          className="btn"
+          disabled={pdfBusy || rows.length === 0}
+          title="تقرير PDF مفصّل بكل الفواتير المطابقة للفلاتر الحالية"
+          onClick={() => void exportPdf()}>
+          {pdfBusy ? 'جارٍ بناء التقرير…' : 'تقرير PDF'}
+        </button>
         <button className="btn" onClick={() => void reload()} disabled={loading}>
           {loading ? 'جارٍ التحديث…' : 'تحديث'}
         </button>

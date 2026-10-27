@@ -455,6 +455,8 @@ export const ReportRepo = {
       profit: number;
       discount: number;
       paymentType: string;
+      /** v71 (الجولة 75 #9): طريقة الدفع — لعمود CSV ونظرة المحاسب. */
+      paymentMethod: string;
     }[]
   > {
     const [start, end] = rangeBounds(range);
@@ -469,6 +471,7 @@ export const ReportRepo = {
          s.total_profit AS profit,
          s.discount AS discount,
          s.payment_type AS payment_type,
+         s.payment_method AS payment_method,
          s.return_kind AS return_kind
        FROM sales s
        LEFT JOIN (${RETURN_ORIGINAL_LINK}) link
@@ -493,6 +496,10 @@ export const ReportRepo = {
           : String(row.payment_type ?? 'RETAIL') === 'WHOLESALE'
           ? 'جملة'
           : 'مفرق',
+      paymentMethod:
+        row.return_kind != null
+          ? '—'
+          : String(row.payment_method ?? 'cash') || 'cash',
     }));
   },
 
@@ -503,7 +510,11 @@ export const ReportRepo = {
    *  بتاريخها، والصادر بفترة معالجة المرتجع فعلياً — هكذا يطابق
    *  الرقم ما يراه التاجر في كشف حسابه البنكي/محفظته في نفس
    *  الأيام. المبيعات القديمة (قبل v70) بلا طريقة = نقدي.
-   *  الديون (INV-D/INV-L) لا تدخل هنا — لم يُدفع منها شيء بعد. */
+   *  الديون (INV-D/INV-L) لا تدخل هنا — لم يُدفع منها شيء بعد.
+   *  v71 (الجولة 75 #6): سدادات الديون تدخل الآن — سداد دفتر
+   *  المتجر (RCP-L) وسدادّات صِلة المسجلة هنا (COLL) أموال دخلت
+   *  فعلاً على القناة التي اختارها التاجر (بنك/محفظة/نقدي) فيوم
+   *  السداد هو يوم دخول المال — منطق المحاسب الذي طلبه التاجر. */
   async paymentMethodTotals(
     range: DateRange,
   ): Promise<
@@ -517,22 +528,49 @@ export const ReportRepo = {
   > {
     const [start, end] = rangeBounds(range);
     const result = await getDb().execute(
-      `SELECT
-         COALESCE(s.payment_method, 'cash') AS method,
-         COALESCE(SUM(CASE WHEN s.return_kind IS NULL
-           THEN s.total_amount ELSE 0 END), 0) AS inflow,
-         COALESCE(SUM(CASE WHEN s.return_kind IS NOT NULL
-           THEN -s.total_amount ELSE 0 END), 0) AS refunded,
-         SUM(CASE WHEN s.return_kind IS NULL THEN 1 ELSE 0 END) AS invoices
-       FROM sales s
-       WHERE s.created_at >= ? AND s.created_at <= ?
-         AND s.invoice_number NOT LIKE 'INV-D-%'
-         AND s.invoice_number NOT LIKE 'INV-L-%'
-         AND s.invoice_number NOT LIKE 'INV-O-%'
-         AND s.invoice_number NOT LIKE 'INV-V-%'
-       GROUP BY COALESCE(s.payment_method, 'cash')
+      `SELECT method,
+         COALESCE(SUM(inflow), 0) AS inflow,
+         COALESCE(SUM(refunded), 0) AS refunded,
+         COALESCE(SUM(invoices), 0) AS invoices
+       FROM (
+         SELECT
+           COALESCE(s.payment_method, 'cash') AS method,
+           COALESCE(SUM(CASE WHEN s.return_kind IS NULL
+             THEN s.total_amount ELSE 0 END), 0) AS inflow,
+           COALESCE(SUM(CASE WHEN s.return_kind IS NOT NULL
+             THEN -s.total_amount ELSE 0 END), 0) AS refunded,
+           SUM(CASE WHEN s.return_kind IS NULL THEN 1 ELSE 0 END) AS invoices
+         FROM sales s
+         WHERE s.created_at >= ? AND s.created_at <= ?
+           AND s.invoice_number NOT LIKE 'INV-D-%'
+           AND s.invoice_number NOT LIKE 'INV-L-%'
+           AND s.invoice_number NOT LIKE 'INV-O-%'
+           AND s.invoice_number NOT LIKE 'INV-V-%'
+         GROUP BY COALESCE(s.payment_method, 'cash')
+         UNION ALL
+         SELECT
+           CASE WHEN p.method IN ('card','other') THEN 'other' ELSE p.method END AS method,
+           SUM(p.amount_minor) / 100.0 AS inflow,
+           0 AS refunded,
+           COUNT(*) AS invoices
+         FROM local_payments p
+         WHERE p.created_at >= ? AND p.created_at <= ?
+         GROUP BY 1
+         UNION ALL
+         SELECT
+           CASE WHEN q.payment_method IN ('card','other') THEN 'other'
+                ELSE COALESCE(q.payment_method, 'cash') END AS method,
+           SUM(q.amount_minor) / 100.0 AS inflow,
+           0 AS refunded,
+           COUNT(*) AS invoices
+         FROM sila_payment_queue q
+         WHERE q.kind = 'repayment'
+           AND q.created_at >= ? AND q.created_at <= ?
+         GROUP BY 1
+       )
+       GROUP BY method
        ORDER BY inflow DESC`,
-      [start, end],
+      [start, end, start, end, start, end],
     );
     const rows = result.rows ?? [];
     return rows.map(row => {

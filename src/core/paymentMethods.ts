@@ -125,6 +125,38 @@ export function paymentMethodLabel(id: string | null | undefined): string {
   return paymentMethodById(id).label;
 }
 
+/** v71 (الجولة 75 #6): عرض أي معرف طريقة دفع في التقارير —
+ *  المعروف يأتي من السجل، والقيم التاريخية (card/other) تعرض
+ *  «بطاقة/أخرى» بلا إسقاطها على النقدي (أرصدة السدادات القديمة). */
+export type DisplayMethod = Omit<PaymentMethod, 'id'> & {id: string};
+
+export function displayMethod(id: string | null | undefined): DisplayMethod {
+  if (id != null && id !== '') {
+    const hit = BY_ID.get(id);
+    if (hit != null) {
+      return hit;
+    }
+    if (id === 'card') {
+      return {
+        id: 'card',
+        label: 'بطاقة',
+        kind: 'cash',
+        color: '#6B7280',
+        mark: 'بطاقة',
+        locked: false,
+      };
+    }
+  }
+  return {
+    id: 'other',
+    label: 'أخرى',
+    kind: 'cash',
+    color: '#6B7280',
+    mark: 'أخرى',
+    locked: false,
+  };
+}
+
 /** كل المعرّفات الصالحة (تحقق مدخلات الواجهات). */
 export function isPaymentMethodId(id: string): boolean {
   return BY_ID.has(id);

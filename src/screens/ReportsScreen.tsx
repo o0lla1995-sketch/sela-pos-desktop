@@ -48,7 +48,7 @@ import {Icon} from '../components/Icon';
 import './settingsv57.css';
 import {
   PAYMENT_KIND_LABELS,
-  paymentMethodById,
+  displayMethod,
 } from '../core/paymentMethods';
 import {PaymentMethodIcon} from '../components/PaymentMethodIcon';
 
@@ -513,6 +513,9 @@ export function ReportsScreen() {
     }
     setExportBusy(true);
     try {
+      /* v71 (الجولة 75 #9): جدول حقيقي كامل — عمود طريقة الدفع +
+         صف الإجماليات أسفل الجدول (طلب التاجر: استخراج منسق بشكل
+         صحيح على حسب التقرير المستخرج). */
       const header = [
         'الفاتورة',
         'التاريخ',
@@ -523,6 +526,7 @@ export function ReportsScreen() {
         'الربح',
         'الخصم',
         'الدفع',
+        'طريقة الدفع',
       ];
       const lines = [header.map(csvCell).join(',')];
       for (const row of detail) {
@@ -537,11 +541,30 @@ export function ReportsScreen() {
             row.profit.toFixed(2),
             row.discount.toFixed(2),
             row.paymentType,
+            row.invoice.startsWith('RET-')
+              ? '—'
+              : displayMethod(row.paymentMethod).label,
           ]
             .map(csvCell)
             .join(','),
         );
       }
+      lines.push(
+        [
+          'الإجماليات',
+          '',
+          '',
+          detail.reduce((sum, row) => sum + row.quantity, 0),
+          detail.reduce((sum, row) => sum + row.total, 0).toFixed(2),
+          detail.reduce((sum, row) => sum + row.cost, 0).toFixed(2),
+          detail.reduce((sum, row) => sum + row.profit, 0).toFixed(2),
+          detail.reduce((sum, row) => sum + row.discount, 0).toFixed(2),
+          '',
+          '',
+        ]
+          .map(csvCell)
+          .join(','),
+      );
       const contents = `\uFEFF${lines.join('\r\n')}`;
       const path = await invoke<string>('save_text_file', {
         defaultName: `sela_sales_${from}_${to}.csv`,
@@ -952,7 +975,7 @@ export function ReportsScreen() {
               </div>
               <div className="sv57-kpis">
                 {payMethods.map(row => {
-                  const method = paymentMethodById(row.method);
+                  const method = displayMethod(row.method);
                   return (
                     <div className="sv57-kpi" key={row.method}>
                       <span
@@ -987,9 +1010,10 @@ export function ReportsScreen() {
               </div>
               <div className="sv57-note">
                 الأرقام من منظور حركة المال: الوارد بفواتير البيع بتاريخها
-                والمرتجعات بتاريخ معالجتها — فواتير الدين لا تدخل هنا لأن
-                لم يُدفع منها شيء بعد. المبيعات المسجلة قبل إصدار طرق الدفع
-                محسوبة نقدياً.
+                والمرتجعات بتاريخ معالجتها — فواتير الدين لا تُحتسب عند
+                البيع (لم يُدفع منها شيء بعد)، لكن سداداتها تدخل برصيد
+                الطريقة التي سُددت بها يوم السداد. المبيعات المسجلة قبل
+                إصدار طرق الدفع محسوبة نقدياً.
               </div>
             </div>
           )}

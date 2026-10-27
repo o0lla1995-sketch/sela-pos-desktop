@@ -1414,6 +1414,39 @@ button.primary > .pos-fkey,
   background: var(--danger-soft);
   color: var(--danger);
 }
+/* v71 (الجولة 75 #4): الشريط عائم فوق المحتوى — لا يزحزح حجم نافذة
+   التطبيق ولا يقلص مساحة الشاشات (طلب التاجر الصريح). */
+.state-banner.state-banner-float {
+  position: fixed;
+  top: 10px;
+  inset-inline: 10px;
+  z-index: 900;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  padding: 8px 12px;
+  max-width: 720px;
+  margin-inline: auto;
+}
+.state-banner.state-banner-float span {
+  flex: 1;
+  min-width: 0;
+}
+.state-banner-x {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.state-banner-x:hover {
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+}
 
 /* ───────────────────────────────── حاجز الأخطاء ───────────────────── */
 .eb-wrap {
@@ -1554,31 +1587,22 @@ button.primary > .pos-fkey,
 
 /* ═══════════════════ v70 (الجولة 74): طرق الدفع المتعددة ═══════════════════ */
 
-/* رقاقة أيقونة طريقة الدفع — لون العلامة وحرفاها. */
+/* v71 (الجولة 75 #3): رقاقة أيقونة طريقة الدفع — SVG هوية حقيقية
+   لكل بنك/محفظة داخل قالب دائري زاويّ. */
 .pmi {
   display: inline-flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   border-radius: 10px;
-  color: #fff;
+  overflow: hidden;
   position: relative;
   flex-shrink: 0;
-  font-weight: 800;
-  line-height: 1;
-  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.18);
+  line-height: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
-.pmi-mark {
-  font-weight: 800;
-  letter-spacing: -0.5px;
-}
-.pmi-kind {
-  position: absolute;
-  bottom: 2px;
-  font-size: 7px;
-  font-weight: 700;
-  opacity: 0.85;
-  letter-spacing: 0;
+.pmi svg {
+  display: block;
+  border-radius: 10px;
 }
 
 /* شبكة بطاقات تفعيل الطرق (الإعدادات). */
@@ -1641,32 +1665,36 @@ button.primary > .pos-fkey,
   color: #fff;
 }
 
-/* صف اختيار الطريقة داخل نافذة الدفع. */
+/* v71 (الجولة 75 #2): خطوة اختيار طريقة الدفع — شبكة بطاقات كبيرة
+   (كانت شريطاً أفقياً مزدحماً يختفي خلف حقل المبلغ). */
+.pos-pay.pos-pay-wide {
+  width: min(600px, 94vw);
+}
 .pos-pay-methods {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 4px 2px 8px;
-  margin-bottom: 4px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: 10px;
 }
 .pos-pay-method {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 5px;
-  min-width: 84px;
-  padding: 9px 8px 7px;
-  border-radius: 12px;
-  border: 1.5px solid var(--line);
+  justify-content: center;
+  gap: 7px;
+  padding: 14px 10px 11px;
+  border-radius: 14px;
+  border: 2px solid var(--line);
   background: var(--surface-2);
   cursor: pointer;
   font: inherit;
   color: inherit;
-  transition: border-color 0.12s, background 0.12s, transform 0.05s;
+  transition: border-color 0.12s, background 0.12s, transform 0.05s,
+    box-shadow 0.12s;
   position: relative;
 }
 .pos-pay-method:hover {
   background: var(--surface-3);
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--line));
 }
 .pos-pay-method:active {
   transform: scale(0.97);
@@ -1674,20 +1702,37 @@ button.primary > .pos-fkey,
 .pos-pay-method.sel {
   border-color: var(--brand);
   background: var(--surface-3);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 25%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 25%, transparent);
 }
 .pos-pay-method .pm-name {
-  font-size: 11.5px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 800;
   white-space: nowrap;
 }
-.pos-pay-method .pm-kbd-hint {
-  font-size: 9.5px;
+.pos-pay-method .pm-kind-label {
+  font-size: 10px;
+  font-weight: 600;
   color: var(--muted);
 }
-.pos-pay-method.sel .pm-kbd-hint {
+.pos-pay-method.sel .pm-kind-label {
   color: var(--brand);
   font-weight: 700;
+}
+.pos-pay-method-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+}
+.pos-pay-method-foot .btn {
+  width: 100%;
+  justify-content: center;
+}
+.pos-pay-kbd-hint {
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
 }
 .pos-pay-confirm {
   display: flex;

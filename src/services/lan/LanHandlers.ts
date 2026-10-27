@@ -71,6 +71,10 @@ import {getDb} from '../../database/connection';
 import {PlatformUtilsNative} from '../../native/nativeBridge';
 import {APP_VERSION} from '../../core/config';
 import {localNow} from '../../core/format';
+import {
+  activePaymentMethods,
+  isPaymentMethodId,
+} from '../../core/paymentMethods';
 import type {
   CartLine,
   ExchangeLineInput,
@@ -679,6 +683,24 @@ export async function handleLanRequest(
       });
     }
 
+    // v71 (الجولة 75 #10): طرق الدفع المفعّلة عند التاجر — يقرأها
+    // الكاشير بعد الدخول ليعرض لزميل الكاشير نفس خيارات الدفع التي
+    // ضبطها المدير (بنوك ومحافظ) في نافذة البيع.
+    if (path === '/api/payment-methods' && method === 'GET') {
+      const methods = activePaymentMethods(
+        getSettings().paymentMethodsEnabled,
+      );
+      return ok({
+        ok: true,
+        methods: methods.map(m => ({
+          id: m.id,
+          label: m.label,
+          kind: m.kind,
+          color: m.color,
+        })),
+      });
+    }
+
     if (path === '/api/auth/login' && method === 'POST') {
       return await handleLogin(req);
     }
@@ -1002,6 +1024,18 @@ async function handleSale(
     return fail(400, 'السلة فارغة');
   }
   const paymentType = body.paymentType === 'debt' ? 'debt' : 'cash';
+  // v71 (الجولة 75 #10): طريقة الدفع (بنك/محفظة) من الكاشير — تُخزن
+  // مع الفاتورة وتدخل أرصدة طرق الدفع؛ الدين لا يقبلها (لا مال دخل).
+  let paymentMethod: string | undefined;
+  if (paymentType === 'cash') {
+    const requested = body.paymentMethod ? String(body.paymentMethod) : '';
+    if (requested && requested !== 'cash') {
+      if (!isPaymentMethodId(requested)) {
+        return fail(400, 'طريقة دفع غير معروفة');
+      }
+      paymentMethod = requested;
+    }
+  }
   const clientRef = body.clientRef ? String(body.clientRef).slice(0, 80) : '';
   const clientCreatedAt = body.createdAt
     ? String(body.createdAt).slice(0, 19)
@@ -1090,6 +1124,7 @@ async function handleSale(
       lines,
       discount,
       paymentType: 'RETAIL',
+      paymentMethod,
       print,
       receiptSettings: receiptSettings(),
       cashierId: authed.cashierId,

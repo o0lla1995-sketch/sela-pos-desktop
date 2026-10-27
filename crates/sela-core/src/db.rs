@@ -344,8 +344,10 @@ CREATE TABLE IF NOT EXISTS local_payments (
   local_customer_id INTEGER NOT NULL REFERENCES local_customers(id) ON DELETE CASCADE,
   receipt_ref TEXT NOT NULL UNIQUE,
   amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
-  method TEXT NOT NULL DEFAULT 'cash'
-    CHECK (method IN ('cash','card','other')),
+  -- v71 (الجولة 75 #6): بلا قيد CHECK — يقبل معرفات البنوك
+  -- والمحافظ (bank_palestine/jawwal_pay…) بجانب القيم التاريخية
+  -- (cash/card/other) التي تظل تُقرأ كما هي.
+  method TEXT NOT NULL DEFAULT 'cash',
   note TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -628,6 +630,38 @@ fn heal_v57(conn: &Connection) -> Result<()> {
                FROM stocktake_items;
              DROP TABLE stocktake_items;
              ALTER TABLE stocktake_items_v22 RENAME TO stocktake_items;",
+        )?;
+    }
+    // ── v71 (الجولة 75 #6): توسيع قيد طريقة سداد دفتر المتجر ──
+    // كان method محصوراً بـ CHECK في (cash/card/other) فيرفض
+    // معرفات البنوك والمحافظ الجديدة. SQLite لا يعدّل القيد في مكانه
+    // — إعادة بناء الجدول بنفس أسلوب v22 المجرب (نسخ → حذف → تسمية).
+    let lp_sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='local_payments'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap_or_default();
+    if lp_sql.contains("('cash','card','other')") {
+        conn.execute_batch(
+            "CREATE TABLE local_payments_v71 (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               local_customer_id INTEGER NOT NULL REFERENCES local_customers(id) ON DELETE CASCADE,
+               receipt_ref TEXT NOT NULL UNIQUE,
+               amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+               method TEXT NOT NULL DEFAULT 'cash',
+               note TEXT,
+               created_at TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             INSERT INTO local_payments_v71
+               (id, local_customer_id, receipt_ref, amount_minor, method, note, created_at)
+             SELECT id, local_customer_id, receipt_ref, amount_minor, method, note, created_at
+               FROM local_payments;
+             DROP TABLE local_payments;
+             ALTER TABLE local_payments_v71 RENAME TO local_payments;
+             CREATE INDEX IF NOT EXISTS idx_local_pays_cust
+               ON local_payments(local_customer_id, created_at DESC);",
         )?;
     }
     // ── فهارس لا تُنشأ إلا بعد ضمان أعمدتها (درس v23.0.1) ──

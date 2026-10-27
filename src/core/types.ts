@@ -769,13 +769,16 @@ export interface LocalDebt {
 }
 
 /** v16 (round-22 #4): a repayment received from a local customer
- *  (RCP-L series — reduces the local balance; never uploaded). */
+ *  (RCP-L series — reduces the local balance; never uploaded).
+ *  v71 (الجولة 75 #6): method أصبح نصاً حراً — القيم الجديدة معرفات
+ *  طرق الدفع (bank_palestine/jawwal_pay/palpay/malchat…) بجانب
+ *  القيم التاريخية cash/card/other من الإصدارات الأقدم. */
 export interface LocalPayment {
   id: number;
   local_customer_id: number;
   receipt_ref: string;
   amount_minor: number;
-  method: 'cash' | 'card' | 'other';
+  method: string;
   note: string | null;
   created_at: string;
 }

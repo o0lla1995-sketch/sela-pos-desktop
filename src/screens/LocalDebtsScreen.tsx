@@ -27,6 +27,12 @@ import type {
   LocalDebt,
   LocalPayment,
 } from '../core/types';
+import {
+  activePaymentMethods,
+  isPaymentMethodId,
+  paymentMethodById,
+} from '../core/paymentMethods';
+import {useSettingsStore} from '../stores/settingsStore';
 import {Icon} from '../components/Icon';
 import {Select} from '../components/Select';
 import './debtscash.css';
@@ -34,11 +40,21 @@ import './debtscash.css';
 type FieldErrors = {id?: string; name?: string; phone?: string};
 type PayMethod = LocalPayment['method'];
 
-const METHOD_LABELS: Record<PayMethod, string> = {
-  cash: 'نقد',
-  card: 'بطاقة',
-  other: 'أخرى',
-};
+/** v71 (الجولة 75 #6): تسمية طريقة السداد — معرفات البنوك
+ *  والمحافظ الجديدة تُعرض بأسمائها الرسمية، والقيم التاريخية
+ *  (card/other) تبقى كما كانت للسجلات القديمة. */
+function payMethodLabel(method: string): string {
+  if (isPaymentMethodId(method)) {
+    return paymentMethodById(method).label;
+  }
+  if (method === 'card') {
+    return 'بطاقة';
+  }
+  if (method === 'other') {
+    return 'أخرى';
+  }
+  return method;
+}
 
 /** أغورات → «1,234.50 ₪» (formatMoney يعمل بالشيكل الكامل). */
 const money = (minor: number): string => formatMoney(minor / 100);
@@ -62,6 +78,9 @@ function phoneError(value: string): string {
 
 export function LocalDebtsScreen() {
   const toast = useToastStore(s => s.show);
+  const paymentMethodsEnabled = useSettingsStore(
+    s => s.settings.paymentMethodsEnabled,
+  );
 
   // ── القائمة الرئيسية ──────────────────────────────────────────
   const [balances, setBalances] = useState<LocalCustomerBalance[]>([]);
@@ -432,7 +451,7 @@ export function LocalDebtsScreen() {
       await refreshDetail(customerId);
       toast(
         `سُجّل السداد ${pay.receipt_ref} بمبلغ ${money(pay.amount_minor)} ` +
-          `(${METHOD_LABELS[pay.method]})`,
+          `(${payMethodLabel(pay.method)})`,
         'success',
       );
     } catch (e) {
@@ -745,7 +764,7 @@ export function LocalDebtsScreen() {
                         </td>
                         <td>
                           <span className="chip muted">
-                            {METHOD_LABELS[p.method]}
+                            {payMethodLabel(p.method)}
                           </span>
                         </td>
                         <td className="mut">{p.note ?? '—'}</td>
@@ -1022,12 +1041,25 @@ export function LocalDebtsScreen() {
               <div className="dc-form-grid">
                 <div className="field">
                   <label>طريقة السداد</label>
+                  {/* v71 (الجولة 75 #6): البنوك والمحافظ المفعّلة من
+                      الإعدادات + النقدي + «أخرى» للسجلات اليدوية —
+                      طلب التاجر: طرق الدفع الجديدة في تسجيل السداد. */}
                   <Select
                     value={payMethod}
-                    onChange={value => setPayMethod(value as PayMethod)}
+                    onChange={value => setPayMethod(value)}
                     options={[
-                      {value: 'cash', label: 'نقد'},
-                      {value: 'card', label: 'بطاقة'},
+                      {
+                        value: 'cash',
+                        label: 'نقدي — الخزينة',
+                      },
+                      ...activePaymentMethods(paymentMethodsEnabled)
+                        .filter(m => m.id !== 'cash')
+                        .map(m => ({
+                          value: m.id,
+                          label: `${m.label} — ${
+                            m.kind === 'bank' ? 'تحويل بنكي' : 'محفظة'
+                          }`,
+                        })),
                       {value: 'other', label: 'أخرى'},
                     ]}
                     ariaLabel="طريقة السداد"

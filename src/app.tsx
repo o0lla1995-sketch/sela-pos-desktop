@@ -7,7 +7,7 @@
  * v58: كل شاشة داخل ErrorBoundary — أي استثناء عرض يظهر بطاقة
  * عربية واضحة بدل الشاشة البيضاء، وبقية النظام يواصل العمل.
  */
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {evaluate, heartbeat, type LicenseStatus} from './license/LicenseService';
 import {initStorage} from './state/storage';
 import {useSettingsStore} from './stores/settingsStore';
@@ -80,6 +80,9 @@ export function App() {
   const [ready, setReady] = useState(false);
   const [status, setStatus] = useState<LicenseStatus | null>(null);
   const [screen, setScreen] = useState<ScreenKey>('home');
+  /** v71 (الجولة 75 #4): إخفاء شريط «العمل دون إنترنت» بيد التاجر —
+   *  يُعاد تلقائياً عند أي دخول جديد لوضع المهلة. */
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const toast = useToastStore(s => s.show);
   const toasts = useToastStore(s => s.toasts);
   const unread = useNotificationsStore(s => s.unreadCount);
@@ -151,6 +154,17 @@ export function App() {
         } catch {
           /* خادم الكاشير غير مفعّل */
         }
+        // v71 (الجولة 75 #5): مجدول النسخ التلقائي على مستوى التطبيق
+        // — الفحص كان حبيس شاشة الإعدادات فلا نسخة تُنشأ أبداً لمن
+        // يبقى في نقطة البيع. الآن: فحص عند الإقلاع + كل 30 دقيقة.
+        try {
+          const {startAutoBackupScheduler} = await import(
+            './services/AutoBackupScheduler'
+          );
+          startAutoBackupScheduler();
+        } catch {
+          /* النسخ التلقائي غير مهيأ */
+        }
       } catch (e) {
         toast(e instanceof Error ? e.message : String(e), 'error');
       } finally {
@@ -161,13 +175,47 @@ export function App() {
   }, []);
 
   // نبضة كل 15 دقيقة (نفس إيقاع الأندرويد تقريباً — بلا إزعاج للمستخدم).
+  // v71 (الجولة 75 #4): عند دخول وضع المهلة (grace — العمل دون
+  // إنترنت) تتسارع النبضة إلى كل دقيقتين مع force كي يكتشف عودة
+  // الاتصال خلال ثوانٍ منها وليس بعد ربع ساعة — كان الشريط يبقى
+  // معلقاً حتى مع رجوع الإنترنت لأن النبضة التالية بعيدة.
   useEffect(() => {
     if (status == null || status.state === 'needs_activation') return;
+    const inGrace = status.state === 'grace';
+    const intervalMs = inGrace ? 2 * 60 * 1000 : 15 * 60 * 1000;
     const timer = setInterval(() => {
-      void heartbeat().then(setStatus);
-    }, 15 * 60 * 1000);
+      void heartbeat(inGrace).then(setStatus);
+    }, intervalMs);
     return () => clearInterval(timer);
-  }, [status == null]);
+  }, [status == null, status?.state]);
+
+  // v71 (الجولة 75 #4): حدث «عودة الاتصال» من نظام التشغيل — نبضة
+  // فورية إجبارية تلغي شريط «العمل دون إنترنت» خلال ثانية واحدة من
+  // رجوع الشبكة، لا بعد انتظار الدورة التالية.
+  useEffect(() => {
+    const onOnline = () => {
+      void heartbeat(true)
+        .then(next => {
+          setStatus(next);
+          if (next.state !== 'grace') {
+            setBannerDismissed(false);
+          }
+        })
+        .catch(() => undefined);
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, []);
+
+  // إعادة إظهار الشريط عند أي دخول جديد لوضع المهلة (انقطاع جديد).
+  const prevGraceRef = useRef(status?.state === 'grace');
+  useEffect(() => {
+    const isGrace = status?.state === 'grace';
+    if (isGrace && !prevGraceRef.current) {
+      setBannerDismissed(false);
+    }
+    prevGraceRef.current = isGrace;
+  }, [status?.state]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode;
@@ -243,13 +291,28 @@ export function App() {
 
   return (
     <AppLockGate>
-      {status.state === 'grace' && (
-        <div className="state-banner">
+      {/* v71 (الجولة 75 #4): شريط «العمل دون إنترنت» — عائم فوق
+          المحتوى (لا يزحزح حجم النافذة ولا يقلص مساحة الشاشات كما
+          اشتكى التاجر) + قابل للإغلاق بزر × كي لا يبقى معلقاً، مع
+          فحص فوري لعودة الاتصال عند الضغط عليه. */}
+      {status.state === 'grace' && !bannerDismissed && (
+        <div className="state-banner state-banner-float">
           <Icon name="alert" size={17} />
           <span>
             العمل دون إنترنت منذ {Math.round(status.offlineHours)} ساعة — يظل
             النظام يعمل حتى 72 ساعة، بعدها يلزم الاتصال بالسيرفر مرة واحدة.
           </span>
+          <button
+            className="state-banner-x"
+            title="إخفاء التنبيه والفحص الفوري لعودة الاتصال"
+            onClick={() => {
+              setBannerDismissed(true);
+              void heartbeat(true)
+                .then(setStatus)
+                .catch(() => undefined);
+            }}>
+            <Icon name="x" size={14} />
+          </button>
         </div>
       )}
       <div className="app">

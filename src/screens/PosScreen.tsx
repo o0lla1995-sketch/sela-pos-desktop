@@ -154,6 +154,13 @@ export function PosScreen() {
   /** v70 (الجولة 74 #2/#3): طريقة الدفع المختارة داخل نافذة الدفع —
    *  نقدي افتراضياً؛ الأسهم تنقل بين الطرق المفعّلة وEnter يؤكد. */
   const [payMethodId, setPayMethodId] = useState<PaymentMethodId>('cash');
+  /** v71 (الجولة 75 #2): تدفق الدفع بخطوتين — طلب التاجر نصاً:
+   *  «إذا كانت هناك محافظ أو بنوك مفعّلة وتم الضغط على البيع يظهر
+   *  أولاً خيار الدفع قبل فتح نافذة إدخال المبلغ». الخطوة الأولى
+   *  اختيار الطريقة (شبكة بطاقات كبيرة)، والثانية إدخال المبلغ
+   *  (نقدي) أو التأكيد (بنك/محفظة). عند تفعيل النقدي وحده تُفتح
+   *  خطوة المبلغ مباشرة كما كان دائماً — بلا نقر إضافي. */
+  const [payStep, setPayStep] = useState<'method' | 'pay'>('pay');
   const [debtConfirm, setDebtConfirm] = useState<DebtConfirmState | null>(null);
   const [debtSheet, setDebtSheet] = useState<'sila' | 'local' | null>(null);
   const [silaCustomers, setSilaCustomers] = useState<SilaCustomer[]>([]);
@@ -339,12 +346,15 @@ export function PosScreen() {
     [payMethodId],
   );
 
-  /** فتح نافذة الدفع — النقدي هو الافتراضي دائماً. */
+  /** فتح نافذة الدفع — v71 (الجولة 75 #2): خطوتان عند تفعيل بنوك أو
+   *  محافظ (اختيار الطريقة أولاً ثم المبلغ)، وخطوة واحدة (المبلغ
+   *  مباشرة) عند تفعيل النقدي وحده — سرعة البيع الصغير لا تتأثر. */
   const openPaySheet = useCallback(() => {
     setPayMethodId('cash');
     setAmountText('');
+    setPayStep(payMethods.length > 1 ? 'method' : 'pay');
     setPaySheet('cash');
-  }, []);
+  }, [payMethods.length]);
 
   // ── بيع نقدي ──
   const completeCashSale = useCallback(
@@ -830,10 +840,32 @@ export function PosScreen() {
   }, [weightPick, weightValue, addWeighted, pricingMode, toast]);
 
   // ── v59: الكيبورد الفعلي في كل لوحات الأرقام ──
-  // الدفع النقدي: أرقام مباشرة + Enter يؤكد البيع فوراً + الأسهم
-  // تنقل بين طرق الدفع المفعّلة (v70) وEsc يغلق.
+  // v71 (الجولة 75 #2): خطوة اختيار طريقة الدفع — الأسهم تنقل بين
+  // البطاقات، Enter يختار وينتقل لإدخال المبلغ، Esc يغلق النافذة.
   useAmountKeyboard({
-    active: paySheet === 'cash',
+    active: paySheet === 'cash' && payStep === 'method',
+    text: '',
+    onKey: () => undefined,
+    onConfirm: () => {
+      setPayStep('pay');
+    },
+    onCancel: () => setPaySheet(null),
+    onArrow: delta => {
+      if (payMethods.length === 0) return;
+      const idx = payMethods.findIndex(m => m.id === payMethodId);
+      const next =
+        idx === -1
+          ? 0
+          : (idx + delta + payMethods.length) % payMethods.length;
+      setPayMethodId(payMethods[next].id);
+    },
+  });
+  // الدفع النقدي: أرقام مباشرة + Enter يؤكد البيع فوراً + الأسهم
+  // تعود لاختيار الطريقة (لا معنى لها في إدخال المبلغ) وEsc يرجع
+  // لخطوة الطريقة إن وُجدت طرق أخرى، وإلا يغلق (طلب التاجر: Esc
+  // = الرجوع للخطوة السابقة).
+  useAmountKeyboard({
+    active: paySheet === 'cash' && payStep === 'pay',
     text: amountText,
     onKey: setAmountText,
     onConfirm: () => {
@@ -845,15 +877,12 @@ export function PosScreen() {
         );
       }
     },
-    onCancel: () => setPaySheet(null),
-    onArrow: delta => {
-      if (payMethods.length === 0) return;
-      const idx = payMethods.findIndex(m => m.id === payMethodId);
-      const next =
-        idx === -1
-          ? 0
-          : (idx + delta + payMethods.length) % payMethods.length;
-      setPayMethodId(payMethods[next].id);
+    onCancel: () => {
+      if (payMethods.length > 1) {
+        setPayStep('method');
+      } else {
+        setPaySheet(null);
+      }
     },
   });
   // لوحة الوزن: نفس الشيء — Enter يضيف للسلة.
@@ -1118,18 +1147,16 @@ export function PosScreen() {
             ))}
           </div>
           <div className="pos-cart-math">
-            <label className="pos-discount-row">
-              <span
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  flex: 1,
-                }}>
-                <Icon name="percent" size={14} /> خصم الفاتورة
-                <span
-                  className="sv57-seg"
-                  style={{margin: 0, direction: 'ltr'}}>
+            {/* v71 (الجولة 75 #1): صفّان منفصلان — التسمية والمبدّل في
+                سطر، وحقل الإدخال في سطر كامل تحته. كان الزران «مبلغ/
+                نسبة» يلتفان فوق بعضهما داخل السلة الضيقة (sv57-seg
+                يسمح بالالتفاف) فيتشوّه قسم الحساب كله. */}
+            <div className="pos-discount-block">
+              <div className="pos-discount-head">
+                <span className="pos-discount-label">
+                  <Icon name="percent" size={14} /> خصم الفاتورة
+                </span>
+                <span className="sv57-seg pos-discount-seg">
                   <button
                     type="button"
                     className={discountMode === 'amount' ? 'on' : ''}
@@ -1158,9 +1185,10 @@ export function PosScreen() {
                     ٪ نسبة
                   </button>
                 </span>
-              </span>
+              </div>
               {discountMode === 'amount' ? (
                 <input
+                  className="pos-discount-input"
                   type="number"
                   min={0}
                   step="0.01"
@@ -1172,6 +1200,7 @@ export function PosScreen() {
                 />
               ) : (
                 <input
+                  className="pos-discount-input"
                   type="number"
                   min={0}
                   max={100}
@@ -1188,11 +1217,10 @@ export function PosScreen() {
                     const amount =
                       Math.round(totals.subtotal * (pct / 100) * 100) / 100;
                     setDiscount(amount);
-                  }
-                }
+                  }}
                 />
               )}
-            </label>
+            </div>
             {discountMode === 'pct' &&
               discountInput > 0 &&
               totals.subtotal > 0 && (
@@ -1267,9 +1295,25 @@ export function PosScreen() {
       {/* ── لوحة الدفع (نقدي + بنوك ومحافظ — v70) ── */}
       {paySheet === 'cash' && (
         <div className="overlay" onClick={() => setPaySheet(null)}>
-          <div className="modal pos-pay" onClick={e => e.stopPropagation()}>
+          <div
+            className={`modal pos-pay ${
+              payStep === 'method' ? 'pos-pay-wide' : ''
+            }`}
+            onClick={e => e.stopPropagation()}>
             <div className="modal-head">
-              <b>الدفع — {selectedPayMethod.label}</b>
+              <b>
+                {payStep === 'method'
+                  ? 'اختر طريقة الدفع'
+                  : `الدفع — ${selectedPayMethod.label}`}
+              </b>
+              {payStep === 'pay' && payMethods.length > 1 && (
+                <button
+                  className="btn sm ghost"
+                  onClick={() => setPayStep('method')}
+                  title="الرجوع لاختيار طريقة الدفع — Esc">
+                  تغيير الطريقة
+                </button>
+              )}
               <button className="modal-x" onClick={() => setPaySheet(null)}>
                 <Icon name="x" size={15} />
               </button>
@@ -1280,120 +1324,152 @@ export function PosScreen() {
                 <b>{formatMoney(totals.total)}</b>
               </div>
 
-              {/* طرق الدفع المفعّلة — أسهم الكيبورد تنقل، Enter يؤكد */}
-              {payMethods.length > 1 && (
-                <div
-                  className="pos-pay-methods"
-                  role="radiogroup"
-                  aria-label="طريقة الدفع">
-                  {payMethods.map((method, i) => (
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={payMethodId === method.id}
-                      key={method.id}
-                      className={`pos-pay-method ${
-                        payMethodId === method.id ? 'sel' : ''
-                      }`}
-                      onClick={() => setPayMethodId(method.id)}>
-                      <PaymentMethodIcon method={method} size={34} />
-                      <span className="pm-name">{method.label}</span>
-                      <span className="pm-kbd-hint">
-                        {payMethodId === method.id
-                          ? 'Enter يؤكد'
-                          : i === 0
-                          ? 'الأسهم للتنقل'
-                          : ''}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {payMethodId === 'cash' ? (
+              {payStep === 'method' ? (
+                /* v71 (الجولة 75 #2): الخطوة الأولى — اختيار طريقة
+                 * الدفع قبل إدخال المبلغ (طلب التاجر الصريح). شبكة
+                 * بطاقات كبيرة بأيقونات الهوية؛ نقرة واحدة تختار
+                 * وتنتقل للمبلغ فوراً. */
                 <>
-                  <div className="pos-amount-display" dir="ltr">
-                    {amountText === '' ? '0' : amountText} ₪
-                  </div>
-                  <div className="pos-quickcash">
-                    <button
-                      className="btn sm"
-                      onClick={() => setAmountText(String(totals.total))}>
-                      كامل المبلغ
-                    </button>
-                    <button className="btn sm ghost" onClick={() => setAmountText('')}>
-                      تصفير
-                    </button>
-                  </div>
-                  <div className="pos-amount-keys">
-                    {AMOUNT_KEYPAD_KEYS.map((row, i) => (
-                      <React.Fragment key={i}>
-                        {row.map(k => (
-                          <button
-                            key={k}
-                            className="pos-key"
-                            onClick={() => setAmountText(t => applyAmountKey(t, k))}>
-                            {k}
-                          </button>
-                        ))}
-                      </React.Fragment>
+                  <div
+                    className="pos-pay-methods"
+                    role="radiogroup"
+                    aria-label="طريقة الدفع">
+                    {payMethods.map(method => (
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={payMethodId === method.id}
+                        key={method.id}
+                        className={`pos-pay-method ${
+                          payMethodId === method.id ? 'sel' : ''
+                        }`}
+                        onClick={() => {
+                          setPayMethodId(method.id);
+                          setPayStep('pay');
+                        }}>
+                        <PaymentMethodIcon method={method} size={42} />
+                        <span className="pm-name">{method.label}</span>
+                        <span className="pm-kind-label">
+                          {method.kind === 'cash'
+                            ? 'الخزينة النقدية'
+                            : method.kind === 'bank'
+                            ? 'تحويل بنكي'
+                            : 'محفظة إلكترونية'}
+                        </span>
+                      </button>
                     ))}
                   </div>
-                  {amountText !== '' && (
-                    <div className={`pos-change ${change < 0 ? 'neg' : ''}`}>
-                      {change < 0 ? (
-                        <>الباقي على الزبون: <b>{formatMoney(-change)}</b></>
-                      ) : (
-                        <>الباقي للزبون: <b>{formatMoney(change)}</b></>
+                  <div className="pos-pay-method-foot">
+                    <span className="pos-pay-kbd-hint">
+                      الأسهم للتنقل · Enter لاختيار الطريقة المعلمة · Esc
+                      للإلغاء
+                    </span>
+                    <button
+                      className="btn primary"
+                      onClick={() => setPayStep('pay')}>
+                      <Icon name="check" size={16} />
+                      متابعة بطريقة «{selectedPayMethod.label}»
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {payMethodId === 'cash' ? (
+                    <>
+                      <div className="pos-amount-display" dir="ltr">
+                        {amountText === '' ? '0' : amountText} ₪
+                      </div>
+                      <div className="pos-quickcash">
+                        <button
+                          className="btn sm"
+                          onClick={() => setAmountText(String(totals.total))}>
+                          كامل المبلغ
+                        </button>
+                        <button className="btn sm ghost" onClick={() => setAmountText('')}>
+                          تصفير
+                        </button>
+                      </div>
+                      <div className="pos-amount-keys">
+                        {AMOUNT_KEYPAD_KEYS.map((row, i) => (
+                          <React.Fragment key={i}>
+                            {row.map(k => (
+                              <button
+                                key={k}
+                                className="pos-key"
+                                onClick={() => setAmountText(t => applyAmountKey(t, k))}>
+                                {k}
+                              </button>
+                            ))}
+                          </React.Fragment>
+                        ))}
+                      </div>
+                      {amountText !== '' && (
+                        <div className={`pos-change ${change < 0 ? 'neg' : ''}`}>
+                          {change < 0 ? (
+                            <>الباقي على الزبون: <b>{formatMoney(-change)}</b></>
+                          ) : (
+                            <>الباقي للزبون: <b>{formatMoney(change)}</b></>
+                          )}
+                        </div>
                       )}
+                    </>
+                  ) : (
+                    <div className="pos-pay-confirm">
+                      <PaymentMethodIcon method={selectedPayMethod} size={52} />
+                      <div className="txts">
+                        <b>الدفع عبر {selectedPayMethod.label}</b>
+                        <span>
+                          يُسجَّل المبلغ كاملاً ({formatMoney(totals.total)}) على{' '}
+                          {selectedPayMethod.kind === 'bank'
+                            ? 'حسابك البنكي'
+                            : 'محفظتك الإلكترونية'}{' '}
+                          — تتبّعه من التقارير ← أرصدة طرق الدفع، ويُطبع على
+                          الإيصال.
+                        </span>
+                      </div>
                     </div>
                   )}
                 </>
-              ) : (
-                <div className="pos-pay-confirm">
-                  <PaymentMethodIcon method={selectedPayMethod} size={46} />
-                  <div className="txts">
-                    <b>الدفع عبر {selectedPayMethod.label}</b>
-                    <span>
-                      يُسجَّل المبلغ كاملاً ({formatMoney(totals.total)}) على{' '}
-                      {selectedPayMethod.kind === 'bank'
-                        ? 'حسابك البنكي'
-                        : 'محفظتك الإلكترونية'}{' '}
-                      — تتبّعه من التقارير ← أرصدة طرق الدفع، ويُطبع على
-                      الإيصال.
-                    </span>
-                  </div>
-                </div>
               )}
             </div>
-            <div className="modal-foot">
-              <button className="btn ghost" onClick={() => setPaySheet(null)}>
-                إلغاء — Esc
-              </button>
-              <span className="spacer" />
-              {payMethodId === 'cash' && (
+            {payStep === 'pay' && (
+              <div className="modal-foot">
                 <button
-                  className="btn"
-                  disabled={busy}
-                  onClick={() => void completeCashSale('')}>
-                  بدون مبلغ (كامل)
+                  className="btn ghost"
+                  onClick={() => {
+                    if (payMethods.length > 1) {
+                      setPayStep('method');
+                    } else {
+                      setPaySheet(null);
+                    }
+                  }}>
+                  {payMethods.length > 1 ? 'رجوع — Esc' : 'إلغاء — Esc'}
                 </button>
-              )}
-              <button
-                className="btn primary lg"
-                disabled={busy}
-                onClick={() =>
-                  void completeCashSale(
-                    payMethodId === 'cash' ? amountText : '',
-                    payMethodId,
-                  )
-                }>
-                <Icon name="check" size={17} />
-                {payMethodId === 'cash'
-                  ? 'تأكيد البيع وطباعة الإيصال'
-                  : `تأكيد الدفع عبر ${selectedPayMethod.label}`}
-              </button>
-            </div>
+                <span className="spacer" />
+                {payMethodId === 'cash' && (
+                  <button
+                    className="btn"
+                    disabled={busy}
+                    onClick={() => void completeCashSale('')}>
+                    بدون مبلغ (كامل)
+                  </button>
+                )}
+                <button
+                  className="btn primary lg"
+                  disabled={busy}
+                  onClick={() =>
+                    void completeCashSale(
+                      payMethodId === 'cash' ? amountText : '',
+                      payMethodId,
+                    )
+                  }>
+                  <Icon name="check" size={17} />
+                  {payMethodId === 'cash'
+                    ? 'تأكيد البيع وطباعة الإيصال'
+                    : `تأكيد الدفع عبر ${selectedPayMethod.label}`}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
