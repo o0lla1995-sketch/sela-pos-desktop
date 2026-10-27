@@ -680,9 +680,12 @@ export function PosScreen() {
   }, [products, search, categoryId]);
 
   const change = useMemo(() => {
-    if (amountText === '') return 0;
+    // v72 (الجولة 76 #8): صافي غير مقصوص — موجب = باقٍ للزبون
+    // (دفع أكثر)، سالب = متبقٍ عليه (دفع أقل/لم يدخل بعد). اللوحة
+    // الجانبية تعرض الاتجاهين بلونين.
+    if (amountText === '') return -totals.total;
     const paid = Number(amountText);
-    return Number.isFinite(paid) ? Math.max(0, paid - totals.total) : 0;
+    return Number.isFinite(paid) ? paid - totals.total : -totals.total;
   }, [amountText, totals.total]);
 
   // ── v61 (الجولة 26 #2): التنقل بأسهم الكيبورد في شبكة المنتجات ──
@@ -1147,45 +1150,43 @@ export function PosScreen() {
             ))}
           </div>
           <div className="pos-cart-math">
-            {/* v71 (الجولة 75 #1): صفّان منفصلان — التسمية والمبدّل في
-                سطر، وحقل الإدخال في سطر كامل تحته. كان الزران «مبلغ/
-                نسبة» يلتفان فوق بعضهما داخل السلة الضيقة (sv57-seg
-                يسمح بالالتفاف) فيتشوّه قسم الحساب كله. */}
-            <div className="pos-discount-block">
-              <div className="pos-discount-head">
-                <span className="pos-discount-label">
-                  <Icon name="percent" size={14} /> خصم الفاتورة
-                </span>
-                <span className="sv57-seg pos-discount-seg">
-                  <button
-                    type="button"
-                    className={discountMode === 'amount' ? 'on' : ''}
-                    onClick={() => {
-                      setDiscountMode('amount');
-                      setDiscountPctText('');
-                    }}
-                    title="إدخال الخصم كمبلغ ثابت بالشيكل">
-                    ₪ مبلغ
-                  </button>
-                  <button
-                    type="button"
-                    className={discountMode === 'pct' ? 'on' : ''}
-                    onClick={() => {
-                      setDiscountMode('pct');
-                      // ابدأ النسبة من الخصم الحالي إن وُجد.
-                      const pct =
-                        totals.subtotal > 0
-                          ? Math.round(
-                              (discountInput / totals.subtotal) * 1000,
-                            ) / 10
-                          : 0;
-                      setDiscountPctText(pct > 0 ? String(pct) : '');
-                    }}
-                    title="إدخال الخصم كنسبة مئوية من مجموع السلة">
-                    ٪ نسبة
-                  </button>
-                </span>
-              </div>
+            {/* v72 (الجولة 76 #1): صف واحد أفقي — المبدّل وحقل
+                الإدخال جنباً إلى جنب (طلب التاجر نصاً: «دمج زر الخصم
+                وحقل الإدخال في نفس الصف لتوفير المساحة الرأسية
+                وتسريع البيع»). التسمية الطويلة والسطر الثاني حُذفا. */}
+            <div className="pos-discount-row">
+              <span className="pos-discount-label" title="خصم الفاتورة">
+                <Icon name="percent" size={14} />
+              </span>
+              <span className="sv57-seg pos-discount-seg">
+                <button
+                  type="button"
+                  className={discountMode === 'amount' ? 'on' : ''}
+                  onClick={() => {
+                    setDiscountMode('amount');
+                    setDiscountPctText('');
+                  }}
+                  title="إدخال الخصم كمبلغ ثابت بالشيكل">
+                  ₪
+                </button>
+                <button
+                  type="button"
+                  className={discountMode === 'pct' ? 'on' : ''}
+                  onClick={() => {
+                    setDiscountMode('pct');
+                    // ابدأ النسبة من الخصم الحالي إن وُجد.
+                    const pct =
+                      totals.subtotal > 0
+                        ? Math.round(
+                            (discountInput / totals.subtotal) * 1000,
+                          ) / 10
+                        : 0;
+                    setDiscountPctText(pct > 0 ? String(pct) : '');
+                  }}
+                  title="إدخال الخصم كنسبة مئوية من مجموع السلة">
+                  ٪
+                </button>
+              </span>
               {discountMode === 'amount' ? (
                 <input
                   className="pos-discount-input"
@@ -1193,7 +1194,8 @@ export function PosScreen() {
                   min={0}
                   step="0.01"
                   value={discountInput === 0 ? '' : discountInput}
-                  placeholder="0"
+                  placeholder="خصم الفاتورة"
+                  title="خصم الفاتورة كمبلغ"
                   onChange={e =>
                     setDiscount(Math.max(0, Number(e.target.value) || 0))
                   }
@@ -1206,7 +1208,8 @@ export function PosScreen() {
                   max={100}
                   step="0.5"
                   value={discountPctText}
-                  placeholder="0"
+                  placeholder="نسبة الخصم ٪"
+                  title="خصم الفاتورة كنسبة مئوية"
                   onChange={e => {
                     const raw = e.target.value;
                     setDiscountPctText(raw);
@@ -1376,8 +1379,27 @@ export function PosScreen() {
                 <>
                   {payMethodId === 'cash' ? (
                     <>
-                      <div className="pos-amount-display" dir="ltr">
-                        {amountText === '' ? '0' : amountText} ₪
+                      {/* v72 (الجولة 76 #8): لوحتان متجاورتان — المبلغ
+                       * المدخل وبجانبه الباقي للزبون (طلب التاجر نصاً:
+                       * «تنقسم الشاشة إلى قسمين: شاشة عرض المبلغ
+                       * المدخل وبجانبها مباشرة شاشة عرض المبلغ الباقي
+                       * بدلاً من عرضها كملاحظة في الأسفل»). */}
+                      <div className="pos-pay-panels">
+                        <div className="pos-panel-amount">
+                          <span className="pos-panel-cap">المبلغ المدخل</span>
+                          <div className="pos-amount-display" dir="ltr">
+                            {amountText === '' ? '0' : amountText} ₪
+                          </div>
+                        </div>
+                        <div
+                          className={`pos-panel-change ${change < 0 ? 'neg' : ''}`}>
+                          <span className="pos-panel-cap">
+                            {change < 0 ? 'المتبقي على الزبون' : 'الباقي للزبون'}
+                          </span>
+                          <div className="pos-change-display" dir="ltr">
+                            {formatMoney(Math.abs(change))}
+                          </div>
+                        </div>
                       </div>
                       <div className="pos-quickcash">
                         <button
@@ -1403,15 +1425,6 @@ export function PosScreen() {
                           </React.Fragment>
                         ))}
                       </div>
-                      {amountText !== '' && (
-                        <div className={`pos-change ${change < 0 ? 'neg' : ''}`}>
-                          {change < 0 ? (
-                            <>الباقي على الزبون: <b>{formatMoney(-change)}</b></>
-                          ) : (
-                            <>الباقي للزبون: <b>{formatMoney(change)}</b></>
-                          )}
-                        </div>
-                      )}
                     </>
                   ) : (
                     <div className="pos-pay-confirm">
@@ -1423,7 +1436,7 @@ export function PosScreen() {
                           {selectedPayMethod.kind === 'bank'
                             ? 'حسابك البنكي'
                             : 'محفظتك الإلكترونية'}{' '}
-                          — تتبّعه من التقارير ← أرصدة طرق الدفع، ويُطبع على
+                          — تتبّعه من التقارير ← أرصدة المحافظ والبنوك، ويُطبع على
                           الإيصال.
                         </span>
                       </div>
@@ -2112,12 +2125,27 @@ function VariantPicker({
   const [color, setColor] = useState<string>(colors[0] ?? '');
   const [qty, setQty] = useState('1');
   const [bundleMode, setBundleMode] = useState(false);
+  /** v72 (الجولة 76 #7): التنقل السريع بين الخيارات — المقاس المعيّن
+   *  يُضاف بزر واحد (أو Enter) بدل قراءة الشبكة كلها؛ الأسهم تتنقل
+   *  بين الألوان والمقاسات حلقياً مع مؤشر موضع (٢/٥) وعرض السعر
+   *  والمخزون للمقاس المعيّن لحظة التنقل. */
+  const [sizeIdx, setSizeIdx] = useState(0);
 
-  const sizesOfColor = variants.filter(
-    v => v.kind === 'variant' && v.color === color,
+  const sizesOfColor = useMemo(
+    () => variants.filter(v => v.kind === 'variant' && v.color === color),
+    [variants, color],
   );
-  const sizeVariants = variants.filter(v => v.kind === 'size');
+  const sizeVariants = useMemo(
+    () => variants.filter(v => v.kind === 'size'),
+    [variants],
+  );
   const quantity = Math.max(1, Number(qty) || 1);
+
+  // المقاس المعروض حسب نمط المنتج (ملابس: ألوان/مقاسات — أحذية:
+  // مقاسات مجردة).
+  const activeList = isClothing ? sizesOfColor : sizeVariants;
+  const activeIdx = Math.min(sizeIdx, Math.max(0, activeList.length - 1));
+  const activeVariant = activeList[activeIdx] ?? null;
 
   const priceFor = (v: ProductVariant): number => {
     if (v.retail_price != null) return v.retail_price;
@@ -2125,6 +2153,69 @@ function VariantPicker({
       ? product.wholesale_price
       : product.retail_price;
   };
+
+  // تبديل اللون يعيد المقاس للأول (نفس سلوك النقر القديم).
+  const pickColor = useCallback(
+    (next: string) => {
+      setColor(next);
+      setSizeIdx(0);
+    },
+    [],
+  );
+  const cycleColor = useCallback(
+    (dir: 1 | -1) => {
+      if (colors.length === 0) return;
+      const idx = colors.indexOf(color);
+      const next = (idx + dir + colors.length) % colors.length;
+      pickColor(colors[next]);
+    },
+    [colors, color, pickColor],
+  );
+  const cycleSize = useCallback(
+    (dir: 1 | -1) => {
+      if (activeList.length === 0) return;
+      setSizeIdx(i => (i + dir + activeList.length) % activeList.length);
+    },
+    [activeList.length],
+  );
+  const addActive = useCallback(() => {
+    if (activeVariant == null) return;
+    onAdd(activeVariant, quantity, false, isClothing ? color : '');
+  }, [activeVariant, quantity, onAdd, isClothing, color]);
+
+  // لوحة مفاتيح النافذة: ←/→ ألوان، ↑/↓ مقاسات، Enter يضيف المعيّن،
+  // Esc يغلق — نفس لغة لوحة الدفع (تسريع البيع بلا ماوس).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        cycleColor(1);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        cycleColor(-1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        cycleSize(-1);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        cycleSize(1);
+      } else if (e.key === 'Enter' || e.key === 'NumpadEnter') {
+        e.preventDefault();
+        e.stopPropagation();
+        addActive();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [cycleColor, cycleSize, addActive, onClose]);
+
+  const colorPos = colors.length > 0 ? colors.indexOf(color) + 1 : 0;
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -2138,29 +2229,92 @@ function VariantPicker({
         <div className="modal-body">
           {isClothing ? (
             <>
-              <div className="pos-variant-label">اللون</div>
-              <div className="pos-variant-colors">
-                {colors.map(c => (
-                  <button
-                    key={c}
-                    className={`pos-color-chip ${c === color ? 'on' : ''}`}
-                    onClick={() => setColor(c)}>
-                    {c === '' ? 'بدون لون' : c}
-                  </button>
-                ))}
+              <div className="pos-variant-label">
+                اللون {colors.length > 1 ? `(${colorPos}/${colors.length})` : ''}
               </div>
-              <div className="pos-variant-label">المقاس</div>
+              <div className="pos-variant-nav">
+                <button
+                  className="btn sm ghost pos-nav-arrow"
+                  onClick={() => cycleColor(1)}
+                  disabled={colors.length <= 1}
+                  title="اللون السابق — سهم يسار">
+                  <Icon name="chevronRight" size={16} />
+                </button>
+                <div className="pos-variant-colors">
+                  {colors.map(c => (
+                    <button
+                      key={c}
+                      className={`pos-color-chip ${c === color ? 'on' : ''}`}
+                      onClick={() => pickColor(c)}>
+                      {c === '' ? 'بدون لون' : c}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="btn sm ghost pos-nav-arrow"
+                  onClick={() => cycleColor(-1)}
+                  disabled={colors.length <= 1}
+                  title="اللون التالي — سهم يمين">
+                  <Icon name="chevronLeft" size={16} />
+                </button>
+              </div>
+              <div className="pos-variant-label">
+                المقاس{' '}
+                {activeList.length > 0
+                  ? `(${activeIdx + 1}/${activeList.length})`
+                  : ''}
+              </div>
               <div className="pos-variant-sizes">
-                {sizesOfColor.map(v => (
+                {sizesOfColor.map((v, i) => (
                   <button
                     key={v.id}
-                    className="pos-variant-size"
-                    onClick={() => onAdd(v, quantity, false, color)}>
+                    className={`pos-variant-size ${i === activeIdx ? 'on' : ''}`}
+                    onClick={() => onAdd(v, quantity, false, color)}
+                    onDoubleClick={() => setSizeIdx(i)}
+                    title="نقرة: إضافة فورية للمقاس — نقرة مزدوجة: تعيينه معيّناً">
                     <b>{v.size === '' ? 'قياس واحد' : v.size}</b>
                     <span>مخزون {v.stock_quantity}</span>
                   </button>
                 ))}
               </div>
+              {/* شريط الخيار المعيّن — سعره ومخزونه وعدّاده وزر الإضافة */}
+              {activeVariant != null && (
+                <div className="pos-variant-active">
+                  <div className="txts">
+                    <b>
+                      {activeVariant.size === '' ? 'قياس واحد' : activeVariant.size}
+                      {color !== '' ? ` · ${color}` : ''}
+                    </b>
+                    <span>
+                      {formatMoney(priceFor(activeVariant))} · مخزون{' '}
+                      {activeVariant.stock_quantity}
+                    </span>
+                  </div>
+                  <div className="pos-variant-qty">
+                    <button
+                      className="btn sm ghost"
+                      onClick={() => setQty(q => String(Math.max(1, (Number(q) || 1) - 1)))}>
+                      −
+                    </button>
+                    <input
+                      type="number"
+                      min="1"
+                      value={qty}
+                      onChange={e => setQty(e.target.value)}
+                    />
+                    <button
+                      className="btn sm ghost"
+                      onClick={() => setQty(q => String((Number(q) || 1) + 1))}>
+                      +
+                    </button>
+                  </div>
+                  <button className="btn primary" onClick={addActive}>
+                    <Icon name="plus" size={15} />
+                    إضافة {quantity > 1 ? `×${quantity}` : ''}
+                    <span className="pos-fkey">Enter</span>
+                  </button>
+                </div>
+              )}
               <label className="pos-bundle-toggle">
                 <input
                   type="checkbox"
@@ -2188,22 +2342,67 @@ function VariantPicker({
               )}
             </>
           ) : (
-            <div className="pos-variant-sizes">
-              {sizeVariants.map(v => (
-                <button
-                  key={v.id}
-                  className="pos-variant-size"
-                  onClick={() => onAdd(v, quantity, false, '')}>
-                  <b>{v.size}</b>
-                  <span>{formatMoney(priceFor(v))}</span>
-                </button>
-              ))}
-            </div>
+            <>
+              <div className="pos-variant-label">
+                المقاس{' '}
+                {activeList.length > 0
+                  ? `(${activeIdx + 1}/${activeList.length})`
+                  : ''}
+              </div>
+              <div className="pos-variant-sizes">
+                {sizeVariants.map((v, i) => (
+                  <button
+                    key={v.id}
+                    className={`pos-variant-size ${i === activeIdx ? 'on' : ''}`}
+                    onClick={() => onAdd(v, quantity, false, '')}>
+                    <b>{v.size}</b>
+                    <span>{formatMoney(priceFor(v))}</span>
+                  </button>
+                ))}
+              </div>
+              {activeVariant != null && (
+                <div className="pos-variant-active">
+                  <div className="txts">
+                    <b>{activeVariant.size}</b>
+                    <span>
+                      {formatMoney(priceFor(activeVariant))} · مخزون{' '}
+                      {activeVariant.stock_quantity}
+                    </span>
+                  </div>
+                  <div className="pos-variant-qty">
+                    <button
+                      className="btn sm ghost"
+                      onClick={() => setQty(q => String(Math.max(1, (Number(q) || 1) - 1)))}>
+                      −
+                    </button>
+                    <input
+                      type="number"
+                      min="1"
+                      value={qty}
+                      onChange={e => setQty(e.target.value)}
+                    />
+                    <button
+                      className="btn sm ghost"
+                      onClick={() => setQty(q => String((Number(q) || 1) + 1))}>
+                      +
+                    </button>
+                  </div>
+                  <button className="btn primary" onClick={addActive}>
+                    <Icon name="plus" size={15} />
+                    إضافة {quantity > 1 ? `×${quantity}` : ''}
+                    <span className="pos-fkey">Enter</span>
+                  </button>
+                </div>
+              )}
+            </>
           )}
+          <div className="pos-variant-kbd-hint">
+            الأسهم للتنقل بين الألوان والمقاسات · Enter يضيف المعيّن · Esc إغلاق
+          </div>
         </div>
         <div className="modal-foot">
           <button className="btn ghost" onClick={onClose}>
-            إلغاء
+            إلغاء — Esc
           </button>
         </div>
       </div>

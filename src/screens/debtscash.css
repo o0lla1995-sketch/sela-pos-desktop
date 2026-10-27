@@ -455,3 +455,17 @@ table.dc-table tbody tr:hover {
     grid-column: span 1;
   }
 }
+
+/* v72 (الجولة 76 #5): رقاقة قناة الحركة في سجل الخزينة — تمييز
+   السندات التي جرت على بنك/محفظة عن النقدية. */
+.dc-method-chip {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 2px 8px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  vertical-align: middle;
+}

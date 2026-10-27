@@ -948,6 +948,9 @@ export interface CashMovementRecord {
   note: string | null;
   amount_minor: number;
   auth_method: CashAuthMethod;
+  /** v72 (الجولة 76 #5): قناة المصدر/الوجهة — نقدي أو معرف بنك/
+   *  محفظة. null = نقدي (كل الحركات المسجلة قبل v72). */
+  payment_method?: string | null;
   /** v46: مسار صورة السند المرفقة (ملف محلي داخل filesDir/vouchers)
    *  أو null — تُلتقط بالكاميرا أو تُختار من المعرض عند التسجيل. */
   photo_path?: string | null;

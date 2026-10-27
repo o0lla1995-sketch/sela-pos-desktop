@@ -737,3 +737,153 @@
   text-align: center;
   margin-top: 22px;
 }
+
+/* ═══════════ v72 (الجولة 76 #3): إعادة تصميم نافذة الإرجاع/الاستبدال ═══════════
+   نافذة أوسع بعمودين (أسطر الفاتورة يميناً، البدائل والتسوية يساراً)
+   وتذييل ثابت بالقيم الحية — أبعاد مريحة وتدفق أسرع للكاشير. */
+.ih-ret-modal .modal-body {
+  padding-top: 10px;
+}
+.ih-ret-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 820px) {
+  .ih-ret-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.ih-ret-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.ih-ret-col-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink);
+  padding: 2px 0;
+}
+.ih-ret-col-title svg {
+  color: var(--brand);
+}
+.ih-ret-line.picked {
+  border-color: color-mix(in srgb, var(--brand) 55%, var(--line));
+  background: var(--brand-soft);
+}
+.ih-ret-lines {
+  max-height: 46vh;
+}
+/* بطاقة التسوية — قناة تحصيل/إرجاع قيمة المرتجع أو فرق الاستبدال */
+.ih-settle-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 12px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.ih-settle-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 800;
+}
+.ih-settle-title svg {
+  color: var(--brand);
+}
+.ih-settle-channels {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 7px;
+}
+.ih-settle-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 9px 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition),
+    box-shadow var(--transition);
+}
+.ih-settle-chip:hover {
+  border-color: color-mix(in srgb, var(--brand) 55%, var(--line));
+}
+.ih-settle-chip.on {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: var(--ring);
+}
+.ih-settle-chip .name {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.ih-settle-hint {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  line-height: 1.75;
+}
+/* حالة «لا بدائل بعد» داخل عمود الاستبدال */
+.ih-exchange-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  padding: 22px 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.ih-exchange-empty svg {
+  color: var(--muted);
+}
+.ih-exchange-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  padding: 2px 2px 0;
+}
+.ih-exchange-total b {
+  font-size: 15px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+/* التذييل الجديد — قيم حية + أزرار على سطر واحد مرن */
+.ih-ret-foot {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.ih-ret-values {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-width: 260px;
+}
+.ih-ret-actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}

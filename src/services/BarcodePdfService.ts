@@ -26,6 +26,7 @@
 
 import {encodeBarcodeBars} from './BarcodeService';
 import {formatMoney} from '../core/format';
+import {buildImagePagesPdf} from './pdfWriter';
 
 /** بند ملصق — منتج واحد بعدد نسخه. */
 export interface BarcodeLabelEntry {
@@ -462,135 +463,11 @@ export async function buildLabelsPdf(
     }
   }
 
-  // ── كائنات PDF: 1 كتالوج، 2 صفحات، ثم لكل صفحة (صورة + محتوى
-  //    + صفحة) بترتيب ثابت قابل للتجميع الخطي البسيط. ──
-  const encoder = new TextEncoder();
-  const parts: {text?: string; bytes?: Uint8Array}[] = [];
-  const offsets: number[] = [];
-  let runningLength = 0;
-
-  const pushText = (text: string): number => {
-    offsets.push(runningLength);
-    parts.push({text});
-    runningLength += encoder.encode(text).length;
-    return offsets.length; // معرف الكائن = ترتيبه
-  };
-  const pushBinary = (prefix: string, bytes: Uint8Array, suffix: string): number => {
-    offsets.push(runningLength);
-    parts.push({text: prefix});
-    const prefixLength = encoder.encode(prefix).length;
-    parts.push({bytes});
-    parts.push({text: suffix});
-    runningLength += prefixLength + bytes.length + encoder.encode(suffix).length;
-    return offsets.length;
-  };
-
-  const header = '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n';
-  parts.push({text: header});
-  runningLength += encoder.encode(header).length;
-
-  const catalogId = 1;
-  const pagesId = 2;
-  // يُحجز ترتيبهما أولاً ثم تُكتب أجسادهما بعد معرفة معرفات الصفحات.
-  offsets.push(runningLength);
-  parts.push({text: '__CATALOG__'});
-  runningLength += 0; // يُستبدل لاحقاً بطوله الفعلي
-  const catalogOffsetIndex = offsets.length - 1;
-
-  offsets.push(runningLength);
-  parts.push({text: '__PAGES__'});
-  const pagesOffsetIndex = offsets.length - 1;
-
-  const pageIds: number[] = [];
-  for (const image of images) {
-    const imageId = offsets.length + 1;
-    pushBinary(
-      `${imageId} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${image.widthPx} /Height ${image.heightPx} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /${image.filter} /Length ${image.data.length} >>\nstream\n`,
-      image.data,
-      '\nendstream\nendobj\n',
-    );
-    const contentBody = `q ${image.wPt.toFixed(2)} 0 0 ${image.hPt.toFixed(2)} 0 0 cm /Im Do Q`;
-    const contentId = offsets.length + 1;
-    pushText(
-      `${contentId} 0 obj\n<< /Length ${contentBody.length} >>\nstream\n${contentBody}\nendstream\nendobj\n`,
-    );
-    const pageId = offsets.length + 1;
-    pushText(
-      `${pageId} 0 obj\n<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${image.wPt.toFixed(2)} ${image.hPt.toFixed(2)}] /Resources << /XObject << /Im ${imageId} 0 R >> >> /Contents ${contentId} 0 R >>\nendobj\n`,
-    );
-    pageIds.push(pageId);
-  }
-
-  // استبدال العنصرين المحجوزين بأجساد فعلية (مع ضبط الإزاحات).
-  const catalogBody = `${catalogId} 0 obj\n<< /Type /Catalog /Pages ${pagesId} 0 R >>\nendobj\n`;
-  parts[catalogOffsetIndex + 1] = {text: catalogBody};
-  offsets[catalogOffsetIndex] = runningLength;
-  runningLength += encoder.encode(catalogBody).length;
-  // إزاحة كائن الصفحات الآن بعد الكتالوج.
-  offsets[pagesOffsetIndex] = runningLength;
-  const pagesBody = `${pagesId} 0 obj\n<< /Type /Pages /Kids [${pageIds
-    .map(id => `${id} 0 R`)
-    .join(' ')}] /Count ${pageIds.length} >>\nendobj\n`;
-  parts[pagesOffsetIndex + 1] = {text: pagesBody};
-  runningLength += encoder.encode(pagesBody).length;
-
-  // لكن الصور حُجزت قبل حساب إزاحات الكتالوج/الصفحات الصحيحة —
-  // الإزاحات تُحسب من جديد تسلسلياً على القطع النهائية.
-  const finalOffsets: number[] = [];
-  let cursor = encoder.encode(header).length;
-  // parts: [header, __CATALOG__ slot, __PAGES__ slot, ...rest]
-  // الترتيب الفيزيائي: header ثم كتالوج ثم صفحات ثم باقي الكائنات
-  // بترتيب إدراجها (صورة/محتوى/صفحة...).
-  for (let i = 1; i < parts.length; i += 1) {
-    const part = parts[i];
-    if (part.text != null) {
-      if (i - 1 < 2) {
-        // أول عنصرين نصيان بعد الترويسة = الكتالوج والصفحات.
-        finalOffsets.push(cursor);
-        cursor += encoder.encode(part.text).length;
-      } else {
-        // كائن نصي — إزاحته ترتيبها.
-        finalOffsets.push(cursor);
-        cursor += encoder.encode(part.text).length;
-      }
-    } else if (part.bytes != null) {
-      cursor += part.bytes.length;
-    }
-  }
-
-  const xrefOffset = cursor;
-  const objectCount = finalOffsets.length + 1;
-  const xrefLines = [`xref\n0 ${objectCount}\n0000000000 65535 f \n`];
-  for (const offset of finalOffsets) {
-    xrefLines.push(`${String(offset).padStart(10, '0')} 00000 n \n`);
-  }
-  const trailer = `trailer\n<< /Size ${objectCount} /Root ${catalogId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-  parts.push({text: xrefLines.join('') + trailer});
-
-  // ── الدمج النهائي في مصفوفة بايتات واحدة ──
-  const totalLength = parts.reduce(
-    (sum, part) =>
-      sum +
-      (part.bytes != null
-        ? part.bytes.length
-        : encoder.encode(part.text ?? '').length),
-    0,
-  );
-  const out = new Uint8Array(totalLength);
-  let writeAt = 0;
-  for (const part of parts) {
-    if (part.bytes != null) {
-      out.set(part.bytes, writeAt);
-      writeAt += part.bytes.length;
-    } else {
-      const encoded = encoder.encode(part.text ?? '');
-      out.set(encoded, writeAt);
-      writeAt += encoded.length;
-    }
-  }
-
+  // ── v72 (الجولة 76 #2): الكاتب المشترك المُصلَح — كان جدول xref
+  //    يُدخل لواحق endstream/endobj كإدخالات زائفة فتظهر الصفحات
+  //    فارغة/مكسورة في القارئات والطابعات الصارمة.
   return {
-    bytes: out,
+    bytes: buildImagePagesPdf(images),
     totalLabels: plan.totalLabels,
     pages: images.length,
   };

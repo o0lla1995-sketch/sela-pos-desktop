@@ -1025,7 +1025,7 @@ async function handleSale(
   }
   const paymentType = body.paymentType === 'debt' ? 'debt' : 'cash';
   // v71 (الجولة 75 #10): طريقة الدفع (بنك/محفظة) من الكاشير — تُخزن
-  // مع الفاتورة وتدخل أرصدة طرق الدفع؛ الدين لا يقبلها (لا مال دخل).
+  // مع الفاتورة وتدخل أرصدة المحافظ والبنوك؛ الدين لا يقبلها (لا مال دخل).
   let paymentMethod: string | undefined;
   if (paymentType === 'cash') {
     const requested = body.paymentMethod ? String(body.paymentMethod) : '';

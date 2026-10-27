@@ -1,13 +1,21 @@
 /**
- * components/Select.tsx — قائمة منسدلة مخصّصة v61 (الجولة 26 #7).
+ * components/Select.tsx — قائمة منسدلة مخصّصة v72 (الجولة 76 #4).
  * ─────────────────────────────────────────────────────────────────
  * بديل الـ <select> الأصلي بكل مواضعه: القائمة المنبثقة الأصلية
  * تبدو نظامية وغير متناسقة مع هوية سيلا، وضيّقة داخل جداول
  * وحدات البيع (ملاحظة التاجر: «القائمة المنسدلة مضغوطة»).
  *
  *  • زر مغلق بنفس لغة حقول النظام + سهم يفتح القائمة.
- *  • قائمة منبثقة عائمة (لا تضغطها الخلايا) بعرض الزر على الأقل،
- *    تنقلب للأعلى إن ضاق المساح أسفله، وتمرر داخلياً عند الطول.
+ *  • v72 (الجولة 76 #4 — طلب التاجر نصاً: «القوائم المنسدلة داخل
+ *    النوافذ المنبثقة مقصوصة/مخفية»): القائمة تُرسم الآن عبر
+ *    createPortal على <body> بتموضع fixed محسوب من موضع الزر —
+ *    فلا تُقصها حواف النافذة (modal) ولا حواف الجداول ولا أي
+ *    حاوية قابلة للتمرير مهما كان عمق التداخل. كان النمط القديم
+ *    position:absolute داخل الزر، وoverflow-y:auto على .modal
+ *    يقصّ كل ما تجاوز حدّه — نافذة «تسجيل سداد دين» و«تسجيل
+ *    مصروف» أشهر الضحايا (المحافظ والبنوك وفئات المصروف تختفي).
+ *    تُعاد الإزاحة لحظياً عند التمرير/تحجيم النافذة، وتنقلب
+ *    للأعلى إن ضاق المساح أسفل الزر.
  *  • لوحة مفاتيح كاملة: ↑/↓ تحرّكان الخيار النشط، Enter يختاره،
  *    Escape يغلق، Home/End للطرفين، وطباعة حرف تقفز لأول مطابقة.
  *  • ARIA (combobox/listbox/option) وتمييز الخيار المختار.
@@ -23,6 +31,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import {createPortal} from 'react-dom';
 import {Icon} from './Icon';
 
 export interface SelectOption {
@@ -52,6 +61,15 @@ export function selaSelectOpen(): boolean {
   );
 }
 
+/** إحداثيات القائمة العائمة (fixed) — تُحسب من مستطيل الزر. */
+interface FloatRect {
+  top: number;
+  left: number;
+  width: number;
+  maxWidth: number;
+  flipUp: boolean;
+}
+
 export function Select({
   value,
   onChange,
@@ -77,8 +95,9 @@ export function Select({
 }) {
   const [open, setOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
-  const [flipUp, setFlipUp] = useState(false);
+  const [floatRect, setFloatRect] = useState<FloatRect | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const typeAheadRef = useRef({chars: '', at: 0});
 
@@ -104,11 +123,56 @@ export function Select({
     return () => markOpen(-1);
   }, [open]);
 
-  // إغلاق بالنقر خارج القائمة.
+  // ── v72: حساب تموضع القائمة العائمة من مستطيل الزر ──
+  // fixed على مستوى الـ body: لا قصّ من overflow أي حاوية كانت،
+  // والحد الوحيد هو حافة نافذة التطبيق نفسها.
+  const measure = useCallback(() => {
+    const btn = btnRef.current;
+    if (btn == null) return;
+    const rect = btn.getBoundingClientRect();
+    const gap = 6;
+    const listMaxH = 264;
+    const below = Math.max(0, window.innerHeight - rect.bottom - gap);
+    const flipUp = below < Math.min(listMaxH, 180) && rect.top > below;
+    setFloatRect({
+      top: flipUp
+        ? Math.max(8, rect.top - gap - Math.min(listMaxH, rect.top - 8))
+        : rect.bottom + gap,
+      left: rect.left,
+      width: rect.width,
+      maxWidth: Math.min(360, window.innerWidth - 16),
+      flipUp,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    measure();
+    // تمركز الخيار المختار أول فتح.
+    const el = listRef.current?.children[selectedIdx] as
+      | HTMLElement
+      | undefined;
+    el?.scrollIntoView({block: 'nearest'});
+    // إعادة القياس لحظياً مع أي تمرير/تحجيم (النافذة نفسها قد
+    // تتمرر أو يتحرك الزر تحتها).
+    window.addEventListener('scroll', measure, true);
+    window.addEventListener('resize', measure);
+    return () => {
+      window.removeEventListener('scroll', measure, true);
+      window.removeEventListener('resize', measure);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // إغلاق بالنقر خارج القائمة (الزر نفسه يبدّل).
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (wrapRef.current?.contains(e.target as Node) !== true) {
+      const target = e.target as Node;
+      if (
+        wrapRef.current?.contains(target) !== true &&
+        listRef.current?.contains(target) !== true
+      ) {
         closeList();
       }
     };
@@ -134,7 +198,11 @@ export function Select({
       ) {
         return;
       }
-      if (wrapRef.current?.contains(e.target as Node) === true) {
+      const target = e.target as Node;
+      if (
+        wrapRef.current?.contains(target) === true ||
+        listRef.current?.contains(target) === true
+      ) {
         return; // ملك معالج القائمة — يختار/يغلق بنفسه.
       }
       e.stopPropagation();
@@ -143,39 +211,13 @@ export function Select({
     return () => window.removeEventListener('keydown', onWinKey, true);
   }, [open]);
 
-  // اتجاه القائمة: أسفل الزر، أو أعلاه إن ضاقت المساحة — والمساحة
-  // تُقاس حتى أقرب سلف قابل للتمرير (نافذة حوار بارتفاع محدود) لا
-  // حتى حافة الشاشة فقط، كي لا تُقص القائمة داخل النافذة.
-  useLayoutEffect(() => {
-    if (!open) return;
-    const wrap = wrapRef.current;
-    if (wrap == null) return;
-    let limitBottom = window.innerHeight;
-    let node: HTMLElement | null = wrap.parentElement;
-    while (node != null && node !== document.body) {
-      const overflowY = window.getComputedStyle(node).overflowY;
-      if (overflowY === 'auto' || overflowY === 'scroll') {
-        limitBottom = Math.min(limitBottom, node.getBoundingClientRect().bottom);
-        break;
-      }
-      node = node.parentElement;
-    }
-    const rect = wrap.getBoundingClientRect();
-    const below = Math.max(0, limitBottom - rect.bottom);
-    setFlipUp(below < 220 && rect.top > below);
-    // تمركز الخيار المختار أول فتح.
-    const el = listRef.current?.children[selectedIdx] as HTMLElement | undefined;
-    el?.scrollIntoView({block: 'nearest'});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
   const choose = useCallback(
     (idx: number): void => {
       const option = options[idx];
       if (option == null || option.disabled) return;
       onChange(option.value);
       closeList();
-      wrapRef.current?.querySelector<HTMLButtonElement>('.sela-select-btn')?.focus();
+      btnRef.current?.focus();
     },
     [options, onChange, closeList],
   );
@@ -240,15 +282,58 @@ export function Select({
           break;
       }
     },
-    [disabled, open, options.length, activeIdx, choose, closeList, openList, typeAhead],
+    [
+      disabled,
+      open,
+      options.length,
+      activeIdx,
+      choose,
+      closeList,
+      openList,
+      typeAhead,
+    ],
   );
 
   // تمرير الخيار النشط داخل القائمة الطويلة.
   useEffect(() => {
     if (!open) return;
-    const el = listRef.current?.children[activeIdx] as HTMLElement | undefined;
+    const el = listRef.current?.children[activeIdx] as
+      | HTMLElement
+      | undefined;
     el?.scrollIntoView({block: 'nearest'});
   }, [activeIdx, open]);
+
+  const listBox = open ? (
+    <div
+      ref={listRef}
+      className={`sela-select-list ${floatRect?.flipUp ? 'flip-up' : ''}`}
+      style={{
+        position: 'fixed',
+        top: floatRect?.top ?? -9999,
+        left: floatRect?.left ?? -9999,
+        minWidth: floatRect?.width ?? 0,
+        maxWidth: floatRect?.maxWidth ?? 320,
+      }}
+      role="listbox"
+      aria-label={ariaLabel}>
+      {options.map((option, idx) => (
+        <button
+          type="button"
+          key={option.value}
+          role="option"
+          aria-selected={option.value === value}
+          disabled={option.disabled}
+          className={`sela-select-opt ${
+            idx === activeIdx ? 'active' : ''
+          } ${option.value === value ? 'selected' : ''}`}
+          onMouseEnter={() => setActiveIdx(idx)}
+          onClick={() => choose(idx)}>
+          <span>{option.label}</span>
+          {option.value === value && <Icon name="check" size={14} />}
+        </button>
+      ))}
+    </div>
+  ) : null;
 
   return (
     <div
@@ -257,6 +342,7 @@ export function Select({
       style={style}>
       <button
         type="button"
+        ref={btnRef}
         id={id}
         className="sela-select-btn"
         disabled={disabled}
@@ -273,30 +359,7 @@ export function Select({
           <Icon name="chevronDown" size={15} />
         </span>
       </button>
-      {open && (
-        <div
-          ref={listRef}
-          className={`sela-select-list ${flipUp ? 'flip-up' : ''}`}
-          role="listbox"
-          aria-label={ariaLabel}>
-          {options.map((option, idx) => (
-            <button
-              type="button"
-              key={option.value}
-              role="option"
-              aria-selected={option.value === value}
-              disabled={option.disabled}
-              className={`sela-select-opt ${
-                idx === activeIdx ? 'active' : ''
-              } ${option.value === value ? 'selected' : ''}`}
-              onMouseEnter={() => setActiveIdx(idx)}
-              onClick={() => choose(idx)}>
-              <span>{option.label}</span>
-              {option.value === value && <Icon name="check" size={14} />}
-            </button>
-          ))}
-        </div>
-      )}
+      {listBox != null && createPortal(listBox, document.body)}
     </div>
   );
 }

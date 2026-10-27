@@ -35,6 +35,7 @@ import {
   ReportRepo,
   type DebtSalesSummary,
 } from '../database/repositories/ReportRepo';
+import {CashService} from '../services/CashService';
 import {
   dayMonthLabel,
   formatDateTime,
@@ -292,11 +293,20 @@ export function ReportsScreen() {
   const [treasury, setTreasury] = useState<TreasurySnapshot | null>(null);
   const [debt, setDebt] = useState<DebtSalesSummary | null>(null);
   const [detail, setDetail] = useState<SalesDetailRow>([]);
-  /** v70 (الجولة 74 #2): أرصدة طرق الدفع بالفترة — كم دخل كل بنك/
+  /** v70 (الجولة 74 #2): أرصدة المحافظ والبنوك بالفترة — كم دخل كل بنك/
    *  محفظة/الخزينة النقدية وكم رُدّ منه. */
+  /** v72 (الجولة 76 #6): الرصيد الصافي الكامل لكل قناة — مبيعات
+   *  وسدادات وإيداعات مقابل مرتجعات ومسحوبات ومصروفات. */
   const [payMethods, setPayMethods] = useState<
-    Awaited<ReturnType<typeof ReportRepo.paymentMethodTotals>>
+    Awaited<ReturnType<typeof ReportRepo.methodLedgerTotals>>
   >([]);
+  /** نافذة تفاصيل قناة واحدة (سجل الحركات + كشف PDF). */
+  const [methodDetail, setMethodDetail] = useState<string | null>(null);
+  const [methodRows, setMethodRows] = useState<
+    Awaited<ReturnType<typeof ReportRepo.methodLedgerRows>>
+  >([]);
+  const [methodBusy, setMethodBusy] = useState(false);
+  const [methodPdfBusy, setMethodPdfBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [exportBusy, setExportBusy] = useState(false);
 
@@ -322,7 +332,7 @@ export function ReportsScreen() {
           ReportService.treasurySnapshot(),
           ReportRepo.debtSalesSummary(rangeFor(key, custom)),
           ReportService.salesDetail(key, custom),
-          ReportRepo.paymentMethodTotals(rangeFor(key, custom)),
+          ReportRepo.methodLedgerTotals(rangeFor(key, custom)),
         ]);
       setBundle(nextBundle);
       setTreasury(nextTreasury);
@@ -339,6 +349,66 @@ export function ReportsScreen() {
       setLoading(false);
     }
   }, [rangeKey, from, to, toast]);
+
+  // v72 (الجولة 76 #6): نطاق الفترة الحالي (تغذية نافذة القناة).
+  const currentRange = useMemo(
+    () => rangeFor(rangeKey, rangeKey === 'custom' ? {from, to} : undefined),
+    [rangeKey, from, to],
+  );
+
+  // v72 (الجولة 76 #6): تحميل سجل القناة التفصيلي عند فتح نافذتها.
+  useEffect(() => {
+    if (methodDetail == null) {
+      setMethodRows([]);
+      return;
+    }
+    let mounted = true;
+    setMethodBusy(true);
+    ReportRepo.methodLedgerRows(currentRange, methodDetail)
+      .then(rows => {
+        if (mounted) {
+          setMethodRows(rows);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setMethodRows([]);
+          toast('تعذر تحميل حركات القناة', 'error', 5000);
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setMethodBusy(false);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [methodDetail, currentRange, toast]);
+
+  /** كشف PDF لقناة الفترة الحالية — نفس الفلاتر المعروضة. */
+  const exportMethodPdf = useCallback(async () => {
+    if (methodDetail == null || methodPdfBusy) {
+      return;
+    }
+    setMethodPdfBusy(true);
+    try {
+      const path = await CashService.exportMethodStatementPdf(
+        methodDetail,
+        currentRange.from,
+        currentRange.to,
+      );
+      toast(`أُنشئ كشف القناة: ${path}`, 'success', 6000);
+    } catch (e) {
+      toast(
+        e instanceof Error ? e.message : 'تعذر إنشاء كشف القناة',
+        'error',
+        6000,
+      );
+    } finally {
+      setMethodPdfBusy(false);
+    }
+  }, [methodDetail, methodPdfBusy, currentRange, toast]);
 
   useEffect(() => {
     void load();
@@ -960,16 +1030,16 @@ export function ReportsScreen() {
             </div>
           )}
 
-          {/* ── 5.5) أرصدة طرق الدفع (v70 — الجولة 74 #2) ──── */}
+          {/* ── 5.5) أرصدة المحافظ والبنوك (v70 → v72 الجولة 76 #6) ── */}
           {payMethods.length > 0 && (
             <div className="card sv57-sec">
               <div className="sv57-sec-head">
                 <div>
-                  <div className="sv57-sec-title">أرصدة طرق الدفع</div>
+                  <div className="sv57-sec-title">أرصدة المحافظ والبنوك — الرصيد الصافي</div>
                   <div className="sv57-sec-hint">
-                    كم دخل كل حساب بنكي/محفظة إلكترونية/الخزينة النقدية
-                    خلال الفترة، وكم رُدّ منه — طابقه مع كشف حسابك البنكي
-                    والمحافظ
+                    لكل قناة خلال الفترة: الوارد (مبيعات + سدادات ديون +
+                    إيداعات) مطروحاً منه الصادر (مرتجعات وفروق استبدال +
+                    مسحوبات + مصروفات) — اضغط القناة لسجلها التفصيلي وكشفها
                   </div>
                 </div>
               </div>
@@ -977,7 +1047,12 @@ export function ReportsScreen() {
                 {payMethods.map(row => {
                   const method = displayMethod(row.method);
                   return (
-                    <div className="sv57-kpi" key={row.method}>
+                    <button
+                      type="button"
+                      className="sv57-kpi sv57-kpi-btn"
+                      key={row.method}
+                      onClick={() => setMethodDetail(row.method)}
+                      title={`سجل ${method.label} التفصيلي وكشف PDF`}>
                       <span
                         className="label"
                         style={{
@@ -995,25 +1070,30 @@ export function ReportsScreen() {
                         {formatMoney(row.net)}
                       </span>
                       <span className="sub">
-                        {row.invoices > 0
-                          ? `${row.invoices} فاتورة · دخل ${formatMoney(
-                              row.inflow,
+                        {row.salesCount > 0 || row.repaymentsCount > 0
+                          ? `دخل ${formatMoney(
+                              row.salesIn + row.repaymentsIn,
+                            )}${row.depositsIn > 0 ? ` + إيداعات ${formatMoney(row.depositsIn)}` : ''}`
+                          : 'لا عمليات بيع'}
+                        {row.refundsOut > 0
+                          ? ` · رُدّ ${formatMoney(row.refundsOut)}`
+                          : ''}
+                        {row.withdrawalsOut + row.expensesOut > 0
+                          ? ` · خرج ${formatMoney(
+                              row.withdrawalsOut + row.expensesOut,
                             )}`
-                          : 'لا فواتير'}
-                        {row.refunded > 0
-                          ? ` · رُدّ ${formatMoney(row.refunded)}`
                           : ''}
                       </span>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
               <div className="sv57-note">
-                الأرقام من منظور حركة المال: الوارد بفواتير البيع بتاريخها
-                والمرتجعات بتاريخ معالجتها — فواتير الدين لا تُحتسب عند
-                البيع (لم يُدفع منها شيء بعد)، لكن سداداتها تدخل برصيد
-                الطريقة التي سُددت بها يوم السداد. المبيعات المسجلة قبل
-                إصدار طرق الدفع محسوبة نقدياً.
+                منظور حركة المال: كل مبلغ يدخل القناة أو يخرج منها بتاريخه
+                الفعلي — فواتير الدين لا تُحتسب عند البيع (لم يُدفع منها شيء
+                بعد) لكن سداداتها تدخل بقناتها يوم السداد، ومرتجعات/فروق
+                الاستبدال تُخصم من قناة التسوية التي اخترتها. المبيعات
+                المسجلة قبل إصدار طرق الدفع محسوبة نقدياً.
               </div>
             </div>
           )}
@@ -1344,6 +1424,110 @@ export function ReportsScreen() {
           <div className="sv57-empty">
             <div className="icon"><Icon name="chart" size={30} /></div>
             لا بيانات — جرّب نطاقاً آخر أو أعد التحديث
+          </div>
+        </div>
+      )}
+
+      {/* v72 (الجولة 76 #6): نافذة سجل القناة التفصيلي — كل حركة
+          داخل/خارج مع رصيد متسلسل + كشف PDF احترافي بنفس الفلاتر. */}
+      {methodDetail != null && (
+        <div
+          className="overlay"
+          onClick={e => e.target === e.currentTarget && setMethodDetail(null)}>
+          <div className="modal lg" style={{width: 'min(860px, 94vw)'}}>
+            <div className="modal-head">
+              <span className="sv57-sec-title" style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                <PaymentMethodIcon
+                  method={displayMethod(methodDetail)}
+                  size={26}
+                />
+                سجل {displayMethod(methodDetail).label} —{' '}
+                {currentRange.from} ← {currentRange.to}
+              </span>
+              <button
+                className="btn sm ghost"
+                onClick={() => setMethodDetail(null)}>
+                إغلاق
+              </button>
+            </div>
+            <div className="modal-body">
+              {methodBusy ? (
+                <div className="sv57-empty">جارٍ تحميل حركات القناة…</div>
+              ) : methodRows.length === 0 ? (
+                <div className="sv57-empty">لا حركات على هذه القناة بالفترة</div>
+              ) : (
+                <div className="sv57-table-wrap">
+                  <table className="sv57-table">
+                    <thead>
+                      <tr>
+                        <th>النوع</th>
+                        <th>المرجع</th>
+                        <th>التاريخ</th>
+                        <th>وارد</th>
+                        <th>صادر</th>
+                        <th>الرصيد</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {methodRows.map((row, i) => (
+                        <tr key={`${row.ref}-${i}`}>
+                          <td className="mut">{row.label}</td>
+                          <td className="num mut">{row.ref}</td>
+                          <td className="mut">
+                            {formatDateTime(row.at)}
+                          </td>
+                          <td
+                            className="num"
+                            style={{
+                              color:
+                                row.amountIn > 0 ? 'var(--ok)' : undefined,
+                            }}>
+                            {row.amountIn > 0
+                              ? formatMoney(row.amountIn)
+                              : '—'}
+                          </td>
+                          <td
+                            className="num"
+                            style={{
+                              color:
+                                row.amountOut > 0 ? 'var(--danger)' : undefined,
+                            }}>
+                            {row.amountOut > 0
+                              ? formatMoney(row.amountOut)
+                              : '—'}
+                          </td>
+                          <td className="num">
+                            {formatMoney(
+                              methodRows
+                                .slice(0, i + 1)
+                                .reduce(
+                                  (sum, r) => sum + r.amountIn - r.amountOut,
+                                  0,
+                                ),
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <div className="modal-foot">
+              <button
+                className="btn ghost"
+                onClick={() => setMethodDetail(null)}>
+                إغلاق
+              </button>
+              <span className="spacer" />
+              <button
+                className="btn"
+                disabled={methodPdfBusy || methodRows.length === 0}
+                onClick={() => void exportMethodPdf()}>
+                {methodPdfBusy ? 'جارٍ البناء…' : 'كشف PDF'}
+                <Icon name="printer" size={15} />
+              </button>
+            </div>
           </div>
         </div>
       )}

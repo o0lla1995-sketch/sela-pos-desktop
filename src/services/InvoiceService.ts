@@ -1065,6 +1065,10 @@ export const InvoiceService = {
     saleId: number;
     lines: ReturnLineInput[];
     refundMethod: 'none' | 'cash';
+    /** v72 (الجولة 76 #3): قناة تسوية الاسترداد/فرق الاستبدال —
+     *  نقدي أو بنك/محفظة مفعّلة. تُمرر كما هي إلى SaleRepo فتُختم
+     *  على صف RET والسجل. null/غير محدد = الطريقة الأصلية. */
+    settleMethod?: string | null;
     note?: string | null;
     print: boolean;
     receiptSettings: ReceiptSettings;
@@ -1303,6 +1307,7 @@ export const InvoiceService = {
           invoiceRef: prep.sale.invoice_number,
           book: prep.book,
           refundMethod: input.refundMethod,
+          settleMethod: input.settleMethod ?? null,
           discountRatio: prep.discountRatio,
           lines: input.lines,
           silaReversal,

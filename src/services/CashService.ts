@@ -33,6 +33,7 @@ import {useSettingsStore} from '../stores/settingsStore';
 import {usePrinterStore} from '../stores/printerStore';
 import {logDiag} from '../core/diagnostics';
 import {formatDateTime, localToday} from '../core/format';
+import {paymentMethodById} from '../core/paymentMethods';
 import type {
   CashAuthMethod,
   CashMovementKind,
@@ -113,7 +114,9 @@ function receiptSettings(): ReceiptSettings {
 }
 
 /** Prints the movement's slip — a print failure NEVER rolls the
- *  movement back (the same discipline as sales/returns). */
+ *  movement back (the same discipline as sales/returns).
+ *  v72 (الجولة 76 #5): رصيد ما بعد الحركة يُحسب لقناة الحركة
+ *  نفسها — الدرج للنقدي، ورصيد البنك/المحفظة لغيره. */
 async function printMovementSlip(
   movement: CashMovementRecord,
 ): Promise<void> {
@@ -122,9 +125,11 @@ async function printMovementSlip(
     return;
   }
   try {
-    const treasury = await ReportService.treasurySnapshot();
+    const channel =
+      movement.payment_method ?? 'cash';
+    const channelAfter = await ReportService.methodBalanceNow(channel);
     const job = buildCashMovementJob(
-      {movement, drawerAfterMinor: Math.round(treasury.cashTotal * 100)},
+      {movement, drawerAfterMinor: Math.round(channelAfter * 100)},
       receiptSettings(),
     );
     await ThermalPrinterService.printJob(job, 'receipt');
@@ -147,9 +152,11 @@ export const CashService = {
     if (status !== 'connected') {
       throw new Error('لا توجد طابعة متصلة — أوصل الطابعة أولاً');
     }
-    const treasury = await ReportService.treasurySnapshot();
+    // v72: رصيد القناة نفسها (الدرج للنقدي).
+    const channel = movement.payment_method ?? 'cash';
+    const channelAfter = await ReportService.methodBalanceNow(channel);
     const job = buildCashMovementJob(
-      {movement, drawerAfterMinor: Math.round(treasury.cashTotal * 100)},
+      {movement, drawerAfterMinor: Math.round(channelAfter * 100)},
       receiptSettings(),
     );
     await ThermalPrinterService.printJob(job, 'receipt');
@@ -157,18 +164,24 @@ export const CashService = {
 
   /** Records a business EXPENSE paid from the drawer. v27: the
    *  caller's passed security gate lands in the audit trail.
-   *  v46: photoPath (اختياري) — مسار صورة السند المرفقة. */
+   *  v46: photoPath (اختياري) — مسار صورة السند المرفقة.
+   *  v72 (الجولة 76 #5): paymentMethod — القناة التي دُفع منها
+   *  المصروف (نقدي افتراضياً أو بنك/محفظة مفعّلة)؛ السقف يُفحص
+   *  على رصيد تلك القناة نفسها ويُميّز في السندات والتقارير. */
   async recordExpense(input: {
     category: string;
     note?: string | null;
     amountMinor: number;
     authMethod?: CashAuthMethod;
     photoPath?: string | null;
+    paymentMethod?: string | null;
   }): Promise<CashMovementRecord> {
-    const treasury = await ReportService.treasurySnapshot();
-    if (input.amountMinor > Math.round(treasury.cashTotal * 100)) {
+    const method = input.paymentMethod ?? 'cash';
+    const balance = await ReportService.methodBalanceNow(method);
+    if (input.amountMinor > Math.round(balance * 100)) {
+      const methodInfo = paymentMethodById(method);
       throw new Error(
-        `المبلغ أكبر من النقد الموجود بالخزينة (${treasury.cashTotal.toFixed(
+        `المبلغ أكبر من الرصيد المتاح في ${methodInfo.label} (${balance.toFixed(
           2,
         )} ₪) — لا يمكن تسجيل مصروف بأكثر من الموجود`,
       );
@@ -180,6 +193,7 @@ export const CashService = {
       amountMinor: input.amountMinor,
       authMethod: input.authMethod ?? 'none',
       photoPath: input.photoPath ?? null,
+      paymentMethod: method,
     });
     await printMovementSlip(movement);
     return movement;
@@ -188,20 +202,24 @@ export const CashService = {
   /** Records the OWNER's cash WITHDRAWAL — only after the caller
    *  passed the security gate (the auth method is written into the
    *  row so the audit trail matches the prompt that approved it).
-   *  v46: photoPath (اختياري) — مسار صورة السند المرفقة. */
+   *  v46: photoPath (اختياري) — مسار صورة السند المرفقة.
+   *  v72 (الجولة 76 #5): paymentMethod — القناة التي سُحب منها
+   *  (نقدي أو بنك/محفظة)؛ السقف على رصيد القناة نفسها. */
   async recordWithdrawal(input: {
     note?: string | null;
     amountMinor: number;
     authMethod: CashAuthMethod;
     photoPath?: string | null;
+    paymentMethod?: string | null;
   }): Promise<CashMovementRecord> {
-    const treasury = await ReportService.treasurySnapshot();
-    const drawerMinor = Math.round(treasury.cashTotal * 100);
-    if (input.amountMinor > drawerMinor) {
+    const method = input.paymentMethod ?? 'cash';
+    const balance = await ReportService.methodBalanceNow(method);
+    if (input.amountMinor > Math.round(balance * 100)) {
+      const methodInfo = paymentMethodById(method);
       throw new Error(
-        `لا يمكن سحب أكثر من النقد الموجود بالخزينة (${(
-          drawerMinor / 100
-        ).toFixed(2)} ₪) — راجع المبلغ أو أودع نقداً أولاً`,
+        `لا يمكن سحب أكثر من الرصيد المتاح في ${methodInfo.label} (${balance.toFixed(
+          2,
+        )} ₪) — راجع المبلغ أو أودع فيها أولاً`,
       );
     }
     const movement = await CashRepo.add({
@@ -211,6 +229,7 @@ export const CashService = {
       amountMinor: input.amountMinor,
       authMethod: input.authMethod,
       photoPath: input.photoPath ?? null,
+      paymentMethod: method,
     });
     await printMovementSlip(movement);
     return movement;
@@ -218,12 +237,15 @@ export const CashService = {
 
   /** Records cash put BACK into the drawer (تغذية خزينة). v27: the
    *  caller's passed security gate lands in the audit trail.
-   *  v46: photoPath (اختياري) — مسار صورة السند المرفقة. */
+   *  v46: photoPath (اختياري) — مسار صورة السند المرفقة.
+   *  v72 (الجولة 76 #5): paymentMethod — القناة التي أُودع فيها
+   *  (نقدي أو بنك/محفظة — إيداع نقدي من الربح للمحفظة مثلاً). */
   async recordDeposit(input: {
     note?: string | null;
     amountMinor: number;
     authMethod?: CashAuthMethod;
     photoPath?: string | null;
+    paymentMethod?: string | null;
   }): Promise<CashMovementRecord> {
     const movement = await CashRepo.add({
       kind: 'deposit',
@@ -232,6 +254,7 @@ export const CashService = {
       amountMinor: input.amountMinor,
       authMethod: input.authMethod ?? 'none',
       photoPath: input.photoPath ?? null,
+      paymentMethod: input.paymentMethod ?? 'cash',
     });
     await printMovementSlip(movement);
     return movement;
@@ -258,103 +281,76 @@ export const CashService = {
         kind: 'all',
         limit: opts?.full ? 10000 : 500,
       }),
-      CashRepo.totalsFor(from, to),
+      // v72: الكشف الشامل بكل القنوات (كل السندات المعروضة).
+      CashRepo.totalsFor(from, to, 'all'),
       CashRepo.categoryTotals(from, to),
     ]);
     return {rows, totals, categories};
   },
 
   /** The expected drawer cash AFTER every recorded movement — the
-   *  hard ceiling every withdrawal/expense is checked against. */
+   *  hard ceiling every withdrawal/expense is checked against.
+   *  v72: صار عام القنوات — methodBalanceNow(methodId). */
   async drawerNowMinor(): Promise<number> {
     const treasury = await ReportService.treasurySnapshot();
     return Math.round(treasury.cashTotal * 100);
   },
 
-  /** v25 (round-32 #3): builds the A4 PDF statement for the period
-   *  and saves it into Downloads/SmartVisionPOS — the archival copy
-   *  (the merchant's «كشف pdf كامل خاص السحب والمصروفات»). */
+  /** v25 (round-32 #3) → v72 (الجولة 76 #5): كشف حركات الخزينة
+   *  للفترة كملف PDF احترافي حقيقي (Canvas A4 150DPI + الكاتب
+   *  المُصلَح) — كان HTML بسيطاً بعده؛ الآن: بطاقات ملخص + تفصيل
+   *  الفئات + جدول السندات بقناة كل سند (نقدي/بنك/محفظة) + صف
+   *  الإجماليات + النقد الحالي. يُحفظ بحوار أصلي ويعيد المسار. */
   async exportStatementPdf(from: string, to: string): Promise<string> {
     const data = await this.statement(from, to, {full: true});
     const treasury = await ReportService.treasurySnapshot();
     const settings = useSettingsStore.getState().settings;
-    const shekels = (minor: number) => `${(minor / 100).toFixed(2)} ₪`;
-    const payload = {
+    const {exportTreasuryStatementPdf} = await import('./StatementPdf');
+    const {path} = await exportTreasuryStatementPdf({
       storeName: settings.storeName || 'sela',
-      title: 'كشف المصروفات والسحوبات من الخزينة',
-      periodLabel: `${from} إلى ${to}`,
-      generatedAt: formatDateTime(localToday()),
-      summary: [
-        {label: 'المصروفات', value: shekels(data.totals.expensesMinor)},
-        {
-          label: 'عدد المصروفات',
-          value: `${data.totals.expensesCount}`,
-        },
-        {label: 'المسحوبات', value: shekels(data.totals.withdrawalsMinor)},
-        {
-          label: 'عدد المسحوبات',
-          value: `${data.totals.withdrawalsCount}`,
-        },
-        {label: 'الإيداعات', value: shekels(data.totals.depositsMinor)},
-        {
-          label: 'صافي الحركة',
-          value: shekels(data.totals.netMinor),
-        },
-        {
-          label: 'النقد المتوقع بالخزينة الآن',
-          value: shekels(Math.round(treasury.cashTotal * 100)),
-        },
-      ],
-      categories: data.categories.map(cat => ({
-        name: cat.category,
-        count: `${cat.count}`,
-        total: shekels(cat.totalMinor),
-      })),
-      rows: data.rows.map(row => ({
-        ref: row.ref,
-        kind:
-          row.kind === 'withdrawal'
-            ? 'سحب رصيد'
-            : row.kind === 'deposit'
-            ? 'إيداع'
-            : 'مصروف',
-        category: row.category,
-        note: row.note ?? '',
-        amount: `${row.kind === 'deposit' ? '+' : '-'}${shekels(
-          row.amount_minor,
-        )}`,
-        date: row.created_at,
-      })),
-      footer: 'سجل حركات الخزينة — وثيقة محاسبية غير قابلة للتعديل',
-    };
-    const fileName = `sela-cash-statement-${from}-to-${to}.pdf`;
-    const platform = requirePlatformUtils();
-    const location = await platform.createStatementPdf(
-      fileName,
-      JSON.stringify(payload),
-    );
+      from,
+      to,
+      rows: data.rows,
+      totals: data.totals,
+      categories: data.categories,
+      drawerNow: treasury.cashTotal,
+    });
     logDiag('cash', `أُنشئ كشف PDF للمصروفات والسحوبات (${from} → ${to})`);
-    return location;
+    return path;
   },
 
-  /** Opens the system share sheet for the exported statement PDF
-   *  (WhatsApp / email / any PDF printer app). */
-  async shareStatementPdf(from: string, to: string): Promise<void> {
-    const fileName = `sela-cash-statement-${from}-to-${to}.pdf`;
-    await requirePlatformUtils().shareExportedPdf(
-      fileName,
-      'كشف المصروفات والسحوبات',
+  /** v72 (الجولة 76 #6): كشف تفصيلي لقناة واحدة (بنك/محفظة/نقد)
+   *  للفترة — كل المقبوضات والمدفوعات برصيد متسلسل، PDF حقيقي
+   *  بنفس هوية كشوف الخزينة. */
+  async exportMethodStatementPdf(
+    methodId: string,
+    from: string,
+    to: string,
+  ): Promise<string> {
+    const {ReportRepo} = await import(
+      '../database/repositories/ReportRepo'
     );
-  },
-
-  /** Prints the exported statement via Android's system print
-   *  framework (cloud / Wi-Fi / USB printers). */
-  async printStatementPdf(from: string, to: string): Promise<void> {
-    const fileName = `sela-cash-statement-${from}-to-${to}.pdf`;
-    await requirePlatformUtils().printExportedPdf(
-      fileName,
-      `كشف الخزينة ${from} → ${to}`,
+    const [rows, totals, balanceNow] = await Promise.all([
+      ReportRepo.methodLedgerRows({from, to}, methodId),
+      ReportRepo.methodLedgerTotals({from, to}),
+      ReportService.methodBalanceNow(methodId),
+    ]);
+    const settings = useSettingsStore.getState().settings;
+    const {exportMethodStatementPdf: build} = await import('./StatementPdf');
+    const methodTotals = totals.find(
+      (row: {method: string; net: number}) => row.method === methodId,
     );
+    const {path} = await build({
+      storeName: settings.storeName || 'sela',
+      from,
+      to,
+      methodId,
+      rows,
+      net: methodTotals?.net ?? 0,
+      balanceNow,
+    });
+    logDiag('cash', `أُنشئ كشف PDF للقناة ${methodId} (${from} → ${to})`);
+    return path;
   },
 
   /** Prints the period statement on the THERMAL printer — the

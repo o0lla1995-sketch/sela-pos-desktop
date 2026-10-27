@@ -10,6 +10,7 @@
 import {ReceiptBuilder} from './escpos';
 import type {ReceiptSettings} from './receipt';
 import {RECEIPT_WIDTH_58, RECEIPT_WIDTH_80} from '../../core/config';
+import {paymentMethodById} from '../../core/paymentMethods';
 import type {
   CashAuthMethod,
   CashMovementKind,
@@ -17,9 +18,9 @@ import type {
 } from '../../core/types';
 
 const TITLES: Record<CashMovementKind, string> = {
-  expense: 'سند مصروف من الخزينة',
-  withdrawal: 'سند سحب رصيد من الخزينة',
-  deposit: 'سند إيداع نقدي للخزينة',
+  expense: 'سند مصروف',
+  withdrawal: 'سند سحب رصيد',
+  deposit: 'سند إيداع',
   online_collection: 'سند تحصيل طلب أونلاين',
   online_refund: 'سند استرداد مرتجع طلب أونلاين',
 };
@@ -32,7 +33,8 @@ const AUTH_LABEL: Record<CashAuthMethod, string> = {
 
 export interface CashMovementReceiptData {
   movement: CashMovementRecord;
-  /** The drawer's expected cash AFTER this movement (info line). */
+  /** The drawer's expected cash AFTER this movement (info line).
+   *  v72: للبنوك/المحافظ يُمرر رصيد القناة نفسها بدل الدرج. */
   drawerAfterMinor: number | null;
 }
 
@@ -78,6 +80,12 @@ export function buildCashMovementJob(
     .separator(width)
     .align(2)
     .textLine(`Category: ${m.category}`);
+  // v72 (الجولة 76 #5): قناة المصدر/الوجهة على السند — النقدي
+  // «الخزينة النقدية» وإلا اسم البنك/المحفظة.
+  const channel = paymentMethodById(m.payment_method ?? 'cash');
+  b.align(2).textLine(
+    `Via: ${channel.id === 'cash' ? 'الخزينة النقدية' : channel.label}`,
+  );
   if (m.note) {
     b.align(2).textLine(`Note: ${m.note}`);
   }
@@ -85,7 +93,11 @@ export function buildCashMovementJob(
   if (data.drawerAfterMinor != null) {
     b.separator(width)
       .align(2)
-      .textLine(`Drawer now: ${(data.drawerAfterMinor / 100).toFixed(2)} ILS`);
+      .textLine(
+        `${
+          channel.id === 'cash' ? 'Drawer now' : `${channel.label} now`
+        }: ${(data.drawerAfterMinor / 100).toFixed(2)} ILS`,
+      );
   }
   b.separator(width)
     .align(1)

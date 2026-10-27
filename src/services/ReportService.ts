@@ -381,6 +381,10 @@ export const ReportService = {
       returnReversalsTotalMinor,
       cashTotals,
       onlineInvoicedNetMinor,
+      // v72 (الجولة 76 #5): ما يجب استثناؤه من معادلة الدرج النقدي —
+      // المبيعات/المرتجعات على البنوك والمحافظ والسدادّات عبرها
+      // (قبل هذا كانت تُحسب داخل «النقد المتوقع بالخزينة» خطأً).
+      nonCashExclusions,
     ] = await Promise.all([
       SaleRepo.allTimeRevenue(),
       SilaRepo.totals(),
@@ -394,9 +398,11 @@ export const ReportService = {
       SilaRepo.returnReversalsTotal(),
       // v25 (round-32 #3): the cash-movements ledger (expenses /
       // withdrawals / deposits) — the drawer's non-sale life.
+      // v72: نقدية فقط — حركات القنوات الأخرى لها أرصدتها المستقلة.
       CashRepo.allTimeTotals(),
       // v48 (الجولة 56): المفتور الأونلاين صافياً من المرتجعات.
       OnlineRepo.invoicedNetTotal(),
+      ReportRepo.nonCashExclusionsMinor(),
     ]);
     // Credit sales that never entered the drawer as cash at sale
     // time: the whole INV-D queue (credit-covered parts return via
@@ -476,11 +482,34 @@ export const ReportService = {
         cashTotals.onlineRefundsMinor / 100 +
         cashTotals.depositsMinor / 100 -
         cashTotals.expensesMinor / 100 -
-        cashTotals.withdrawalsMinor / 100,
+        cashTotals.withdrawalsMinor / 100 -
+        // v72 (الجولة 76 #5): تصحيح القنوات — المبيعات والمرتجعات
+        // والسدادّات التي جرت على بنك/محفظة لا علاقة لها بالدرج
+        // النقدي: تُستبعد بإشاراتها (بيع موجب، مرتجع سالب، سداد
+        // موجب) فيبقى الرقم نقدياً خالصاً.
+        nonCashExclusions.salesNetMinor / 100 -
+        nonCashExclusions.repaymentsMinor / 100,
     };
   },
 
   async salesDetail(key: ReportRangeKey, custom?: DateRange) {
     return ReportRepo.salesDetail(rangeFor(key, custom));
+  },
+
+  /** v72 (الجولة 76 #5): الرصيد اللحظي لقناة دفع واحدة — سقف السحب
+   *  والمصروف منها. النقدي = معادلة الخزينة الكاملة (بكل مكوناتها
+   *  من قسائم وحملات وأونلاين)؛ البنك/المحفظة = دفتر القناة الصافي
+   *  عبر التاريخ: مبيعات + سدادات + إيداعات − مرتجعات − مسحوبات −
+   *  مصروفات — نفس منظور كشف الحساب البنكي تماماً. */
+  async methodBalanceNow(methodId: string): Promise<number> {
+    if (methodId === 'cash' || methodId === '') {
+      const treasury = await this.treasurySnapshot();
+      return treasury.cashTotal;
+    }
+    const rows = await ReportRepo.methodLedgerTotals({
+      from: '2000-01-01',
+      to: '2999-12-31',
+    });
+    return rows.find(row => row.method === methodId)?.net ?? 0;
   },
 };

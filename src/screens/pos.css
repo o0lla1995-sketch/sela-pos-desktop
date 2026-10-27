@@ -529,29 +529,22 @@
   gap: 6px;
   background: var(--surface);
 }
-/* v71 (الجولة 75 #1): صفّان منفصلان — التسمية والمبدّل فوق، والإدخال
-   بعرض كامل تحت. كان الزران يلتفان عمودياً في السلة الضيقة. */
-.pos-discount-block {
+/* v72 (الجولة 76 #1): صف واحد أفقي — أيقونة + مبدّل ₪/٪ + حقل
+   الإدخال بعرض مرن. وفرَ سطراً كاملاً من المساحة الرأسية داخل
+   السلة (طلب التاجر: دمج زر الخصم وحقل الإدخال بنفس الصف). */
+.pos-discount-row {
   display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 2px 0 4px;
-  border-bottom: 1px dashed var(--line-soft);
-}
-.pos-discount-head {
-  display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+  padding: 2px 0 6px;
+  border-bottom: 1px dashed var(--line-soft);
 }
 .pos-discount-label {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
+  justify-content: center;
   color: var(--ink-soft);
-  font-weight: 700;
-  white-space: nowrap;
+  flex-shrink: 0;
 }
 .pos-discount-seg {
   flex-wrap: nowrap;
@@ -560,17 +553,20 @@
   flex-shrink: 0;
 }
 .pos-discount-seg button {
-  padding: 4px 11px;
-  font-size: 11.5px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 800;
   white-space: nowrap;
 }
 .pos-discount-input {
-  width: 100%;
-  padding: 8px 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   color: var(--ink);
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 :root[data-theme='light'] .pos-discount-input {
@@ -681,6 +677,55 @@
 }
 :root[data-theme='light'] .pos-amount-display {
   background: var(--surface);
+}
+/* v72 (الجولة 76 #8): لوحتا الدفع النقدي — المبلغ المدخل وبجانبه
+   الباقي/المتبقي للزبون (لوحة مستقلة بلونها بدل ملاحظة سفلية). */
+.pos-pay-panels {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 10px;
+  align-items: stretch;
+}
+.pos-panel-amount,
+.pos-panel-change {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+.pos-panel-change {
+  background: var(--ok-soft, rgba(22, 163, 74, 0.1));
+  border-color: color-mix(in srgb, var(--ok, #16a34a) 35%, var(--line));
+}
+.pos-panel-change.neg {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 40%, var(--line));
+}
+.pos-panel-cap {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--ink-soft);
+  text-align: center;
+}
+.pos-panel-change .pos-panel-cap {
+  color: var(--ok, #16a34a);
+}
+.pos-panel-change.neg .pos-panel-cap {
+  color: var(--danger);
+}
+.pos-change-display {
+  font-size: 26px;
+  font-weight: 800;
+  text-align: center;
+  color: var(--ok, #16a34a);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+}
+.pos-panel-change.neg .pos-change-display {
+  color: var(--danger);
 }
 /* v61 (الجولة 26 #3): ملاحظة «اكتب من الكيبورد» حُذفت من لوحتي
    الدفع والوزن بطلب التاجر — Enter يبقى يعمل بلا إعلان. */
@@ -908,9 +953,78 @@
   border-color: var(--brand);
   background: var(--surface);
 }
+/* v72 (الجولة 76 #7): المقاس المعيّن (الأسهم/النقر المزدوج) — إطار
+   العلامة وإبراز كامل قبل إضافته بـ Enter. */
+.pos-variant-size.on {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: var(--ring);
+}
 .pos-variant-size span {
   font-size: 11.5px;
   color: var(--muted);
+}
+/* شريط التنقل بين الألوان — سهمان + رقائق الألوان بينهما. */
+.pos-variant-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pos-variant-nav .pos-variant-colors {
+  flex: 1;
+  flex-wrap: wrap;
+}
+.pos-nav-arrow {
+  flex-shrink: 0;
+}
+/* شريط الخيار المعيّن: النصوص + عدّاد الكمية + زر الإضافة الكبير. */
+.pos-variant-active {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 10px 12px;
+}
+.pos-variant-active .txts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pos-variant-active .txts b {
+  font-size: 14.5px;
+}
+.pos-variant-active .txts span {
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+.pos-variant-qty {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.pos-variant-qty input {
+  width: 58px;
+  text-align: center;
+  padding: 7px 6px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+:root[data-theme='light'] .pos-variant-qty input {
+  background: var(--surface);
+}
+.pos-variant-kbd-hint {
+  font-size: 11.5px;
+  color: var(--muted);
+  text-align: center;
 }
 .pos-bundle-toggle {
   display: flex;

@@ -19,6 +19,11 @@
 
 import {formatMoney, formatDateTime} from '../core/format';
 import {paymentMethodById} from '../core/paymentMethods';
+import {
+  buildImagePagesPdf,
+  deflateCanvasPage,
+  ensureFontsReady,
+} from './pdfWriter';
 
 /** صف فاتورة واحد داخل التقرير. */
 export interface InvoiceReportRow {
@@ -432,43 +437,10 @@ function renderPages(payload: InvoicesReportPayload): HTMLCanvasElement[] {
   return pages;
 }
 
-/* ── ضغط الصفحات وكتابة PDF (نفس نمط BarcodePdfService) ── */
-
-async function deflateRgb(
-  canvas: HTMLCanvasElement,
-): Promise<Uint8Array | null> {
-  try {
-    const ctx = canvas.getContext('2d');
-    if (ctx == null) return null;
-    const {data} = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const buffer = await new Response(
-      new ReadableStream({
-        start(controller) {
-          controller.enqueue(data);
-          controller.close();
-        },
-      }),
-    ).arrayBuffer();
-    const cs = new CompressionStream('deflate');
-    const compressed = await new Response(
-      new Blob([buffer]).stream().pipeThrough(cs),
-    ).arrayBuffer();
-    return new Uint8Array(compressed);
-  } catch {
-    return null;
-  }
-}
-
-function pageToJpeg(canvas: HTMLCanvasElement): Uint8Array {
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-  const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
+/* ── ضغط الصفحات وكتابة PDF (v72: الكاتب المشترك المُصلَح) ──
+ * كان جدول xref يُبنى بلواحق endstream/endobj فتُكسر الصفحات
+ * بعد الفلترة (طلب التاجر: «صفحات فارغة/مكسورة/لا تُطبع») —
+ * الكاتب المشترك يحسب إزاحات الكائنات المعلَّمة فقط. */
 
 export async function buildInvoicesReportPdf(
   payload: InvoicesReportPayload,
@@ -476,131 +448,21 @@ export async function buildInvoicesReportPdf(
   if (payload.rows.length === 0) {
     throw new Error('لا فواتير تطابق الفلاتر الحالية — غيّر الفلاتر ثم أعد');
   }
+  // v72: انتظار خطوط الواجهة كي يشكّل الـ Canvas العربية بخط
+  // التطبيق نفسه (لا خط نظام بديل).
+  await ensureFontsReady();
   const canvases = renderPages(payload);
-  const images: {
-    data: Uint8Array;
-    filter: 'FlateDecode' | 'DCTDecode';
-  }[] = [];
-  for (const canvas of canvases) {
-    const deflated = await deflateRgb(canvas);
-    images.push(
-      deflated != null
-        ? {data: deflated, filter: 'FlateDecode'}
-        : {data: pageToJpeg(canvas), filter: 'DCTDecode'},
-    );
-  }
-
-  const encoder = new TextEncoder();
-  const parts: {text?: string; bytes?: Uint8Array}[] = [];
-  const offsets: number[] = [];
-  let runningLength = 0;
-
-  const pushText = (textBody: string): number => {
-    offsets.push(runningLength);
-    parts.push({text: textBody});
-    runningLength += encoder.encode(textBody).length;
-    return offsets.length;
-  };
-  const pushBinary = (
-    prefix: string,
-    bytes: Uint8Array,
-    suffix: string,
-  ): number => {
-    offsets.push(runningLength);
-    parts.push({text: prefix});
-    const prefixLength = encoder.encode(prefix).length;
-    parts.push({bytes});
-    parts.push({text: suffix});
-    runningLength += prefixLength + bytes.length + encoder.encode(suffix).length;
-    return offsets.length;
-  };
-
-  const header = '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n';
-  parts.push({text: header});
-  runningLength += encoder.encode(header).length;
-
-  const catalogId = 1;
-  const pagesId = 2;
-  offsets.push(runningLength);
-  parts.push({text: '__CATALOG__'});
-  const catalogOffsetIndex = offsets.length - 1;
-  offsets.push(runningLength);
-  parts.push({text: '__PAGES__'});
-  const pagesOffsetIndex = offsets.length - 1;
-
-  const pageIds: number[] = [];
-  for (const image of images) {
-    const imageId = offsets.length + 1;
-    pushBinary(
-      `${imageId} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${PAGE_W_PX} /Height ${PAGE_H_PX} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /${image.filter} /Length ${image.data.length} >>\nstream\n`,
-      image.data,
-      '\nendstream\nendobj\n',
-    );
-    const contentBody = `q ${PAGE_W_PT.toFixed(2)} 0 0 ${PAGE_H_PT.toFixed(2)} 0 0 cm /Im Do Q`;
-    const contentId = offsets.length + 1;
-    pushText(
-      `${contentId} 0 obj\n<< /Length ${contentBody.length} >>\nstream\n${contentBody}\nendstream\nendobj\n`,
-    );
-    const pageId = offsets.length + 1;
-    pushText(
-      `${pageId} 0 obj\n<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${PAGE_W_PT.toFixed(2)} ${PAGE_H_PT.toFixed(2)}] /Resources << /XObject << /Im ${imageId} 0 R >> >> /Contents ${contentId} 0 R >>\nendobj\n`,
-    );
-    pageIds.push(pageId);
-  }
-
-  const catalogBody = `${catalogId} 0 obj\n<< /Type /Catalog /Pages ${pagesId} 0 R >>\nendobj\n`;
-  parts[catalogOffsetIndex + 1] = {text: catalogBody};
-  offsets[catalogOffsetIndex] = runningLength;
-  runningLength += encoder.encode(catalogBody).length;
-  offsets[pagesOffsetIndex] = runningLength;
-  const pagesBody = `${pagesId} 0 obj\n<< /Type /Pages /Kids [${pageIds
-    .map(id => `${id} 0 R`)
-    .join(' ')}] /Count ${pageIds.length} >>\nendobj\n`;
-  parts[pagesOffsetIndex + 1] = {text: pagesBody};
-  runningLength += encoder.encode(pagesBody).length;
-
-  const finalOffsets: number[] = [];
-  let cursor = encoder.encode(header).length;
-  for (let i = 1; i < parts.length; i += 1) {
-    const part = parts[i];
-    if (part.text != null) {
-      finalOffsets.push(cursor);
-      cursor += encoder.encode(part.text).length;
-    } else if (part.bytes != null) {
-      cursor += part.bytes.length;
-    }
-  }
-
-  const xrefOffset = cursor;
-  const objectCount = finalOffsets.length + 1;
-  const xrefLines = [`xref\n0 ${objectCount}\n0000000000 65535 f \n`];
-  for (const offset of finalOffsets) {
-    xrefLines.push(`${String(offset).padStart(10, '0')} 00000 n \n`);
-  }
-  const trailer = `trailer\n<< /Size ${objectCount} /Root ${catalogId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-  parts.push({text: xrefLines.join('') + trailer});
-
-  const totalLength = parts.reduce(
-    (sum, part) =>
-      sum +
-      (part.bytes != null
-        ? part.bytes.length
-        : encoder.encode(part.text ?? '').length),
-    0,
+  const images = await Promise.all(canvases.map(deflateCanvasPage));
+  const bytes = buildImagePagesPdf(
+    images.map(image => ({
+      ...image,
+      widthPx: PAGE_W_PX,
+      heightPx: PAGE_H_PX,
+      wPt: PAGE_W_PT,
+      hPt: PAGE_H_PT,
+    })),
   );
-  const out = new Uint8Array(totalLength);
-  let writeAt = 0;
-  for (const part of parts) {
-    if (part.bytes != null) {
-      out.set(part.bytes, writeAt);
-      writeAt += part.bytes.length;
-    } else {
-      const encoded = encoder.encode(part.text ?? '');
-      out.set(encoded, writeAt);
-      writeAt += encoded.length;
-    }
-  }
-  return {bytes: out, pages: images.length};
+  return {bytes, pages: images.length};
 }
 
 /** حوار الحفظ الأصلي + كتابة الملف — يعيد المسار. */

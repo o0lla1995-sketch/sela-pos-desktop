@@ -62,7 +62,8 @@ import type {
   SilaDebtRow,
 } from '../core/types';
 import './invoiceshome.css';
-import {PAYMENT_METHODS, paymentMethodById} from '../core/paymentMethods';
+import {PAYMENT_METHODS, paymentMethodById, activePaymentMethods} from '../core/paymentMethods';
+import {PaymentMethodIcon} from '../components/PaymentMethodIcon';
 
 const PAGE_SIZE = 40;
 
@@ -1090,6 +1091,18 @@ function ReturnModal({
   // والفرق يُسوّى نقداً أو ديناً (v40).
   const [picks, setPicks] = useState<ExchangePick[]>([]);
   const [exchangeOpen, setExchangeOpen] = useState(false);
+  /** v72 (الجولة 76 #3): قناة تسوية الاسترداد/فرق الاستبدال —
+   *  نقدي أو أي بنك/محفظة مفعّلة (طلب التاجر: «خيارات دقيقة لمعالجة
+   *  وتحصيل/إرجاع فرق السعر عبر المحافظ والبنوك أو النقد دون أي
+   *  أخطاء محاسبية»). تُختم على صف RET فيتتبع الدفتر الصحيح. */
+  const [settleMethodId, setSettleMethodId] = useState<string>('cash');
+  const paymentMethodsEnabled = useSettingsStore(
+    s => s.settings.paymentMethodsEnabled,
+  );
+  const settleChannels = useMemo(
+    () => activePaymentMethods(paymentMethodsEnabled),
+    [paymentMethodsEnabled],
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -1100,6 +1113,7 @@ function ReturnModal({
     setRefundMethod('cash');
     setPicks([]);
     setExchangeOpen(false);
+    setSettleMethodId('cash');
     InvoiceService.prepareReturn(saleId)
       .then(prep => {
         if (!mounted) {
@@ -1233,6 +1247,7 @@ function ReturnModal({
         saleId,
         lines: payload,
         refundMethod: book === 'cash' ? refundMethod : 'none',
+        settleMethod: book === 'cash' ? settleMethodId : null,
         note: null,
         print: printerConnected,
         receiptSettings,
@@ -1242,19 +1257,26 @@ function ReturnModal({
         exchange: exchangePayload,
       });
       // رسالة النجاح تشرح تسوية الفرق بالضبط — ماذا حدث للفرق
-      // (نقد خارج/داخل، خصم/زيادة دين، أو استبدال متكافئ).
+      // (نقد خارج/داخل، خصم/زيادة دين، أو استبدال متكافئ) وعلى أي
+      // قناة (v72).
+      const channelInfo =
+        book === 'cash' && paymentMethodById(settleMethodId).id !== 'cash'
+          ? ` عبر ${paymentMethodById(settleMethodId).label}`
+          : '';
       toast(
         exchangePayload != null
           ? exchangeDiff > 0.0001
             ? book === 'cash'
-              ? `سُجّل الاستبدال — سلّم الزبون الفرق ${formatMoney(exchangeDiff)} نقداً من الخزينة`
+              ? `سُجّل الاستبدال — سلّم الزبون الفرق ${formatMoney(exchangeDiff)}${channelInfo}`
               : `سُجّل الاستبدال — خُصم الفرق ${formatMoney(exchangeDiff)} من دين الزبون`
             : exchangeDiff < -0.0001
             ? book === 'cash'
-              ? `سُجّل الاستبدال — اقبض الفرق ${formatMoney(-exchangeDiff)} نقداً من الزبون إلى الخزينة`
+              ? `سُجّل الاستبدال — اقبض الفرق ${formatMoney(-exchangeDiff)}${channelInfo} من الزبون`
               : `سُجّل الاستبدال — زاد دين الزبون بالفرق ${formatMoney(-exchangeDiff)}`
             : 'سُجّل الاستبدال المتكافئ — المرتجع عاد والبديل خرج ولا فرق'
-          : 'سُجّل المرتجع وأُعيدت الكميات للمخزون',
+          : `سُجّل المرتجع وأُعيدت الكميات للمخزون${
+              book === 'cash' && refundMethod === 'cash' ? channelInfo : ''
+            }`,
         'success',
         6000,
       );
@@ -1279,6 +1301,7 @@ function ReturnModal({
     quantities,
     book,
     refundMethod,
+    settleMethodId,
     debtState,
     picks,
     saleId,
@@ -1298,13 +1321,18 @@ function ReturnModal({
     enabled: () => !busy && !blocked && refundTotal > 0 && pickedCount > 0,
   });
 
+  const settleChannel = paymentMethodById(settleMethodId);
+
   return (
     <>
       <div
         className="overlay"
         style={{zIndex: 70}}
         onClick={e => e.target === e.currentTarget && onClose()}>
-        <div className="modal" style={{width: 'min(720px, 94vw)'}}>
+        {/* v72 (الجولة 76 #3): إعادة تصميم كاملة — نافذة أوسع
+         * (٩٤٠px) بعمودين: أسطر الإرجاع يميناً والاستبدال والتسوية
+         * يساراً، وتذييل ثابت بالقيم الحية والفرق وقناة التسوية. */}
+        <div className="modal ih-ret-modal" style={{width: 'min(940px, 96vw)'}}>
           <div className="modal-head">
             <span className="ih-meta-row">
               <b>إرجاع / استبدال</b>
@@ -1330,154 +1358,252 @@ function ReturnModal({
                 <Icon name="alert" size={16} /> {error}
               </div>
             ) : (
-              <>
-                {/* سياق الدفتر — ماذا سيحدث للقيمة عند التنفيذ */}
-                <div className="ih-infobox">
-                  {book === 'cash' &&
-                    'فاتورة نقدية — قيمة المرتجع تُسترد للزبون (أو تُسلَّم فرقاً عند الاستبدال) حسب طريقة الاسترداد بالأسفل.'}
-                  {book === 'sila' &&
-                    debtState.kind === 'sila-synced' &&
-                    `دين صِلة مُتزامن على «${debtLabel ?? 'زبون صِلة'}» — قيمة المرتجع تُخصم من دينه ويُرفع العكس للخادم فوراً.`}
-                  {book === 'sila' &&
-                    debtState.kind === 'sila-pending' &&
-                    `دين صِلة بانتظار المزامنة على «${debtLabel ?? 'زبون صِلة'}» — يُخصم من صف الدين محلياً الآن.`}
-                  {book === 'local' &&
-                    `دين دفتر المتجر على «${debtLabel ?? 'زبون الدفتر'}» — قيمة المرتجع تُخصم من صف الدفتر.`}
-                  {book === 'online' &&
-                    debtState.status === 'sent' &&
-                    'طلب أونلاين مُرسل لم يُسلَّم بعد — المرتجع ينقص الدين المؤقت فقط.'}
-                  {book === 'online' &&
-                    debtState.status !== 'sent' &&
-                    'طلب أونلاين مسلَّم — المبلغ دخل الخزينة بسند تحصيل، فالمرتجع استرداد نقدي منها.'}
-                </div>
-                {blocked && (
-                  <div className="ih-warnbox">
-                    <Icon name="alert" size={16} />{' '}
-                    {debtState.reason ?? 'الحالة لا تسمح بالإرجاع الآن'}
+              <div className="ih-ret-grid">
+                {/* ── العمود الأيمن: أسطر الفاتورة بعدّاداتها ── */}
+                <div className="ih-ret-col">
+                  <div className="ih-ret-col-title">
+                    <Icon name="list" size={15} />
+                    أصناف الفاتورة — اختر الكميات المرتجعة
                   </div>
-                )}
-
-                {/* أسطر الفاتورة — عدّاد لكل صنف بحدّ المتبقي */}
-                <div className="ih-ret-lines">
-                  {lines.map(line => {
-                    const qty = quantities[line.item.id] ?? 0;
-                    const step = stepFor(line.remaining);
-                    const lineValue = line.item.unit_price * qty * ratio;
-                    return (
-                      <div key={line.item.id} className="ih-ret-line">
-                        <div className="ih-ret-line-main">
-                          <div className="ih-ret-line-name">
-                            {line.productName}
-                            {line.item.unit_name &&
-                            line.item.unit_name !== 'قطعة'
-                              ? ` (${line.item.unit_name})`
-                              : ''}
-                          </div>
-                          <div className="ih-ret-line-meta">
-                            المتبقي قابل للإرجاع: {formatQty(line.remaining)} ·{' '}
-                            {formatMoney(line.item.unit_price)} للوحدة
-                          </div>
-                          {qty > 0 && (
-                            <div className="ih-ret-line-value">
-                              قيمة الإرجاع: {formatMoney(lineValue)}
+                  <div className="ih-ret-lines">
+                    {lines.map(line => {
+                      const qty = quantities[line.item.id] ?? 0;
+                      const step = stepFor(line.remaining);
+                      const lineValue = line.item.unit_price * qty * ratio;
+                      return (
+                        <div
+                          key={line.item.id}
+                          className={`ih-ret-line ${qty > 0 ? 'picked' : ''}`}>
+                          <div className="ih-ret-line-main">
+                            <div className="ih-ret-line-name">
+                              {line.productName}
+                              {line.item.unit_name &&
+                              line.item.unit_name !== 'قطعة'
+                                ? ` (${line.item.unit_name})`
+                                : ''}
                             </div>
-                          )}
-                        </div>
-                        <div className="ih-step">
-                          <button
-                            onClick={() =>
-                              setQty(line.item.id, qty - step, line.remaining)
-                            }
-                            disabled={busy || qty <= 0}>
-                            −
-                          </button>
-                          <input
-                            className="qty-input"
-                            dir="ltr"
-                            inputMode="decimal"
-                            value={qtyTexts[line.item.id] ?? '0'}
-                            onChange={e => {
-                              const raw = e.target.value;
-                              setQtyTexts(prev => ({
-                                ...prev,
-                                [line.item.id]: raw,
-                              }));
-                              const parsed = parseNumber(raw);
-                              if (!Number.isNaN(parsed)) {
-                                setQty(line.item.id, parsed, line.remaining);
+                            <div className="ih-ret-line-meta">
+                              المتبقي: {formatQty(line.remaining)} ·{' '}
+                              {formatMoney(line.item.unit_price)} للوحدة
+                            </div>
+                            {qty > 0 && (
+                              <div className="ih-ret-line-value">
+                                قيمة الإرجاع: {formatMoney(lineValue)}
+                              </div>
+                            )}
+                          </div>
+                          <div className="ih-step">
+                            <button
+                              onClick={() =>
+                                setQty(line.item.id, qty - step, line.remaining)
                               }
-                            }}
-                          />
-                          <button
-                            onClick={() =>
-                              setQty(line.item.id, qty + step, line.remaining)
-                            }
-                            disabled={busy || qty >= line.remaining}>
-                            +
-                          </button>
-                          <button
-                            className="all-btn"
-                            onClick={() =>
-                              setQty(line.item.id, line.remaining, line.remaining)
-                            }
-                            disabled={busy || qty >= line.remaining}>
-                            الكل
-                          </button>
+                              disabled={busy || qty <= 0}>
+                              −
+                            </button>
+                            <input
+                              className="qty-input"
+                              dir="ltr"
+                              inputMode="decimal"
+                              value={qtyTexts[line.item.id] ?? '0'}
+                              onChange={e => {
+                                const raw = e.target.value;
+                                setQtyTexts(prev => ({
+                                  ...prev,
+                                  [line.item.id]: raw,
+                                }));
+                                const parsed = parseNumber(raw);
+                                if (!Number.isNaN(parsed)) {
+                                  setQty(line.item.id, parsed, line.remaining);
+                                }
+                              }}
+                            />
+                            <button
+                              onClick={() =>
+                                setQty(line.item.id, qty + step, line.remaining)
+                              }
+                              disabled={busy || qty >= line.remaining}>
+                              +
+                            </button>
+                            <button
+                              className="all-btn"
+                              onClick={() =>
+                                setQty(line.item.id, line.remaining, line.remaining)
+                              }
+                              disabled={busy || qty >= line.remaining}>
+                              الكل
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
 
-                {/* أصناف الاستبدال البديلة */}
-                {exchangeModeOn && (
-                  <div className="ih-exchange-list">
-                    <div className="ih-exchange-title">
-                      أصناف الاستبدال البديلة ({picks.length}) — بقيمة{' '}
-                      {formatMoney(exchangeTotal)}
-                    </div>
-                    {picks.map(pick => (
-                      <div key={pick.key} className="ih-exchange-row">
-                        <div className="main">
-                          <div className="name">
-                            {pick.name}
-                            {pick.variantLabel ? ` (${pick.variantLabel})` : ''}
-                            {pick.unitName && pick.unitName !== 'قطعة'
-                              ? ` · ${pick.unitName}`
-                              : ''}
-                          </div>
-                          <div className="meta">
-                            {formatQty(pick.quantity)} ×{' '}
-                            {formatMoney(pick.unitPrice)} ={' '}
-                            {formatMoney(pick.unitPrice * pick.quantity)}
-                          </div>
-                        </div>
-                        <button
-                          className="ih-x-btn"
-                          disabled={busy}
-                          onClick={() =>
-                            setPicks(prev => prev.filter(x => x.key !== pick.key))
-                          }>
-                          <Icon name="x" size={14} />
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      className="ih-link-btn"
-                      disabled={busy}
-                      onClick={() => setPicks([])}>
-                      إلغاء الاستبدال — العودة للإرجاع المالي
-                    </button>
+                {/* ── العمود الأيسر: البدائل + التسوية ── */}
+                <div className="ih-ret-col">
+                  <div className="ih-ret-col-title">
+                    <Icon name="cart" size={15} />
+                    أصناف الاستبدال البديلة
+                    {exchangeModeOn ? ` (${picks.length})` : ''}
                   </div>
-                )}
-              </>
+                  {exchangeModeOn ? (
+                    <div className="ih-exchange-list">
+                      {picks.map(pick => (
+                        <div key={pick.key} className="ih-exchange-row">
+                          <div className="main">
+                            <div className="name">
+                              {pick.name}
+                              {pick.variantLabel ? ` (${pick.variantLabel})` : ''}
+                              {pick.unitName && pick.unitName !== 'قطعة'
+                                ? ` · ${pick.unitName}`
+                                : ''}
+                            </div>
+                            <div className="meta">
+                              {formatQty(pick.quantity)} ×{' '}
+                              {formatMoney(pick.unitPrice)} ={' '}
+                              {formatMoney(pick.unitPrice * pick.quantity)}
+                            </div>
+                          </div>
+                          <button
+                            className="ih-x-btn"
+                            disabled={busy}
+                            onClick={() =>
+                              setPicks(prev => prev.filter(x => x.key !== pick.key))
+                            }>
+                            <Icon name="x" size={14} />
+                          </button>
+                        </div>
+                      ))}
+                      <div className="ih-exchange-total">
+                        قيمة البدائل: <b>{formatMoney(exchangeTotal)}</b>
+                      </div>
+                      <button
+                        className="ih-link-btn"
+                        disabled={busy}
+                        onClick={() => setPicks([])}>
+                        إلغاء الاستبدال — العودة للإرجاع المالي
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="ih-exchange-empty">
+                      <Icon name="cart" size={26} />
+                      <div>
+                        استبدل ببضاعة بديلة بدل الإرجاع المالي — الفرق
+                        يُسوّى تلقائياً حسب القيمتين.
+                      </div>
+                      <button
+                        className="btn"
+                        disabled={busy || lines.length === 0}
+                        onClick={() => {
+                          if (pickedCount === 0) {
+                            toast(
+                              'اختر كميات المرتجع أولاً — الاستبدال يقابل قيمة ما تُرجعه',
+                              'info',
+                              5000,
+                            );
+                          }
+                          setExchangeOpen(true);
+                        }}>
+                        <Icon name="plus" size={15} />
+                        اختيار البدائل
+                      </button>
+                    </div>
+                  )}
+
+                  {/* التسوية — قناة تحصيل/إرجاع قيمة المرتجع أو الفرق */}
+                  {book === 'cash' && (
+                    <div className="ih-settle-card">
+                      <div className="ih-settle-title">
+                        <Icon name="wallet" size={15} />
+                        {exchangeModeOn
+                          ? 'تسوية فرق السعر عبر'
+                          : 'استرداد قيمة المرتجع عبر'}
+                      </div>
+                      <div className="ih-settle-channels" role="radiogroup">
+                        {settleChannels.map(channel => (
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-checked={settleMethodId === channel.id}
+                            key={channel.id}
+                            className={`ih-settle-chip ${
+                              settleMethodId === channel.id ? 'on' : ''
+                            }`}
+                            onClick={() => setSettleMethodId(channel.id)}
+                            disabled={busy}>
+                            <PaymentMethodIcon method={channel} size={22} />
+                            <span className="name">{channel.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="ih-settle-hint">
+                        {exchangeModeOn
+                          ? Math.abs(exchangeDiff) < 0.0001
+                            ? 'استبدال متكافئ — لا فرق للتسوية'
+                            : exchangeDiff > 0
+                            ? `يُرجَع للزبون ${formatMoney(exchangeDiff)} من ${
+                                settleChannel.id === 'cash'
+                                  ? 'الخزينة النقدية'
+                                  : settleChannel.label
+                              }`
+                            : `يُقبض من الزبون ${formatMoney(-exchangeDiff)} على ${
+                                settleChannel.id === 'cash'
+                                  ? 'الخزينة النقدية'
+                                  : settleChannel.label
+                              }`
+                          : refundMethod === 'cash'
+                          ? `تُخرَج قيمة المرتجع (${formatMoney(
+                              refundTotal,
+                            )}) من ${
+                              settleChannel.id === 'cash'
+                                ? 'الخزينة النقدية'
+                                : settleChannel.label
+                            } ويُخصم من رصيد القناة في التقارير`
+                          : 'بدون استرداد نقدي — تُعاد الكميات للمخزون فقط'}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* سياق الدفتر (غير النقدي) — ماذا سيحدث للقيمة */}
+                  {book !== 'cash' && (
+                    <div className="ih-infobox">
+                      {book === 'sila' &&
+                        debtState.kind === 'sila-synced' &&
+                        `دين صِلة مُتزامن على «${
+                          debtLabel ?? 'زبون صِلة'
+                        }» — قيمة المرتجع تُخصم من دينه ويُرفع العكس للخادم فوراً.`}
+                      {book === 'sila' &&
+                        debtState.kind === 'sila-pending' &&
+                        `دين صِلة بانتظار المزامنة على «${
+                          debtLabel ?? 'زبون صِلة'
+                        }» — يُخصم من صف الدين محلياً الآن.`}
+                      {book === 'local' &&
+                        `دين دفتر المتجر على «${
+                          debtLabel ?? 'زبون الدفتر'
+                        }» — قيمة المرتجع تُخصم من صف الدفتر.`}
+                      {book === 'online' &&
+                        debtState.status === 'sent' &&
+                        'طلب أونلاين مُرسل لم يُسلَّم بعد — المرتجع ينقص الدين المؤقت فقط.'}
+                      {book === 'online' &&
+                        debtState.status !== 'sent' &&
+                        'طلب أونلاين مسلَّم — المبلغ دخل الخزينة بسند تحصيل، فالمرتجع استرداد نقدي منها.'}
+                    </div>
+                  )}
+                  {blocked && (
+                    <div className="ih-warnbox">
+                      <Icon name="alert" size={16} />{' '}
+                      {debtState.reason ?? 'الحالة لا تسمح بالإرجاع الآن'}
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
           </div>
 
           {/* التذييل: الاسترداد + القيم الحية + الفرق */}
           {!loading && error == null && (
-            <div className="modal-foot" style={{flexWrap: 'wrap'}}>
-              <div style={{display: 'flex', flexDirection: 'column', gap: 10, flex: 1}}>
+            <div className="modal-foot ih-ret-foot">
+              <div className="ih-ret-values">
                 {book === 'cash' && !exchangeModeOn && (
                   <div className="ih-method-row">
                     <button
@@ -1495,29 +1621,20 @@ function ReturnModal({
                   </div>
                 )}
                 <div className="ih-values-pair">
-                  {exchangeModeOn ? (
-                    <>
-                      <div className="ih-value-half">
-                        <span className="lbl">
-                          المرتجع ({pickedCount} صنف)
-                        </span>
-                        <span className="amt">{formatMoney(refundTotal)}</span>
-                      </div>
-                      <div className="ih-value-half accent">
-                        <span className="lbl accent">
-                          المستبدل ({picks.length} صنف)
-                        </span>
-                        <span className="amt accent">
-                          {formatMoney(exchangeTotal)}
-                        </span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="ih-value-half">
-                      <span className="lbl">
-                        إجمالي قيمة المرتجع ({pickedCount} صنف)
+                  <div className="ih-value-half">
+                    <span className="lbl">
+                      المرتجع ({pickedCount} صنف)
+                    </span>
+                    <span className="amt">{formatMoney(refundTotal)}</span>
+                  </div>
+                  {exchangeModeOn && (
+                    <div className="ih-value-half accent">
+                      <span className="lbl accent">
+                        المستبدل ({picks.length} صنف)
                       </span>
-                      <span className="amt">{formatMoney(refundTotal)}</span>
+                      <span className="amt accent">
+                        {formatMoney(exchangeTotal)}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -1533,16 +1650,24 @@ function ReturnModal({
                     {Math.abs(exchangeDiff) < 0.0001
                       ? 'استبدال متكافئ — لا فرق'
                       : exchangeDiff > 0
-                      ? `الفرق ${formatMoney(exchangeDiff)} — ${
+                      ? `الفرق ${formatMoney(exchangeDiff)} لصالح الزبون — ${
                           book === 'cash'
-                            ? 'سلّمه نقداً من الخزينة'
+                            ? `يُسلَّم من ${
+                                settleChannel.id === 'cash'
+                                  ? 'الخزينة النقدية'
+                                  : settleChannel.label
+                              }`
                             : debtState.kind === 'migrated'
                             ? 'دين مُرحّل لصِلة — عالجه يدوياً'
                             : 'يُخصم من دين الزبون'
                         }`
-                      : `الفرق ${formatMoney(-exchangeDiff)} — ${
+                      : `الفرق ${formatMoney(-exchangeDiff)} على الزبون — ${
                           book === 'cash'
-                            ? 'اقبضه نقداً من الزبون'
+                            ? `يُقبض على ${
+                                settleChannel.id === 'cash'
+                                  ? 'الخزينة النقدية'
+                                  : settleChannel.label
+                              }`
                             : debtState.kind === 'migrated' ||
                               debtState.kind === 'missing'
                             ? 'دين غير قابل للزيادة هنا — عالجه يدوياً'
@@ -1551,7 +1676,7 @@ function ReturnModal({
                   </div>
                 )}
               </div>
-              <span style={{display: 'flex', gap: 8, alignItems: 'flex-end'}}>
+              <span className="ih-ret-actions">
                 <button
                   className="btn"
                   disabled={busy || lines.length === 0}
@@ -1566,7 +1691,7 @@ function ReturnModal({
                     setExchangeOpen(true);
                   }}>
                   {exchangeModeOn
-                    ? `⇄ الاستبدال (${picks.length})`
+                    ? `⇄ تعديل البدائل (${picks.length})`
                     : '⇄ استبدال'}
                 </button>
                 <button

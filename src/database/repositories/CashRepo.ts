@@ -70,6 +70,7 @@ function rowToRecord(row: Record<string, unknown>): CashMovementRecord {
     note: (row.note as string | null) ?? null,
     amount_minor: Number(row.amount_minor ?? 0),
     auth_method: (row.auth_method as CashAuthMethod) ?? 'none',
+    payment_method: (row.payment_method as string | null) ?? null,
     photo_path:
       typeof photoRaw === 'string' && photoRaw.length > 0
         ? photoRaw
@@ -125,6 +126,8 @@ export const CashRepo = {
     amountMinor: number;
     authMethod?: CashAuthMethod;
     photoPath?: string | null;
+    /** v72: قناة المصدر/الوجهة — null/'cash' = الخزينة النقدية. */
+    paymentMethod?: string | null;
   }): Promise<CashMovementRecord> {
     if (!Number.isFinite(input.amountMinor) || input.amountMinor <= 0) {
       throw new Error('المبلغ غير صالح — يجب أن يكون أكبر من صفر');
@@ -137,10 +140,14 @@ export const CashRepo = {
       typeof input.photoPath === 'string' && input.photoPath.length > 0
         ? input.photoPath
         : null;
+    const method =
+      input.paymentMethod != null && input.paymentMethod !== ''
+        ? input.paymentMethod
+        : null;
     const insert = await db.execute(
       `INSERT INTO cash_movements
-        (ref, kind, category, note, amount_minor, auth_method, photo_path, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        (ref, kind, category, note, amount_minor, auth_method, photo_path, payment_method, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         ref,
         input.kind,
@@ -149,6 +156,7 @@ export const CashRepo = {
         Math.round(input.amountMinor),
         input.authMethod ?? 'none',
         photoPath,
+        method,
         localNow(),
       ],
     );
@@ -263,14 +271,27 @@ export const CashRepo = {
     }
   },
 
-  /** Period totals for the statement + reports. */
-  async totalsFor(from: string, to: string): Promise<CashMovementTotals> {
+  /** Period totals for the statement + reports. v72 (الجولة 76
+   *  #5): scope='cash' (الافتراضي) يحسب ما يخص الخزينة النقدية
+   *  فقط — حركات البنوك والمحافظ لها أرصدها المستقلة في
+   *  methodLedgerTotals؛ scope='all' لكشف الخزينة الشامل (كل
+   *  السندات بكل قنواتها) كي يطابق الإجماليات الصفوف المعروضة.
+   *  الحركات القديمة (payment_method NULL) نقدية دوماً. */
+  async totalsFor(
+    from: string,
+    to: string,
+    scope: 'cash' | 'all' = 'cash',
+  ): Promise<CashMovementTotals> {
+    const methodFilter =
+      scope === 'cash'
+        ? " AND COALESCE(payment_method, 'cash') = 'cash'"
+        : '';
     const result = await getDb().execute(
       `SELECT kind,
               COUNT(*) AS cnt,
               COALESCE(SUM(amount_minor), 0) AS total
        FROM cash_movements
-       WHERE date(created_at) BETWEEN date(?) AND date(?)
+       WHERE date(created_at) BETWEEN date(?) AND date(?)${methodFilter}
        GROUP BY kind`,
       [from, to],
     );
@@ -320,7 +341,9 @@ export const CashRepo = {
     };
   },
 
-  /** All-time totals for the treasury snapshot (single query). */
+  /** All-time totals for the treasury snapshot (single query).
+   *  v72 (الجولة 76 #5): نقدية فقط — سحب/إيداع/مصروف من محفظة
+   *  أو بنك لا يمسّ الدرج النقدي أبداً (NULL = نقدي تاريخياً). */
   async allTimeTotals(): Promise<{
     expensesMinor: number;
     withdrawalsMinor: number;
@@ -331,7 +354,9 @@ export const CashRepo = {
     try {
       const result = await getDb().execute(
         `SELECT kind, COALESCE(SUM(amount_minor), 0) AS total
-         FROM cash_movements GROUP BY kind`,
+         FROM cash_movements
+         WHERE COALESCE(payment_method, 'cash') = 'cash'
+         GROUP BY kind`,
       );
       let expensesMinor = 0;
       let withdrawalsMinor = 0;
@@ -401,5 +426,83 @@ export const CashRepo = {
     );
     const row = result.rows?.[0];
     return row ? rowToRecord(row as Record<string, unknown>) : null;
+  },
+
+  /** v72 (الجولة 76 #5/#6): حركات الخزينة مجمّعة بالقناة لفترة —
+   *  صافي حركة كل بنك/محفظة/النقد من السحب والإيداع والمصروف:
+   *  الإيداع داخل، والسحب والمصروف خارج. (تحصيلات واستردادات
+   *  الأونلاين نقدية دوماً فتبقى في قناة النقد.) */
+  async methodMovementTotals(
+    from: string,
+    to: string,
+  ): Promise<
+    {
+      method: string;
+      depositsMinor: number;
+      withdrawalsMinor: number;
+      expensesMinor: number;
+      netMinor: number;
+    }[]
+  > {
+    const result = await getDb().execute(
+      `SELECT COALESCE(payment_method, 'cash') AS method,
+         COALESCE(SUM(CASE WHEN kind = 'deposit' THEN amount_minor ELSE 0 END), 0) AS deposits,
+         COALESCE(SUM(CASE WHEN kind = 'withdrawal' THEN amount_minor ELSE 0 END), 0) AS withdrawals,
+         COALESCE(SUM(CASE WHEN kind = 'expense' THEN amount_minor ELSE 0 END), 0) AS expenses
+       FROM cash_movements
+       WHERE date(created_at) BETWEEN date(?) AND date(?)
+         AND kind IN ('deposit','withdrawal','expense')
+       GROUP BY COALESCE(payment_method, 'cash')`,
+      [from, to],
+    );
+    return (result.rows ?? []).map(raw => {
+      const row = raw as {
+        method?: string;
+        deposits?: number;
+        withdrawals?: number;
+        expenses?: number;
+      };
+      const depositsMinor = Number(row.deposits ?? 0);
+      const withdrawalsMinor = Number(row.withdrawals ?? 0);
+      const expensesMinor = Number(row.expenses ?? 0);
+      return {
+        method: String(row.method ?? 'cash'),
+        depositsMinor,
+        withdrawalsMinor,
+        expensesMinor,
+        netMinor: depositsMinor - withdrawalsMinor - expensesMinor,
+      };
+    });
+  },
+
+  /** v72 (الجولة 76 #6): كل حركات قناة واحدة لفترة (سجل تفصيلي
+   *  بترتيب زمني تصاعدي) — يغذّي تقرير الرصيد الصافي التفصيلي. */
+  async listForMethod(
+    from: string,
+    to: string,
+    method: string,
+    limit = 10000,
+  ): Promise<CashMovementRecord[]> {
+    const clause =
+      method === 'cash'
+        ? "COALESCE(payment_method, 'cash') = 'cash'"
+        : 'payment_method = ?';
+    const params: (string | number)[] = [from, to];
+    if (method !== 'cash') {
+      params.push(method);
+    }
+    params.push(Math.min(Math.max(limit, 1), 10000));
+    const result = await getDb().execute(
+      `SELECT * FROM cash_movements
+       WHERE date(created_at) BETWEEN date(?) AND date(?)
+         AND kind IN ('deposit','withdrawal','expense')
+         AND ${clause}
+       ORDER BY created_at ASC, local_id ASC
+       LIMIT ?`,
+      params,
+    );
+    return (result.rows ?? []).map(row =>
+      rowToRecord(row as Record<string, unknown>),
+    );
   },
 };

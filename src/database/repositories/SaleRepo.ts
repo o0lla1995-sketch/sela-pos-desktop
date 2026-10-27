@@ -524,6 +524,12 @@ export const SaleRepo = {
     invoiceRef: string;
     book: ReturnBook;
     refundMethod: 'none' | 'cash';
+    /** v72 (الجولة 76 #3): قناة تسوية الاسترداد/فرق الاستبدال —
+     *  نقدي أو معرف بنك/محفظة مفعّلة. يُكتب على صف RET وسجل
+     *  المرتجع فيتتبع الدفتر الصحيح (درج النقد أو رصيد القناة)
+     *  وتُصحّحه معادلة الخزينة تلقائياً (nonCashExclusions).
+     *  null = طريقة الفاتورة الأصلية (سلوك ما قبل v72). */
+    settleMethod?: string | null;
     /** Pro-rata discount ratio of the original invoice (0..1]. */
     discountRatio: number;
     lines: ReturnLineInput[];
@@ -637,10 +643,9 @@ export const SaleRepo = {
     let returnId = -1;
 
     await db.transaction(async tx => {
-      // v70 (الجولة 74 #2): طريقة دفع الفاتورة الأصلية — يُختم بها
-      // صف RET السالب وسجل المرتجع، فيُرَد المبلغ (محاسبياً) لنفس
-      // الحساب البنكي/المحفظة التي دخل منها، وتبقى أرصدة الطرق
-      // متوازنة في التقارير بلا أي مسار موازٍ.
+      // v70 (الجولة 74 #2) → v72 (الجولة 76 #3): طريقة الدفع على صف
+      // RET — قناة التسوية المختارة إن حُددت (هناك تحرّك المال
+      // فعلياً)، وإلا طريقة الفاتورة الأصلية (السلوك التاريخي).
       const originalMethodRow = await tx.execute(
         'SELECT payment_method FROM sales WHERE id = ?',
         [input.saleId],
@@ -651,6 +656,10 @@ export const SaleRepo = {
             | {payment_method?: string | null}
             | undefined
         )?.payment_method ?? null;
+      const retPaymentMethod =
+        input.settleMethod != null && input.settleMethod !== ''
+          ? input.settleMethod
+          : originalPaymentMethod;
 
       // 1) The NEGATIVE invoice — every existing aggregation (revenue,
       //    cogs, profit, daily, hourly, top products) nets out with
@@ -676,7 +685,7 @@ export const SaleRepo = {
           createdAt,
           input.book,
           input.cashierId ?? null,
-          originalPaymentMethod,
+          retPaymentMethod,
         ],
       );
       const retSaleId = insertRet.insertId ?? -1;
@@ -770,7 +779,7 @@ export const SaleRepo = {
           input.note?.trim() || null,
           createdAt,
           input.cashierId ?? null,
-          originalPaymentMethod,
+          retPaymentMethod,
         ],
       );
       returnId = insertReturn.insertId ?? -1;

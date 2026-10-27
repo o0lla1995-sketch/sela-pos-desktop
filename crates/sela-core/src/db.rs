@@ -439,6 +439,11 @@ CREATE TABLE IF NOT EXISTS cash_movements (
   auth_method TEXT NOT NULL DEFAULT 'none'
     CHECK (auth_method IN ('fingerprint','pin','none')),
   photo_path TEXT,
+  -- v72 (الجولة 76 #5): قناة المصدر/الوجهة للحركة — نقداً أو أي
+  -- بنك/محفظة مفعّلة. NULL/'cash' = الخزينة النقدية (كل التاريخ
+  -- القديم نقدي بلا ترحيل)، والسحب/المصروف يخرج من القناة
+  -- المذكورة والإيداع يدخلها.
+  payment_method TEXT,
   created_at TEXT NOT NULL
     DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
@@ -594,6 +599,9 @@ fn heal_v57(conn: &Connection) -> Result<()> {
         // القديمة قبل v70 تبقى محسوبة نقداً بلا ترحيل).
         ("sales", "payment_method", "TEXT"),
         ("sale_returns", "payment_method", "TEXT"),
+        // ── v72 (الجولة 76 #5): قناة المصدر/الوجهة لحركات الخزينة
+        // (سحب/إيداع/مصروف) — NULL = نقدي (توافق كامل مع التاريخ).
+        ("cash_movements", "payment_method", "TEXT"),
     ];
     for (table, column, ddl) in upgrades {
         if !has_column(conn, table, column) {

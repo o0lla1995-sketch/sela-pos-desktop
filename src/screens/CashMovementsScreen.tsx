@@ -22,6 +22,7 @@ import {
   verifyWithdrawalPin,
   authorizeWithBiometric,
 } from '../services/CashService';
+import {ReportService} from '../services/ReportService';
 import {useAppLockStore} from '../stores/appLockStore';
 import {PinPad} from '../components/PinPad';
 import {Icon} from '../components/Icon';
@@ -40,6 +41,9 @@ import type {
   CashMovementTotals,
 } from '../core/types';
 import {Select} from '../components/Select';
+import {PaymentMethodIcon} from '../components/PaymentMethodIcon';
+import {activePaymentMethods, paymentMethodById} from '../core/paymentMethods';
+import {useSettingsStore} from '../stores/settingsStore';
 import './debtscash.css';
 
 type KindFilter = 'all' | 'expense' | 'withdrawal' | 'deposit';
@@ -117,6 +121,17 @@ export function CashMovementsScreen() {
   const [note, setNote] = useState('');
   const [category, setCategory] = useState<string>(EXPENSE_CATEGORIES[0]);
   const [formBusy, setFormBusy] = useState(false);
+  /** v72 (الجولة 76 #5): قناة المصدر/الوجهة — نقدي أو بنك/محفظة
+   *  مفعّلة من الإعدادات. السقف يُفحص على رصيد القناة المختارة. */
+  const [formMethod, setFormMethod] = useState<string>('cash');
+  const paymentMethodsEnabled = useSettingsStore(
+    s => s.settings.paymentMethodsEnabled,
+  );
+  const channels = useMemo(
+    () => activePaymentMethods(paymentMethodsEnabled),
+    [paymentMethodsEnabled],
+  );
+  const [channelBalance, setChannelBalance] = useState<number | null>(null);
 
   // ── بوابة رمز PIN للسحب ──────────────────────────────────────
   const [pinOpen, setPinOpen] = useState(false);
@@ -175,7 +190,32 @@ export function CashMovementsScreen() {
     setAmountText('');
     setNote('');
     setCategory(EXPENSE_CATEGORIES[0]);
+    setFormMethod('cash');
+    setChannelBalance(null);
   }, []);
+
+  // v72: رصيد القناة المختارة لحظة فتح النموذج أو تغييرها — سقف
+  // السحب/المصروف يُفحص عليها (النقدي = الخزينة، غيره = دفتر القناة).
+  useEffect(() => {
+    if (formMode == null) {
+      return;
+    }
+    let mounted = true;
+    ReportService.methodBalanceNow(formMethod)
+      .then((balance: number) => {
+        if (mounted) {
+          setChannelBalance(balance);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setChannelBalance(null);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [formMode, formMethod]);
 
   const closeForm = useCallback(() => {
     setFormMode(null);
@@ -183,11 +223,14 @@ export function CashMovementsScreen() {
   }, []);
 
   const amountMinor = amountTextToMinor(amountText);
-  const overDrawer =
-    formMode != null &&
-    formMode !== 'deposit' &&
-    drawerMinor != null &&
-    amountMinor > drawerMinor;
+  /** v72: السقف على رصيد القناة المختارة (لا الدرج وحده) —
+   *  المصروف/السحب من محفظة أو بنك يُفحص على دفتر تلك القناة. */
+  const selectedChannel = paymentMethodById(formMethod);
+  const channelLimitMinor =
+    formMode != null && formMode !== 'deposit' && channelBalance != null
+      ? Math.round(channelBalance * 100)
+      : null;
+  const overChannel = channelLimitMinor != null && amountMinor > channelLimitMinor;
 
   /** التنفيذ الفعلي — بعد اجتياز بوابة التأمين (أو بدون تأمين). */
   const executeMovement = useCallback(
@@ -209,10 +252,13 @@ export function CashMovementsScreen() {
             note: note.trim() || null,
             amountMinor: minor,
             authMethod: auth,
+            paymentMethod: formMethod,
           });
           toast(
             `سُجّل المصروف ${movement.ref} — ${movement.category}: ` +
-              `${shekels(movement.amount_minor)} خُصم من الخزينة`,
+              `${shekels(movement.amount_minor)} من ${
+                selectedChannel.id === 'cash' ? 'الخزينة' : selectedChannel.label
+              }`,
             'success',
             4500,
           );
@@ -221,11 +267,13 @@ export function CashMovementsScreen() {
             note: note.trim() || null,
             amountMinor: minor,
             authMethod: auth,
+            paymentMethod: formMethod,
           });
           toast(
             `سُجّل السحب ${movement.ref} بمبلغ ` +
-              `${shekels(movement.amount_minor)} — خُصم من الخزينة ` +
-              `(${AUTH_LABELS[auth]})`,
+              `${shekels(movement.amount_minor)} — من ${
+                selectedChannel.id === 'cash' ? 'الخزينة' : selectedChannel.label
+              } (${AUTH_LABELS[auth]})`,
             'success',
             4500,
           );
@@ -234,10 +282,13 @@ export function CashMovementsScreen() {
             note: note.trim() || null,
             amountMinor: minor,
             authMethod: auth,
+            paymentMethod: formMethod,
           });
           toast(
             `سُجّل الإيداع ${movement.ref} بمبلغ ` +
-              `${shekels(movement.amount_minor)} — أُضيف إلى الخزينة`,
+              `${shekels(movement.amount_minor)} — أُضيف إلى ${
+                selectedChannel.id === 'cash' ? 'الخزينة' : selectedChannel.label
+              }`,
             'success',
             4500,
           );
@@ -275,10 +326,11 @@ export function CashMovementsScreen() {
       toast('أدخل مبلغاً صحيحاً أكبر من صفر', 'error');
       return;
     }
-    if (overDrawer) {
+    if (overChannel && channelLimitMinor != null) {
       toast(
-        `المبلغ أكبر من النقد الموجود بالخزينة (${shekels(drawerMinor ?? 0)})` +
-          ' — لا يمكن تجاوز رصيد الدرج',
+        `المبلغ أكبر من الرصيد المتاح في ${
+          selectedChannel.id === 'cash' ? 'الخزينة' : selectedChannel.label
+        } (${shekels(channelLimitMinor)})` + ' — لا يمكن تجاوز الرصيد',
         'error',
       );
       return;
@@ -321,8 +373,9 @@ export function CashMovementsScreen() {
     formBusy,
     formMode,
     amountMinor,
-    overDrawer,
-    drawerMinor,
+    overChannel,
+    channelLimitMinor,
+    selectedChannel,
     executeMovement,
     toast,
   ]);
@@ -570,6 +623,18 @@ export function CashMovementsScreen() {
                   <span className={`chip ${KIND_CHIP[m.kind]}`}>
                     {KIND_LABELS[m.kind]}
                   </span>
+                  {m.payment_method != null &&
+                    m.payment_method !== 'cash' && (
+                      <span
+                        className="dc-method-chip"
+                        style={{
+                          borderColor: paymentMethodById(m.payment_method).color,
+                          color: paymentMethodById(m.payment_method).color,
+                        }}
+                        title={`عبر ${paymentMethodById(m.payment_method).label}`}>
+                        {paymentMethodById(m.payment_method).label}
+                      </span>
+                    )}
                 </td>
                 <td>{m.category}</td>
                 <td className="mut">{m.note ?? '—'}</td>
@@ -618,9 +683,13 @@ export function CashMovementsScreen() {
               <div className="field">
                 <label>
                   المبلغ (₪)
-                  {formMode !== 'deposit' &&
-                    drawerMinor != null &&
-                    ` — المتاح بالخزينة: ${shekels(drawerMinor)}`}
+                  {formMode !== 'deposit' && channelLimitMinor != null
+                    ? ` — المتاح في ${
+                        selectedChannel.id === 'cash'
+                          ? 'الخزينة'
+                          : selectedChannel.label
+                      }: ${shekels(channelLimitMinor)}`
+                    : ''}
                 </label>
                 <input
                   className="dc-input-ltr"
@@ -631,10 +700,13 @@ export function CashMovementsScreen() {
                   placeholder="0.00"
                   autoFocus
                 />
-                {overDrawer && (
+                {overChannel && channelLimitMinor != null && (
                   <span className="dc-err">
-                    المبلغ يتجاوز النقد الموجود بالخزينة (
-                    {shekels(drawerMinor ?? 0)})
+                    المبلغ يتجاوز الرصيد المتاح في{' '}
+                    {selectedChannel.id === 'cash'
+                      ? 'الخزينة'
+                      : selectedChannel.label}{' '}
+                    ({shekels(channelLimitMinor)})
                   </span>
                 )}
               </div>
@@ -652,6 +724,29 @@ export function CashMovementsScreen() {
                   />
                 </div>
               )}
+              {/* v72 (الجولة 76 #5): قناة المصدر/الوجهة — نقدي أو أي
+                  بنك/محفظة مفعّلة (طلب التاجر: «إضافة خيار اختيار طريقة
+                  الدفع أو المصدر/الوجهة في عمليات السحب والإيداع
+                  والمصروفات»). */}
+              <div className="field">
+                <label>
+                  {formMode === 'deposit' ? 'الإيداع إلى' : 'الدفع من'}
+                </label>
+                <Select
+                  value={formMethod}
+                  onChange={setFormMethod}
+                  options={channels.map(channel => ({
+                    value: channel.id,
+                    label:
+                      channel.id === 'cash'
+                        ? 'نقدي — الخزينة'
+                        : `${channel.label} — ${
+                            channel.kind === 'bank' ? 'بنك' : 'محفظة'
+                          }`,
+                  }))}
+                  ariaLabel="قناة الحركة"
+                />
+              </div>
               <div className="field">
                 <label>
                   {formMode === 'expense'
@@ -688,7 +783,7 @@ export function CashMovementsScreen() {
               </button>
               <button
                 className="btn primary"
-                disabled={formBusy || amountMinor <= 0 || overDrawer}
+                disabled={formBusy || amountMinor <= 0 || overChannel}
                 onClick={confirmForm}>
                 {formBusy ? 'جارٍ التسجيل…' : 'تأكيد'}
               </button>
