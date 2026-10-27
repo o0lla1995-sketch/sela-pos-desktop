@@ -158,7 +158,10 @@ fn list_input_devices_windows() -> Vec<InputDeviceInfo> {
         if got == u32::MAX {
             return devices;
         }
-        list.set_len(got as usize);
+        // دفاعي: لو نما العدد بين الاستدعاءين (جهاز وُصل) لا نتجاوز
+        // السعة المخصصة أبداً.
+        let written_count = (got as usize).min(list.capacity());
+        list.set_len(written_count);
 
         for device in list {
             let kind = match device.dwType {
@@ -179,7 +182,10 @@ fn list_input_devices_windows() -> Vec<InputDeviceInfo> {
             {
                 continue;
             }
-            let mut buffer = vec![0u16; (size as usize) / 2 + 1];
+            // ⚠️ pcbSize لواجهة W بوحدة المحارف (u16) لا البايتات —
+            // القسمة على 2 كانت تكتب فوق حدود المخزن (انتهاك وصول
+            // على ويندوز). السعة = عدد المحارف + حشوة أمان.
+            let mut buffer = vec![0u16; size as usize + 1];
             let written = GetRawInputDeviceInfoW(
                 handle,
                 RIDI_DEVICENAME,
@@ -189,7 +195,13 @@ fn list_input_devices_windows() -> Vec<InputDeviceInfo> {
             if written == u32::MAX || written == 0 {
                 continue;
             }
-            let name = String::from_utf16_lossy(&buffer[..written as usize]);
+            // الاسم منتهٍ بصفر — نقتطع عنده لا عند العدد المعاد.
+            let name_len = buffer
+                .iter()
+                .position(|&ch| ch == 0)
+                .unwrap_or(written as usize)
+                .min(written as usize);
+            let name = String::from_utf16_lossy(&buffer[..name_len]);
             if name.is_empty() {
                 continue;
             }
