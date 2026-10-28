@@ -87,6 +87,13 @@ export interface AppSettings {
    *  واجهة الدفع (بنوك ومحافظ فلسطينية). النقدي مقفول دائماً.
    *  الخريطة جزئية الترقية = كل غير مذكور مفعّل. */
   paymentMethodsEnabled: Record<string, boolean>;
+  /** v75 (الجولة 79 — سطح المكتب #١): المقاسات المخصصة التي أضافها
+   *  التاجر في نموذج المنتج — تُحفظ لكل نمط متجر على حدة وتظهر
+   *  كرقائق في كل منتج جديد بعده. كانت حالة نموذج مؤقتة تضيع مع
+   *  أول «حفظ وإضافة آخر» فيعيد التاجر كتابتها كل مرة. */
+  customSizes: Record<string, string[]>;
+  /** v75: الألوان المخصصة بنفس المنطق — لكل نمط متجر قائمتها. */
+  customColors: Record<string, string[]>;
 }
 
 /** قناة طابعة سطح المكتب (بديل بلوتوث الأندرويد). */
@@ -144,6 +151,8 @@ const DEFAULTS: AppSettings = {
   scannerMinLength: 4,
   printQrOnReceipt: false,
   paymentMethodsEnabled: defaultPaymentMethodsEnabled(),
+  customSizes: {},
+  customColors: {},
 };
 
 interface SettingsState {
@@ -210,6 +219,73 @@ export const useSettingsStore = create<SettingsState>(set => ({
 /** Imperative accessor for services outside React. */
 export function getSettings(): AppSettings {
   return useSettingsStore.getState().settings;
+}
+
+/** Imperative update for services outside React. */
+export function updateSettings(patch: Partial<AppSettings>): void {
+  useSettingsStore.getState().update(patch);
+}
+
+/* ── v75 (الجولة 79): المقاسات والألوان المخصصة الدائمة ──────────
+ * مساعدات صرفة فوق مخزن الإعدادات — نموذج المنتج يقرأ ويكتب بها
+ * فتظهر إضافات التاجر في كل منتج جديد بعدها. */
+
+function optionList(kind: 'size' | 'color', mode: string): string[] {
+  const settings = getSettings();
+  const map = kind === 'size' ? settings.customSizes : settings.customColors;
+  const list = map?.[mode];
+  return Array.isArray(list) ? list : [];
+}
+
+/** قائمة المخصصة المحفوظة لنمط متجر (فارغة عند أول استخدام). */
+export function customVariantOptions(
+  kind: 'size' | 'color',
+  mode: string,
+): string[] {
+  return [...optionList(kind, mode)];
+}
+
+/** حفظ مقاس/لون مخصص (idempotent — موجود مسبقاً لا يكرر). */
+export function addCustomVariantOption(
+  kind: 'size' | 'color',
+  mode: string,
+  value: string,
+): void {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return;
+  }
+  const current = optionList(kind, mode);
+  if (current.some(v => v === trimmed)) {
+    return;
+  }
+  const settings = getSettings();
+  const sizes = {...(settings.customSizes ?? {})};
+  const colors = {...(settings.customColors ?? {})};
+  if (kind === 'size') {
+    sizes[mode] = [...current, trimmed];
+  } else {
+    colors[mode] = [...current, trimmed];
+  }
+  useSettingsStore.getState().update({customSizes: sizes, customColors: colors});
+}
+
+/** حذف مقاس/لون مخصص محفوظ (زر الصغير × على الرقاقة). */
+export function removeCustomVariantOption(
+  kind: 'size' | 'color',
+  mode: string,
+  value: string,
+): void {
+  const current = optionList(kind, mode).filter(v => v !== value);
+  const settings = getSettings();
+  const sizes = {...(settings.customSizes ?? {})};
+  const colors = {...(settings.customColors ?? {})};
+  if (kind === 'size') {
+    sizes[mode] = current;
+  } else {
+    colors[mode] = current;
+  }
+  useSettingsStore.getState().update({customSizes: sizes, customColors: colors});
 }
 
 export function getPrinter(): DesktopPrinter {

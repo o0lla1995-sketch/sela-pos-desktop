@@ -37,7 +37,13 @@ import {CategoryRepo} from '../database/repositories/CategoryRepo';
 import {UnitRepo} from '../database/repositories/UnitRepo';
 import {VariantRepo} from '../database/repositories/VariantRepo';
 import {useCatalogStore, useToastStore} from '../state/appStores';
-import {useSettingsStore, getPrinter} from '../stores/settingsStore';
+import {
+  useSettingsStore,
+  getPrinter,
+  addCustomVariantOption,
+  customVariantOptions,
+  removeCustomVariantOption,
+} from '../stores/settingsStore';
 import {storeModeConfig} from '../core/storeModes';
 import {generateInternalEan13, isValidEan13} from '../services/BarcodeService';
 import {exportLabelsPdf} from '../services/BarcodePdfService';
@@ -196,6 +202,17 @@ export function ProductFormModal({
   const toast = useToastStore(s => s.show);
   const refreshCatalog = useCatalogStore(s => s.refresh);
   const settings = useSettingsStore(s => s.settings);
+  /* v75 (الجولة 79 — سطح المكتب #١): المقاسات والألوان المخصصة
+   * المحفوظة دائماً — تُقرأ من الإعدادات فتبقى بعد «حفظ وإضافة
+   * آخر» وبعد إغلاق النافذة وتظهر كرقائق في كل منتج جديد. */
+  const savedCustomSizes = useMemo(
+    () => customVariantOptions('size', settings.storeMode),
+    [settings.storeMode, settings.customSizes],
+  );
+  const savedCustomColors = useMemo(
+    () => customVariantOptions('color', settings.storeMode),
+    [settings.storeMode, settings.customColors],
+  );
   /** v33: تكوين نمط المتجر — يقود ظهور/إخفاء الأقسام والتسميات. */
   const modeConfig = storeModeConfig(settings.storeMode);
   const editingId = productProp?.id ?? productId ?? null;
@@ -266,10 +283,18 @@ export function ProductFormModal({
   // ── الربطة / المتغيرات (v35) ─────────────────────────────────
   const [lotSizes, setLotSizes] = useState<string[]>([]);
   const [lotColors, setLotColors] = useState<string[]>([]);
+  /* v75 (الجولة 79): إنشاء وحدة جديدة داخل النموذج — حقل الاسم
+   * يظهر تحت جدول الوحدات عند الطلب أو نفاد الوحدات الحرة. */
+  const [showNewUnit, setShowNewUnit] = useState(false);
+  const [newUnitName, setNewUnitName] = useState('');
   const [lotBundles, setLotBundles] = useState('1');
   const [lotCustomColor, setLotCustomColor] = useState('');
   const [lotCustomSize, setLotCustomSize] = useState('');
   const [variantDrafts, setVariantDrafts] = useState<VariantDraft[]>([]);
+  /* v75 (الجولة 79 #٣): إدخال لون/مقاس جديد لمحرّر التعديل — رقائق
+   * سريعة تضيف للربطة الموجودة بلا كتابة يدوية. */
+  const [variantNewColor, setVariantNewColor] = useState('');
+  const [variantNewSize, setVariantNewSize] = useState('');
 
   // ── الأحجام (مطعم/كافيتريا — v35) ────────────────────────────
   const [sizesEnabled, setSizesEnabled] = useState(false);
@@ -620,26 +645,75 @@ export function ProductFormModal({
     return map;
   }, [units]);
 
-  /** v17/v38: إضافة صف — أول وحدة حرة من النوع الصحيح فقط. */
+  /** v17/v38: إضافة صف — أول وحدة حرة من النوع الصحيح فقط.
+   *  v75 (الجولة 79): الطول والحجم متاحان — وحدات التاجر كلها
+   *  تصل للنموذج (كانت وحدات الطول/الحجم تُحفظ في القاعدة ولا
+   *  تظهر لأي منتج أبداً)، والمعامل يحدده التاجر فتبقى رياضيات
+   *  وحدة الأساس سليمة. */
+  const unitKindAllowed = useCallback(
+    (unit: Unit): boolean =>
+      saleMode === 'weight'
+        ? unit.kind === 'weight' || unit.kind === 'volume'
+        : unit.kind === 'piece' ||
+          unit.kind === 'length' ||
+          unit.kind === 'volume',
+    [saleMode],
+  );
+
+  /** v75 (الجولة 79): إنشاء وحدة جديدة من داخل النموذج — الاسم
+   *  يُكتب هنا والنوع يُستنتج من طريقة البيع داخل نطاق نمط المتجر؛
+   *  تُحفظ في القاعدة فوراً وتُلحق صفاً جديداً فتظهر في كل منتج
+   *  جديد بعدها (كان التاجر يُحال للإعدادات ويخرج من النموذج). */
+  const createUnitInline = useCallback(async () => {
+    const name = newUnitName.trim();
+    if (name.length === 0) {
+      toast('اكتب اسم الوحدة أولاً', 'error');
+      return;
+    }
+    try {
+      const unitId = await UnitRepo.create(
+        name,
+        name,
+        saleMode === 'weight' ? 'weight' : 'piece',
+        settings.storeMode,
+      );
+      const unitList = await UnitRepo.list(settings.storeMode);
+      setUnits(unitList);
+      setUnitRows(prev =>
+        prev.some(row => row.unit_id === unitId)
+          ? prev
+          : [
+              ...prev,
+              {unit_id: unitId, conversion: '', retail: '', wholesale: '', barcode: ''},
+            ],
+      );
+      setNewUnitName('');
+      setShowNewUnit(false);
+      toast(
+        `أُنشئت وحدة «${name}» — حُفظت وستظهر في كل منتج جديد`,
+        'success',
+      );
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : 'تعذر إنشاء الوحدة',
+        'error',
+      );
+    }
+  }, [newUnitName, saleMode, settings.storeMode, toast]);
+
   const addUnitRow = useCallback(() => {
     const used = new Set(unitRows.map(row => row.unit_id));
-    const kindMatch = (unit: Unit) =>
-      saleMode === 'weight' ? unit.kind === 'weight' : unit.kind === 'piece';
-    const free = units.find(unit => !used.has(unit.id) && kindMatch(unit));
+    const free = units.find(unit => !used.has(unit.id) && unitKindAllowed(unit));
     if (free == null) {
-      toast(
-        saleMode === 'weight'
-          ? 'كل وحدات الوزن مستخدمة — أضف وحدات جديدة من الإعدادات'
-          : 'كل وحدات القطع مستخدمة — أضف وحدات جديدة من الإعدادات',
-        'info',
-      );
+      /* v75: لا رسالة «اذهب للإعدادات» — الإنشاء هنا مباشرة. */
+      setShowNewUnit(true);
       return;
     }
     setUnitRows(prev => [
       ...prev,
       {unit_id: free.id, conversion: '', retail: '', wholesale: '', barcode: ''},
     ]);
-  }, [unitRows, units, toast, saleMode]);
+  }, [unitRows, units, unitKindAllowed]);
 
   const updateUnitRow = useCallback(
     (index: number, patch: Partial<UnitRowDraft>) => {
@@ -1152,6 +1226,12 @@ export function ProductFormModal({
     const custom = lotCustomSize.trim();
     if (custom.length > 0 && !lotSizes.includes(custom)) {
       setLotSizes(prev => [...prev, custom]);
+      /* v75 (الجولة 79): يُحفظ دائماً في الإعدادات — يظهر في كل
+       * منتج جديد بعده بدل أن يضيع مع أول تصفير للنموذج. */
+      if (!(modeConfig.variantSizes ?? []).includes(custom)) {
+        addCustomVariantOption('size', settings.storeMode, custom);
+        toast(`حُفظ مقاس «${custom}» — سيظهر في كل منتج جديد`, 'info');
+      }
     }
     setLotCustomSize('');
   };
@@ -1159,6 +1239,10 @@ export function ProductFormModal({
     const custom = lotCustomColor.trim();
     if (custom.length > 0 && !lotColors.includes(custom)) {
       setLotColors(prev => [...prev, custom]);
+      if (!(modeConfig.variantColors ?? []).includes(custom)) {
+        addCustomVariantOption('color', settings.storeMode, custom);
+        toast(`حُفظ لون «${custom}» — سيظهر في كل منتج جديد`, 'info');
+      }
     }
     setLotCustomColor('');
   };
@@ -1251,6 +1335,57 @@ export function ProductFormModal({
     }
     setVariantDrafts(prev => [...prev, {color: c, size: s, stock: 0}]);
   };
+  /* ── v75 (الجولة 79 #٣): إضافة سهلة للربطة الموجودة — طلب التاجر
+   * نصاً: عند تعديل منتج (ملابس وأحذية) يضيف لوناً جديداً بكل
+   * المقاسات الحالية أو مقاساً جديداً لكل الألوان الحالية بلمسة
+   * واحدة — لا صفوف يدوية بعد اليوم. الكمية تبدأ صفراً فيُعدّلها
+   * التاجر بعدها كأي خلية (أو بزر «إضافة ربطة»). ── */
+  const addColorWithAllSizes = (color: string) => {
+    const c = color.trim();
+    if (c.length === 0) {
+      return;
+    }
+    if (variantDrafts.some(v => v.color === c)) {
+      toast(`اللون «${c}» موجود بالفعل في الربطة`, 'info');
+      return;
+    }
+    const sizes = [...new Set(variantDrafts.map(v => v.size))];
+    if (sizes.length === 0) {
+      toast('أضف مقاساً واحداً على الأقل أولاً', 'info');
+      return;
+    }
+    setVariantDrafts(prev => [
+      ...prev,
+      ...sizes.map(size => ({color: c, size, stock: 0})),
+    ]);
+    if (!(modeConfig.variantColors ?? []).includes(c)) {
+      addCustomVariantOption('color', settings.storeMode, c);
+    }
+    toast(`أُضيف لون «${c}» بكل المقاسات (${sizes.length}) — عدّل كمياته`, 'success');
+  };
+  const addSizeToAllColors = (size: string) => {
+    const s = size.trim();
+    if (s.length === 0) {
+      return;
+    }
+    if (variantDrafts.some(v => v.size === s)) {
+      toast(`المقاس «${s}» موجود بالفعل في الربطة`, 'info');
+      return;
+    }
+    const colors = [...new Set(variantDrafts.map(v => v.color))];
+    if (colors.length === 0) {
+      toast('أضف لوناً واحداً على الأقل أولاً', 'info');
+      return;
+    }
+    setVariantDrafts(prev => [
+      ...prev,
+      ...colors.map(color => ({color, size: s, stock: 0})),
+    ]);
+    if (!(modeConfig.variantSizes ?? []).includes(s)) {
+      addCustomVariantOption('size', settings.storeMode, s);
+    }
+    toast(`أُضيف مقاس «${s}» لكل الألوان (${colors.length}) — عدّل كمياته`, 'success');
+  };
   /** «إضافة ربطة» — كل مقاسات لونٍ += عدد الربط دفعة واحدة. */
   const addBundleToColor = (color: string) =>
     setVariantDrafts(prev =>
@@ -1281,6 +1416,12 @@ export function ProductFormModal({
     const custom = customSizeName.trim();
     if (custom.length > 0 && !sizeDrafts.some(d => d.size === custom)) {
       setSizeDrafts(prev => [...prev, {size: custom, price: '', cost: ''}]);
+      /* v75 (الجولة 79): الحجم المخصص يُحفظ دائماً — يظهر في كل
+       * منتج جديد بنفس النمط بدل أن يضيع مع تصفير النموذج. */
+      if (!(modeConfig.productCopy.sizeSeeds ?? []).includes(custom)) {
+        addCustomVariantOption('size', settings.storeMode, custom);
+        toast(`حُفظ حجم «${custom}» — سيظهر في كل منتج جديد`, 'info');
+      }
     }
     setCustomSizeName('');
   };
@@ -2732,24 +2873,16 @@ export function ProductFormModal({
                             }>
                             −
                           </button>
-                          <input
+                          {/* v75 (الجولة 79 #٤): أرقام إنجليزية دائماً —
+                              كان type=number يرسم أرقام لغة النظام
+                              (٠١٢٣ على ويندوز عربي) — والضغط على الحقل
+                              يحدد رقمه بالكامل فيستبدل بالكتابة فوراً. */}
+                          <EnNumInput
                             className="pf-copies-value"
-                            type="number"
-                            min={1}
-                            max={500}
-                            inputMode="numeric"
-                            aria-label="عدد النسخ لكل باركود"
                             value={labelCopies}
-                            onChange={e => {
-                              const raw = Math.max(
-                                1,
-                                Math.min(
-                                  500,
-                                  Math.round(Number(e.target.value) || 1),
-                                ),
-                              );
-                              setLabelCopies(raw);
-                            }}
+                            max={500}
+                            ariaLabel="عدد النسخ لكل باركود"
+                            onNumber={n => setLabelCopies(Math.max(1, n))}
                           />
                           <button
                             type="button"
@@ -2843,20 +2976,62 @@ export function ProductFormModal({
                       </div>
                       <div className="pf-lot-box">
                         <span className="iv57-hint">
-                          المقاسات داخل الربطة (قطعة من كل مقاس):
+                          المقاسات داخل الربطة (قطعة من كل مقاس) — المحفوظ
+                          دائماً بعلامة ★ والضغط على ✕ بجانبه يحذفه من
+                          القائمة الدائمة:
                         </span>
                         <div className="iv57-chips">
-                          {[...new Set([...(modeConfig.variantSizes ?? []), ...lotSizes])].map(
-                            size => (
-                              <button
-                                type="button"
+                          {[
+                            ...new Set([
+                              ...(modeConfig.variantSizes ?? []),
+                              ...savedCustomSizes,
+                              ...lotSizes,
+                            ]),
+                          ].map(size => {
+                            const custom = !(
+                              modeConfig.variantSizes ?? []
+                            ).includes(size);
+                            const saved = savedCustomSizes.includes(size);
+                            return (
+                              <span
                                 key={size}
-                                className={`iv57-chip ${lotSizes.includes(size) ? 'on' : ''}`}
-                                onClick={() => toggleLotSize(size)}>
-                                {size}
-                              </button>
-                            ),
-                          )}
+                                className={`iv57-chip-wrap ${
+                                  lotSizes.includes(size) ? 'on' : ''
+                                }`}>
+                                <button
+                                  type="button"
+                                  className={`iv57-chip ${
+                                    lotSizes.includes(size) ? 'on' : ''
+                                  } ${custom ? 'custom' : ''}`}
+                                  onClick={() => toggleLotSize(size)}>
+                                  {size}
+                                  {custom ? (saved ? ' ★' : ' ✎') : ''}
+                                </button>
+                                {custom ? (
+                                  <button
+                                    type="button"
+                                    className="iv57-chip-x"
+                                    title="حذف من القائمة الدائمة"
+                                    onClick={() => {
+                                      removeCustomVariantOption(
+                                        'size',
+                                        settings.storeMode,
+                                        size,
+                                      );
+                                      setLotSizes(prev =>
+                                        prev.filter(s => s !== size),
+                                      );
+                                      toast(
+                                        `أُزيل مقاس «${size}» من القائمة الدائمة`,
+                                        'info',
+                                      );
+                                    }}>
+                                    <Icon name="x" size={11} />
+                                  </button>
+                                ) : null}
+                              </span>
+                            );
+                          })}
                         </div>
                         <div className="pf-inline-add">
                           <input
@@ -2874,19 +3049,62 @@ export function ProductFormModal({
                             + مقاس
                           </button>
                         </div>
-                        <span className="iv57-hint">الألوان:</span>
+                        <span className="iv57-hint">
+                          الألوان — المحفوظ دائماً بعلامة ★ والضغط على ✕
+                          بجانبه يحذفه من القائمة الدائمة:
+                        </span>
                         <div className="iv57-chips">
-                          {[...new Set([...(modeConfig.variantColors ?? []), ...lotColors])].map(
-                            color => (
-                              <button
-                                type="button"
+                          {[
+                            ...new Set([
+                              ...(modeConfig.variantColors ?? []),
+                              ...savedCustomColors,
+                              ...lotColors,
+                            ]),
+                          ].map(color => {
+                            const custom = !(
+                              modeConfig.variantColors ?? []
+                            ).includes(color);
+                            const saved = savedCustomColors.includes(color);
+                            return (
+                              <span
                                 key={color}
-                                className={`iv57-chip ${lotColors.includes(color) ? 'on' : ''}`}
-                                onClick={() => toggleLotColor(color)}>
-                                {color}
-                              </button>
-                            ),
-                          )}
+                                className={`iv57-chip-wrap ${
+                                  lotColors.includes(color) ? 'on' : ''
+                                }`}>
+                                <button
+                                  type="button"
+                                  className={`iv57-chip ${
+                                    lotColors.includes(color) ? 'on' : ''
+                                  } ${custom ? 'custom' : ''}`}
+                                  onClick={() => toggleLotColor(color)}>
+                                  {color}
+                                  {custom ? (saved ? ' ★' : ' ✎') : ''}
+                                </button>
+                                {custom ? (
+                                  <button
+                                    type="button"
+                                    className="iv57-chip-x"
+                                    title="حذف من القائمة الدائمة"
+                                    onClick={() => {
+                                      removeCustomVariantOption(
+                                        'color',
+                                        settings.storeMode,
+                                        color,
+                                      );
+                                      setLotColors(prev =>
+                                        prev.filter(c => c !== color),
+                                      );
+                                      toast(
+                                        `أُزيل لون «${color}» من القائمة الدائمة`,
+                                        'info',
+                                      );
+                                    }}>
+                                    <Icon name="x" size={11} />
+                                  </button>
+                                ) : null}
+                              </span>
+                            );
+                          })}
                         </div>
                         <div className="pf-inline-add">
                           <input
@@ -2907,13 +3125,23 @@ export function ProductFormModal({
                         <div className="pf-grid2">
                           <div className="pf-field">
                             <label>عدد الربط (من كل مقاس لكل لون)</label>
+                            {/* v75 (الجولة 79 #٤): أرقام إنجليزية +
+                                تحديد عند الضغط — كان type=number يرسم
+                                أرقام النظام العربية. */}
                             <input
                               className="iv57-num"
+                              dir="ltr"
                               inputMode="numeric"
                               value={lotBundles}
                               onChange={e =>
-                                setLotBundles(e.target.value.replace(/[^0-9]/g, ''))
+                                setLotBundles(
+                                  toEnglishDigits(e.target.value).replace(
+                                    /[^0-9]/g,
+                                    '',
+                                  ),
+                                )
                               }
+                              onFocus={e => e.target.select()}
                               placeholder="1"
                             />
                           </div>
@@ -2996,17 +3224,20 @@ export function ProductFormModal({
                                         <span
                                           className="pf-lotgrid-cell"
                                           key={`c-${color}-${size}`}>
-                                          <input
+                                          {/* v75 (الجولة 79 #٤): أرقام
+                                              إنجليزية دائماً + تحديد
+                                              كامل عند الضغط (رقم جديد
+                                              يستبدل القديم فوراً). */}
+                                          <EnNumInput
                                             className="pf-lotcell"
-                                            type="number"
-                                            min={0}
-                                            inputMode="numeric"
                                             value={cell?.stock ?? 0}
-                                            onChange={e =>
+                                            max={99999}
+                                            ariaLabel={`قطع ${color} ${size}`}
+                                            onNumber={stock =>
                                               setLotCellStock(
                                                 color,
                                                 size,
-                                                Number(e.target.value) || 0,
+                                                stock,
                                               )
                                             }
                                           />
@@ -3072,15 +3303,18 @@ export function ProductFormModal({
                                 key={`edit-${row.color}-${row.size}`}
                                 className="pf-variant-row">
                                 <span className="pf-size-label">{row.size}</span>
-                                <input
+                                {/* v75 (الجولة 79 #٤): أرقام إنجليزية
+                                    دائماً + تحديد كامل عند الضغط. */}
+                                <EnNumInput
                                   className="iv57-num"
-                                  inputMode="numeric"
-                                  value={String(row.stock)}
-                                  onChange={e =>
+                                  value={row.stock}
+                                  max={99999}
+                                  ariaLabel={`كمية ${row.color} ${row.size}`}
+                                  onNumber={stock =>
                                     setVariantStock(
                                       row.color,
                                       row.size,
-                                      Math.round(parseNumber(e.target.value) || 0),
+                                      Math.min(99999, Math.max(0, stock)),
                                     )
                                   }
                                 />
@@ -3096,6 +3330,106 @@ export function ProductFormModal({
                           </div>
                         );
                       })}
+                      {/* v75 (الجولة 79 #٣): رقائق سريعة — لون جديد بكل
+                          المقاسات الحالية / مقاس جديد لكل الألوان
+                          الحالية بلمسة واحدة على الربطة الموجودة. */}
+                      <div className="pf-quickadd-box">
+                        <div className="pf-qa-row">
+                          <span className="iv57-hint">
+                            إضافة لون للربطة (يدخل بكل المقاسات الحالية):
+                          </span>
+                          <div className="iv57-chips">
+                            {[
+                              ...new Set([
+                                ...(modeConfig.variantColors ?? []),
+                                ...savedCustomColors,
+                              ]),
+                            ]
+                              .filter(cl => !variantColors.includes(cl))
+                              .map(cl => (
+                                <button
+                                  type="button"
+                                  key={`qa-color-${cl}`}
+                                  className="iv57-chip custom"
+                                  onClick={() => addColorWithAllSizes(cl)}>
+                                  + {cl}
+                                </button>
+                              ))}
+                          </div>
+                          <div className="pf-inline-add">
+                            <input
+                              value={variantNewColor}
+                              onChange={e => setVariantNewColor(e.target.value)}
+                              placeholder="لون آخر واضغط إضافة…"
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  addColorWithAllSizes(variantNewColor);
+                                  setVariantNewColor('');
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              className="btn sm"
+                              onClick={() => {
+                                addColorWithAllSizes(variantNewColor);
+                                setVariantNewColor('');
+                              }}>
+                              + لون
+                            </button>
+                          </div>
+                        </div>
+                        <div className="pf-qa-row">
+                          <span className="iv57-hint">
+                            إضافة مقاس للربطة (يدخل لكل الألوان الحالية):
+                          </span>
+                          <div className="iv57-chips">
+                            {[
+                              ...new Set([
+                                ...(modeConfig.variantSizes ?? []),
+                                ...savedCustomSizes,
+                              ]),
+                            ]
+                              .filter(
+                                sz =>
+                                  !variantDrafts.some(v => v.size === sz),
+                              )
+                              .map(sz => (
+                                <button
+                                  type="button"
+                                  key={`qa-size-${sz}`}
+                                  className="iv57-chip custom"
+                                  onClick={() => addSizeToAllColors(sz)}>
+                                  + {sz}
+                                </button>
+                              ))}
+                          </div>
+                          <div className="pf-inline-add">
+                            <input
+                              value={variantNewSize}
+                              onChange={e => setVariantNewSize(e.target.value)}
+                              placeholder="مقاس آخر واضغط إضافة…"
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  addSizeToAllColors(variantNewSize);
+                                  setVariantNewSize('');
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              className="btn sm"
+                              onClick={() => {
+                                addSizeToAllColors(variantNewSize);
+                                setVariantNewSize('');
+                              }}>
+                              + مقاس
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                       <VariantAddRow onAdd={addVariantRow} />
                       <span className="iv57-hint">
                         الموديل يُحفظ منتجاً واحداً — عند البيع تختار اللون
@@ -3123,19 +3457,52 @@ export function ProductFormModal({
                       </span>
                       {sizesEnabled && (
                         <>
-                          {sizeSeeds.length > 0 && (
+                          {(sizeSeeds.length > 0 || savedCustomSizes.length > 0) && (
                             <div className="iv57-chips">
-                              {sizeSeeds.map(seed => (
-                                <button
-                                  type="button"
-                                  key={`sizesize-${seed}`}
-                                  className={`iv57-chip ${
-                                    sizeDrafts.some(d => d.size === seed) ? 'on' : ''
-                                  }`}
-                                  onClick={() => toggleSizeDraft(seed)}>
-                                  {seed}
-                                </button>
-                              ))}
+                              {[
+                                ...new Set([...sizeSeeds, ...savedCustomSizes]),
+                              ].map(seed => {
+                                const customSeed = !sizeSeeds.includes(seed);
+                                return (
+                                  <span
+                                    key={`sizewrap-${seed}`}
+                                    className="iv57-chip-wrap">
+                                    <button
+                                      type="button"
+                                      className={`iv57-chip ${
+                                        sizeDrafts.some(d => d.size === seed)
+                                          ? 'on'
+                                          : ''
+                                      } ${customSeed ? 'custom' : ''}`}
+                                      onClick={() => toggleSizeDraft(seed)}>
+                                      {seed}
+                                      {customSeed ? ' ★' : ''}
+                                    </button>
+                                    {customSeed ? (
+                                      <button
+                                        type="button"
+                                        className="iv57-chip-x"
+                                        title="حذف من القائمة الدائمة"
+                                        onClick={() => {
+                                          removeCustomVariantOption(
+                                            'size',
+                                            settings.storeMode,
+                                            seed,
+                                          );
+                                          setSizeDrafts(prev =>
+                                            prev.filter(d => d.size !== seed),
+                                          );
+                                          toast(
+                                            `أُزيل حجم «${seed}» من القائمة الدائمة`,
+                                            'info',
+                                          );
+                                        }}>
+                                        <Icon name="x" size={11} />
+                                      </button>
+                                    ) : null}
+                                  </span>
+                                );
+                              })}
                             </div>
                           )}
                           <div className="pf-inline-add">
@@ -3277,9 +3644,12 @@ export function ProductFormModal({
                               .filter(
                                 unit =>
                                   unit.id === row.unit_id ||
-                                  !unitRows.some(
+                                  (!unitRows.some(
                                     other => other.unit_id === unit.id,
-                                  ),
+                                  ) &&
+                                    /* v75: الطول والحجم متاحان — نفس
+                                     * فلطر الإضافة الواحد. */
+                                    unitKindAllowed(unit)),
                               )
                               .forEach(unit =>
                                 unitSelectOptions.push({
@@ -3381,6 +3751,16 @@ export function ProductFormModal({
                       <button type="button" className="btn sm" onClick={addUnitRow}>
                         + صف وحدة
                       </button>
+                      {/* v75 (الجولة 79): إنشاء وحدة جديدة هنا — تُحفظ
+                          في القاعدة فوراً فتظهر في كل منتج جديد. */}
+                      {!showNewUnit ? (
+                        <button
+                          type="button"
+                          className="iv57-chip custom"
+                          onClick={() => setShowNewUnit(true)}>
+                          + وحدة جديدة
+                        </button>
+                      ) : null}
                       {saleMode === 'weight' &&
                         WEIGHT_PACKAGE_PRESETS.map(preset => (
                           <button
@@ -3392,6 +3772,40 @@ export function ProductFormModal({
                           </button>
                         ))}
                     </div>
+                    {showNewUnit && (
+                      <div className="pf-inline-add pf-newunit">
+                        <input
+                          value={newUnitName}
+                          onChange={e => setNewUnitName(e.target.value)}
+                          placeholder={
+                            saleMode === 'weight'
+                              ? 'اسم وحدة الوزن الجديدة (مثال: ربع كغ، أونصة)…'
+                              : 'اسم الوحدة الجديدة (مثال: متر، لتر، دزينة)…'
+                          }
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              void createUnitInline();
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="btn sm primary"
+                          onClick={() => void createUnitInline()}>
+                          إنشاء وإضافة
+                        </button>
+                        <button
+                          type="button"
+                          className="btn sm ghost"
+                          onClick={() => {
+                            setShowNewUnit(false);
+                            setNewUnitName('');
+                          }}>
+                          إلغاء
+                        </button>
+                      </div>
+                    )}
                     {saleMode === 'weight' && (
                       <span className="iv57-hint">
                         حزم الوزن الجاهزة تنشئ الوحدة (إن لم توجد) بمعاملها
@@ -3454,6 +3868,57 @@ export function ProductFormModal({
 }
 
 /* ── عناصر مساعدة ───────────────────────────────────────────── */
+
+/** v75 (الجولة 79 — سطح المكتب #٤): تطبيع الأرقام للأرقام الإنجليزية —
+ *  أرقام لوحة المفاتيح العربية (٠١٢٣…) والفارسية (۰۱۲۳…) تتحول
+ *  فوراً إلى 0-9 فلا يرى التاجر رقماً عربياً في حقل إدخال أبداً. */
+export function toEnglishDigits(text: string): string {
+  return text
+    .replace(/[\u0660-\u0669]/g, ch => String(ch.charCodeAt(0) - 0x0660))
+    .replace(/[\u06f0-\u06f9]/g, ch => String(ch.charCodeAt(0) - 0x06f0));
+}
+
+/**
+ * v75 (الجولة 79 — سطح المكتب #٤): حقل عدد بأرقام إنجليزية دائماً.
+ * الجذر: حقول type="number" يرسمها Chromium بأرقام لغة النظام — على
+ * ويندوز عربي تظهر ٠١٢٣ فيضطر التاجر لقراءتها رأساً. المعالجة:
+ *  • حقل نصي LTR (الأرقام إنجليزية حرفياً مهما كانت لغة النظام).
+ *  • أي رقم عربي يُطبَّع إلى إنجليزي لحظة الكتابة.
+ *  • الضغط على الحقل يحدد رقمه بالكامل — كتابة رقم جديد تستبدله
+ *    فوراً («يفرغه حتى يسهل إضافة رقم جديد» بطلب التاجر نصاً). */
+function EnNumInput({
+  value,
+  onNumber,
+  className,
+  max,
+  ariaLabel,
+  placeholder,
+}: {
+  value: number;
+  onNumber: (next: number) => void;
+  className?: string;
+  max?: number;
+  ariaLabel?: string;
+  placeholder?: string;
+}) {
+  return (
+    <input
+      type="text"
+      dir="ltr"
+      inputMode="numeric"
+      className={className}
+      aria-label={ariaLabel}
+      placeholder={placeholder}
+      value={String(value)}
+      onChange={e => {
+        const digits = toEnglishDigits(e.target.value).replace(/[^0-9]/g, '');
+        const parsed = digits === '' ? 0 : parseInt(digits, 10);
+        onNumber(max != null ? Math.min(max, parsed) : parsed);
+      }}
+      onFocus={e => e.target.select()}
+    />
+  );
+}
 
 /** سطر إضافة متغير جديد (لون × مقاس) في محرّر المتغيرات. */
 function VariantAddRow({

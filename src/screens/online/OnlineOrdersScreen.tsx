@@ -16,6 +16,11 @@ import {ProductRepo} from '../../database/repositories/ProductRepo';
 import {useCatalogStore, useToastStore} from '../../state/appStores';
 import {useSettingsStore} from '../../state/settingsStore';
 import {
+  activePaymentMethods,
+  paymentMethodById,
+} from '../../core/paymentMethods';
+import {PaymentMethodIcon} from '../../components/PaymentMethodIcon';
+import {
   acceptOrder,
   cancelOrder,
   deliverOrder,
@@ -82,10 +87,15 @@ export function OnlineOrdersScreen() {
   const [detail, setDetail] = useState<OnlineOrder | null>(null);
   const [detailItems, setDetailItems] = useState<OnlineOrderItem[]>([]);
   const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [actionPrompt, setActionPrompt] = useState<'reject' | 'cancel' | null>(
-    null,
-  );
+  const [actionPrompt, setActionPrompt] = useState<
+    'reject' | 'cancel' | 'collect' | null
+  >(null);
   const [reason, setReason] = useState('');
+  /* v75 (الجولة 79 — أهم مطلب): استلام دفع الطلبات أونلاين — قبل
+   * تأكيد التسليم يختار البائع طريقة التحصيل (نقدي أو أي بنك/
+   * محفظة مفعلة): سند التحصيل على القناة الصحيحة وفاتورة الطلب
+   * تحمل الطريقة فتظهر مميزة في مركز الفواتير وتقارير الأرصدة. */
+  const [collectMethod, setCollectMethod] = useState('cash');
 
   /* v57 (الجولة 61): نحمّل كل الطلبات دفعة واحدة — شارات العدد على كل
    * فلتر تحتاج عدّ الحالات كلها، والتصفية تجري محلياً فوراً. */
@@ -159,6 +169,33 @@ export function OnlineOrdersScreen() {
       }
     },
     [busyAction, reload, toast],
+  );
+
+  /* v75 (الجولة 79): الطرق المفعلة لنافذة التحصيل. */
+  const collectMethods = useMemo(
+    () => activePaymentMethods(settings.paymentMethodsEnabled),
+    [settings.paymentMethodsEnabled],
+  );
+
+  /** v75: المبلغ القائم للتحصيل (نفس معادلة السند). */
+  const outstandingOf = useCallback(
+    (order: OnlineOrder) =>
+      order.total_minor -
+      Math.min(order.returned_minor, order.items_total_minor),
+    [],
+  );
+
+  const confirmCollect = useCallback(
+    (order: OnlineOrder) => {
+      const method = paymentMethodById(collectMethod);
+      void runAction(async () => {
+        await deliverOrder(order, collectMethod);
+        return `تم تأكيد التسليم — حُصّل ${formatMoney(
+          outstandingOf(order) / 100,
+        )} عبر ${method.label} بسند تحصيل على قناته — وفاتورة الطلب تحمل الطريقة`;
+      }, 'deliver');
+    },
+    [collectMethod, runAction, outstandingOf],
   );
 
   /** طباعة إيصال فاتورة INV-O بعد الإرسال — فشل الطباعة لا يمس
@@ -462,9 +499,11 @@ export function OnlineOrdersScreen() {
                 )}
               </div>
 
-              {/* الإجراءات حسب الحالة — نفس انتقالات الأندرويد */}
+              {/* الإجراءات حسب الحالة — نفس انتقالات الأندرويد.
+                  v75: نافذة التحصيل (collect) تُعرض من كتلة الطلب
+                  المُرسل نفسها — هذا الصندوق لسببي الرفض/الإلغاء فقط. */}
               <div className="olo-actions">
-                {actionPrompt != null ? (
+                {actionPrompt === 'reject' || actionPrompt === 'cancel' ? (
                   <div className="olo-reason-box">
                     <label style={{fontSize: 12.5, fontWeight: 700}}>
                       {actionPrompt === 'reject'
@@ -563,22 +602,81 @@ export function OnlineOrdersScreen() {
                     )}
                     {detail.status === 'sent' && (
                       <>
-                        <button
-                          className="btn primary"
-                          disabled={busyAction != null}
-                          onClick={() =>
-                            void runAction(async () => {
-                              await deliverOrder(detail);
-                              return 'تم تأكيد التسليم — حُوّل المبلغ من الدين إلى الخزينة بسند تحصيل';
-                            }, 'deliver')
-                          }>
-                          تأكيد التسليم (الدين → الخزينة)
-                        </button>
+                        {actionPrompt === 'collect' ? (
+                          /* v75 (الجولة 79 — أهم مطلب): نافذة استلام
+                           * الدفع — اختيار طريقة التحصيل قبل تأكيد
+                           * التسليم: نقدي أو أي بنك/محفظة مفعلة. */
+                          <div className="olo-collect">
+                            <div className="olo-collect-head">
+                              <b>
+                                استلام دفع الطلب {detail.order_number}
+                              </b>
+                              <span className="olo-hint">
+                                المبلغ القائم:{' '}
+                                {formatMoney(outstandingOf(detail) / 100)} —
+                                اختر الطريقة التي حُصّل بها
+                              </span>
+                            </div>
+                            <div className="olo-collect-grid">
+                              {collectMethods.map(method => (
+                                <button
+                                  type="button"
+                                  key={method.id}
+                                  className={`olo-collect-card ${
+                                    collectMethod === method.id ? 'on' : ''
+                                  }`}
+                                  onClick={() => setCollectMethod(method.id)}>
+                                  <PaymentMethodIcon
+                                    method={method}
+                                    size={40}
+                                  />
+                                  <span className="name">{method.label}</span>
+                                  <span className="kind">
+                                    {method.kind === 'cash'
+                                      ? 'الخزينة النقدية'
+                                      : method.kind === 'bank'
+                                      ? 'تحويل بنكي'
+                                      : 'محفظة إلكترونية'}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                            <div style={{display: 'flex', gap: 8}}>
+                              <button
+                                className="btn primary"
+                                disabled={busyAction != null}
+                                onClick={() => confirmCollect(detail)}>
+                                {busyAction === 'deliver'
+                                  ? 'جارٍ التحصيل…'
+                                  : `تحصيل عبر ${
+                                      paymentMethodById(collectMethod).label
+                                    } وتأكيد التسليم`}
+                              </button>
+                              <button
+                                className="btn ghost"
+                                disabled={busyAction != null}
+                                onClick={() => setActionPrompt(null)}>
+                                رجوع
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            className="btn primary"
+                            disabled={busyAction != null}
+                            onClick={() => {
+                              setCollectMethod('cash');
+                              setActionPrompt('collect');
+                            }}>
+                            تأكيد التسليم واستلام الدفع
+                          </button>
+                        )}
                         <div className="olo-hint">
-                          يُسجّل سند تحصيل بالمبلغ القائم ويُطبع من سجل
-                          الخزينة — الإرجاع بعد التسليم يتم من مركز الفواتير
-                          على فاتورة {detail.invoice_ref ?? 'INV-O'} كأي بيع
-                          عادي.
+                          اختر طريقة التحصيل (نقدي أو بنك/محفظة مفعلة) —
+                          يُسجّل سند تحصيل بالمبلغ القائم على القناة التي
+                          اخترتها، وفاتورة الطلب تُميَّز بطريتها في مركز
+                          الفواتير. الإرجاع بعد التسليم من مركز الفواتير على
+                          فاتورة {detail.invoice_ref ?? 'INV-O'}.
                         </div>
                       </>
                     )}

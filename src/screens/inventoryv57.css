@@ -48,6 +48,36 @@
   color: var(--muted);
 }
 
+/* v75 (الجولة 79): رقاقة مخصصة داخل غلاف — زر ✐ صغير يحذفها من
+   القائمة الدائمة (المحفوظة في الإعدادات) دون لمس المفعّل منها. */
+.iv57-chip-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.iv57-chip.custom:not(.on) {
+  border-style: dashed;
+}
+.iv57-chip-x {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  border-radius: 999px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.iv57-chip-x:hover {
+  border-color: var(--danger, #dc2626);
+  color: var(--danger, #dc2626);
+  background: var(--surface-2);
+}
+
 /* مفتاح تبديل (checkbox مقنّع) */
 .iv57-switch {
   display: inline-flex;
@@ -478,6 +508,32 @@
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--ink);
+}
+
+/* v75 (الجولة 79): صندوق الإضافة السريعة لمحرّر التعديل — لون جديد
+   بكل المقاسات / مقاس جديد لكل الألوان بلمسة واحدة. */
+.pf-quickadd-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 6px 0 10px;
+  background: var(--surface);
+}
+.pf-qa-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pf-qa-row .pf-inline-add {
+  margin-top: 2px;
+}
+
+/* v75: حقل إنشاء وحدة جديدة داخل النموذج. */
+.pf-newunit {
+  margin-top: 4px;
 }
 
 /* ── صورة المنتج (v59 — جولة المستخدم #5) ─────────────────── */

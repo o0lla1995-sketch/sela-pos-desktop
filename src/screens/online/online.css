@@ -329,3 +329,62 @@
   font-size: 12.5px;
   line-height: 1.8;
 }
+
+/* ── v75 (الجولة 79 — أهم مطلب): نافذة استلام دفع الطلب أونلاين ──
+   اختيار طريقة التحصيل (نقدي/بنك/محفظة) قبل تأكيد التسليم — نفس
+   هوية بطاقات الدفع في نقطة البيع. */
+.olo-collect {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--surface);
+  width: 100%;
+}
+.olo-collect-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.olo-collect-head b {
+  font-size: 13.5px;
+}
+.olo-collect-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.olo-collect-card {
+  flex: 1 1 130px;
+  min-width: 118px;
+  max-width: 168px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 12px 8px 10px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.olo-collect-card:hover {
+  border-color: var(--brand);
+}
+.olo-collect-card.on {
+  border-color: var(--brand);
+  background: var(--surface-2, var(--surface));
+}
+.olo-collect-card .name {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.olo-collect-card .kind {
+  font-size: 10.5px;
+  color: var(--muted);
+}
