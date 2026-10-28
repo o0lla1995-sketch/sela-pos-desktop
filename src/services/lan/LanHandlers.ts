@@ -720,6 +720,10 @@ export async function handleLanRequest(
     // (نفس مسار ماسح USB تماماً: إضافة للسلة عند البيع وتعبئة حقل
     // الباركود عند إضافة المنتجات). مستقل تماماً عن مهام الكاشير
     // المحلية — لا يلمس السلة ولا الفواتير في التطبيق إطلاقاً.
+    // v73 (الجولة 77 #1): الرد يشرح وجهة القراءة بدقة — wedge
+    // (كُتبت في الحقل المركز) أو معالج شاشة، أو لم تُستقبل أصلاً
+    // (لا شاشة بيع ولا نموذج مفتوح) فيحذّر الجوال بصراحة بدل
+    // رسالة «غير معروف» المضللة.
     if (path === '/api/scan' && method === 'POST') {
       let code = '';
       try {
@@ -731,7 +735,7 @@ export async function handleLanRequest(
       if (code.trim().length < 4) {
         return fail(400, 'باركود قصير جداً');
       }
-      const injected = injectBarcode(code);
+      const injection = injectBarcode(code);
       // هل المنتج معروف؟ للتغذية الراجعة على الجوال (صوت نجاح/تنبيه).
       let known = false;
       let productName: string | null = null;
@@ -751,7 +755,16 @@ export async function handleLanRequest(
       } catch {
         /* البحث أفضل جهد — الحقن نفسه هو المهم */
       }
-      return ok({ok: true, injected, known, productName});
+      return ok({
+        ok: true,
+        injected: injection.injected,
+        wedge: injection.wedge,
+        reason: injection.reason,
+        // عند الكتابة في حقل مركز: القراءة وصلت وجهتها سواء عُرف
+        // المنتج أم لا (المنتج الجديد غير معروف بطبيعته).
+        known: injection.wedge ? true : known,
+        productName,
+      });
     }
 
     if (path === '/api/catalog' && method === 'GET') {
@@ -1204,6 +1217,10 @@ async function handleInvoiceList(
     isReturn: String(row.invoice_number ?? '').startsWith('RET-'),
     returnedMinor: Number(row.returned_minor ?? 0),
     paymentType: String(row.payment_type ?? 'RETAIL'),
+    // v73 (الجولة 77 — كاشير #3): طريقة الدفع الفعلية (بنك/محفظة
+    // أو نقدي) كي يعرض تطبيق الكاشير شارة الطريقة على كل فاتورة
+    // ويتطابق أرشيفه مع نقطة البيع تماماً.
+    paymentMethod: String(row.payment_method ?? 'cash') || 'cash',
     itemCount: Number(row.item_count ?? 0),
     createdAt: String(row.created_at ?? ''),
     clientRef: row.client_ref ? String(row.client_ref) : null,

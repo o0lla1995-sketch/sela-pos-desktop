@@ -6,10 +6,11 @@
  * + طريقة بيع (حبة/علبة/غرام) + مخزون اختياري — السجائر تُضاف في
  * ثوانٍ وتُباع بالحبة المفردة أو بالعلبة أو بالغرام.
  */
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {QuickProductService, type QuickSellBy} from '../services/QuickProductService';
 import {useCatalogStore} from '../state/appStores';
 import {useToastStore} from '../state/appStores';
+import {pushBarcodeHandler, beep} from '../lib/scanner';
 
 const SELL_BY_OPTIONS: {key: QuickSellBy; label: string; hint: string}[] = [
   {key: 'piece', label: 'بالحبة', hint: 'سعر الحبة — وسعر العلبة يُشتق'},
@@ -44,6 +45,19 @@ export function QuickProductSheet({
   const [stock, setStock] = useState('');
   const [barcode, setBarcode] = useState('');
   const [busy, setBusy] = useState(false);
+
+  /* v73 (الجولة 77 #1): الماسح اللاسلكي ← حقل الباركود — النافذة
+   *  تفتح فوق شاشة البيع فيعلو معالجها معالج السلة طوال فتحها:
+   *  مسح الجوال يعبّئ باركود المنتج الجديد بدل إضافته للسلة. */
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    return pushBarcodeHandler(code => {
+      setBarcode(code);
+      beep('ok');
+    });
+  }, [open]);
 
   const perBoxCount = useMemo(() => {
     const parsed = parsePositiveNumber(perBox);

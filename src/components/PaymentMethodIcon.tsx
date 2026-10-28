@@ -20,6 +20,14 @@
  */
 import React, {useId} from 'react';
 import type {PaymentMethod} from '../core/paymentMethods';
+/* v73 (الجولة 77): الشعارات الرسمية — أيقونات التطبيقات المنشورة
+ * على Google Play لكل بنك ومحفظة فلسطينية. */
+import bankPalestineLogo from '../assets/pm-logos/bank_palestine.png';
+import bankQudsLogo from '../assets/pm-logos/bank_quds.png';
+import bankIslamiLogo from '../assets/pm-logos/bank_islami.png';
+import jawwalPayLogo from '../assets/pm-logos/jawwal_pay.png';
+import palPayLogo from '../assets/pm-logos/palpay.png';
+import malchatLogo from '../assets/pm-logos/malchat.png';
 
 /** أي كيان شبيه بطريقة دفع (يقبل العرض التاريخي «أخرى/بطاقة»). */
 export type PaymentIconMethod = Pick<PaymentMethod, 'label'> & {id: string};
@@ -250,6 +258,24 @@ const ICONS: Record<
   card: OtherMethodIcon,
 };
 
+/**
+ * v73 (الجولة 77 — ملاحظة التاجر الأخيرة): الشعارات الرسمية
+ * الحقيقية بدل الرسوم التقريبية — أيقونات التطبيقات الرسمية
+ * المنشورة على Google Play لكل بنك ومحفظة (بنك فلسطين، بنك القدس،
+ * البنك الإسلامي، جوال باي، بال باي، مال تشات) بأعلى دقة، تُعرض
+ * داخل رقاقة بيضاء مستديرة كطريقة العرض الاحترافية المعتمدة في
+ * أنظمة الدفع. النقدي والعرضان التاريخيان (أخرى/بطاقة) يبقيان
+ * رسوماً داخلية — ليست لهما علامة خارجية.
+ */
+const REAL_LOGOS: Record<string, string> = {
+  bank_palestine: bankPalestineLogo,
+  bank_quds: bankQudsLogo,
+  bank_islami: bankIslamiLogo,
+  jawwal_pay: jawwalPayLogo,
+  palpay: palPayLogo,
+  malchat: malchatLogo,
+};
+
 export function PaymentMethodIcon({
   method,
   size = 34,
@@ -257,6 +283,18 @@ export function PaymentMethodIcon({
   method: PaymentIconMethod;
   size?: number;
 }): React.ReactElement {
+  const logo = REAL_LOGOS[method.id];
+  if (logo != null) {
+    return (
+      <span
+        className="pmi pmi-real"
+        style={{width: size, height: size}}
+        title={method.label}
+        aria-label={method.label}>
+        <img src={logo} alt={method.label} draggable={false} />
+      </span>
+    );
+  }
   const Icon = ICONS[method.id] ?? CashIcon;
   return (
     <span

@@ -26,6 +26,8 @@ import {useSettingsStore} from '../stores/settingsStore';
 import {useSilaStore} from '../stores/silaStore';
 import {ReportService} from '../services/ReportService';
 import {CashService} from '../services/CashService';
+import {activePaymentMethods} from '../core/paymentMethods';
+import {PaymentMethodIcon} from '../components/PaymentMethodIcon';
 import {SaleRepo} from '../database/repositories/SaleRepo';
 import {LocalDebtsRepo} from '../database/repositories/LocalDebtsRepo';
 import {SilaRepo} from '../services/sila/SilaRepo';
@@ -107,6 +109,12 @@ export function HomeScreen({goTo}: {goTo: (screen: string) => void}) {
   } | null>(null);
   // يُرفع بعد كل evaluate كي تُقرأ التنبيهات من نسخة الكتالوج الجديدة.
   const [alertsTick, setAlertsTick] = useState(0);
+  // v73 (الجولة 77 #4): الرصيد المتوقع لكل بنك/محفظة مفعّلة —
+  // دفتر القناة الصافي (مبيعات + سدادات + إيداعات − مرتجعات −
+  // مسحوبات − مصروفات) ككشف حساب بنكي لحظي، بشعار كل جهة الحقيقي.
+  const [methodBalances, setMethodBalances] = useState<
+    {id: string; label: string; balance: number}[]
+  >([]);
 
   const load = useCallback(async () => {
     // البيع أونلاين — أفضل جهد كامل: لا يعطّل تحميل الرئيسية أبداً.
@@ -167,6 +175,23 @@ export function HomeScreen({goTo}: {goTo: (screen: string) => void}) {
       setAlertsTick(v => v + 1);
     } catch {
       // لا يعطّل شيئاً.
+    }
+    // v73: أرصدة البنوك والمحافظ المفعّلة (بنك/محفظة فقط — النقدي
+    // له بطاقة الخزينة أعلاه). أفضل جهد — لا يعطّل اللوحة أبداً.
+    try {
+      const channels = activePaymentMethods(
+        useSettingsStore.getState().settings.paymentMethodsEnabled,
+      ).filter(m => m.id !== 'cash');
+      const balances = await Promise.all(
+        channels.map(async m => ({
+          id: m.id,
+          label: m.label,
+          balance: await ReportService.methodBalanceNow(m.id),
+        })),
+      );
+      setMethodBalances(balances);
+    } catch {
+      // أرصدة القنوات معلوماتية.
     }
   }, []);
 
@@ -309,6 +334,45 @@ export function HomeScreen({goTo}: {goTo: (screen: string) => void}) {
           </span>
         </div>
       </div>
+
+      {/* ── v73 (الجولة 77 #4): الأرصدة المتوقعة للبنوك والمحافظ
+          المفعّلة — شريط أفقي مضغوط بشعار كل جهة الحقيقي ورصيد
+          قناتها الصافي، يتحدث مع كل دورة تحديث للوحة (30 ثانية) ── */}
+      {methodBalances.length > 0 && (
+        <>
+          <div className="ih-section-head" style={{marginTop: 14}}>
+            <b>الأرصدة المتوقعة — البنوك والمحافظ المفعّلة</b>
+            <span className="hint">
+              مبيعات + سدادات + إيداعات − مرتجعات ومسحوبات ومصروفات
+            </span>
+            <button className="btn sm ghost" onClick={() => goTo('reports')}>
+              كشوف القنوات
+            </button>
+          </div>
+          <div className="ih-channels-row">
+            {methodBalances.map(channel => (
+              <div
+                className={`ih-channel-chip ${channel.balance < 0 ? 'neg' : ''}`}
+                key={channel.id}
+                title={`${channel.label} — الرصيد الصافي المتوقع الآن`}>
+                <PaymentMethodIcon
+                  method={{
+                    id: channel.id,
+                    label: channel.label,
+                  }}
+                  size={30}
+                />
+                <span className="ih-channel-texts">
+                  <span className="ih-channel-name">{channel.label}</span>
+                  <span className="ih-channel-balance" dir="ltr">
+                    {formatMoney(channel.balance)}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* ── إجراءات سريعة ─────────────────────────────────────── */}
       <div className="ih-section-head">

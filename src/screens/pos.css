@@ -679,36 +679,40 @@
   background: var(--surface);
 }
 /* v72 (الجولة 76 #8): لوحتا الدفع النقدي — المبلغ المدخل وبجانبه
-   الباقي/المتبقي للزبون (لوحة مستقلة بلونها بدل ملاحظة سفلية). */
+   الباقي/المتبقي للزبون (لوحة مستقلة بلونها بدل ملاحظة سفلية).
+   v73 (الجولة 77 #3): صارتا شريطاً مضغوطاً بطلب التاجر («صغّر
+   القسم أكثر من ذلك بكثير حتى نوفر المساحة ويكون أخف في الرؤية») —
+   خط أصغر بكثير وحشوات رفيعة، فالتركيز البصري على لوحة المفاتيح. */
 .pos-pay-panels {
   display: grid;
   grid-template-columns: 1.35fr 1fr;
-  gap: 10px;
+  gap: 6px;
   align-items: stretch;
 }
 .pos-panel-amount,
 .pos-panel-change {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  border-radius: var(--radius-sm);
-  padding: 10px 12px 12px;
+  gap: 1px;
+  border-radius: 9px;
+  padding: 4px 10px 5px;
   border: 1px solid var(--line);
   background: var(--bg);
 }
 .pos-panel-change {
   background: var(--ok-soft, rgba(22, 163, 74, 0.1));
-  border-color: color-mix(in srgb, var(--ok, #16a34a) 35%, var(--line));
+  border-color: color-mix(in srgb, var(--ok, #16a34a) 30%, var(--line));
 }
 .pos-panel-change.neg {
   background: var(--danger-soft);
-  border-color: color-mix(in srgb, var(--danger, #dc2626) 40%, var(--line));
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 35%, var(--line));
 }
 .pos-panel-cap {
-  font-size: 11.5px;
+  font-size: 9.5px;
   font-weight: 800;
   color: var(--ink-soft);
   text-align: center;
+  letter-spacing: 0.01em;
 }
 .pos-panel-change .pos-panel-cap {
   color: var(--ok, #16a34a);
@@ -717,15 +721,25 @@
   color: var(--danger);
 }
 .pos-change-display {
-  font-size: 26px;
+  font-size: 15.5px;
   font-weight: 800;
   text-align: center;
   color: var(--ok, #16a34a);
   font-variant-numeric: tabular-nums;
-  line-height: 1.35;
+  line-height: 1.25;
 }
 .pos-panel-change.neg .pos-change-display {
   color: var(--danger);
+}
+/* داخل الشريط المضغوط: قيمة المبلغ المدخل بحجم الباقي نفسه وبلا
+   إطار/خلفية — الشريط كله هو العرض. */
+.pos-panel-amount .pos-amount-display {
+  font-size: 15.5px;
+  font-weight: 800;
+  padding: 0;
+  border: none;
+  background: transparent;
+  line-height: 1.25;
 }
 /* v61 (الجولة 26 #3): ملاحظة «اكتب من الكيبورد» حُذفت من لوحتي
    الدفع والوزن بطلب التاجر — Enter يبقى يعمل بلا إعلان. */

@@ -44,6 +44,7 @@ import {exportLabelsPdf} from '../services/BarcodePdfService';
 import {buildLabelJob} from '../services/printer/label';
 import {ThermalPrinterService} from '../services/printer/ThermalPrinterService';
 import {notifyCatalogChanged} from '../services/online/OnlineStoreService';
+import {pushBarcodeHandler, beep} from '../lib/scanner';
 import {BASE_UNIT_NAME, WEIGHT_UNIT_NAME} from '../core/config';
 import {formatMoney, parseNumber} from '../core/format';
 import {daysUntilExpiry, expiryStateOf} from '../core/types';
@@ -303,6 +304,18 @@ export function ProductFormModal({
   const loadedCostRef = useRef(0);
   /** v38: آخر معامل تحويل صالح لوحدة الإدخال — عمود إعادة التعبير. */
   const lastStockConvRef = useRef(1);
+
+  /* ── v73 (الجولة 77 #1): ماسح لاسلكي ← حقل الباركود — نموذج
+   *  المنتج يسجل معالجاً أعلى المكدس طوال فتحه، فأي قراءة من كاميرا
+   *  جوال سيلّا كاشير تعبّئ حقل الباركود مباشرة حتى دون تركيز الحقل
+   *  (وإن كان حقل نصي آخر مركزاً تُكتب فيه — سلوك ماسح USB الحرفي
+   *  في injectBarcode). */
+  useEffect(() => {
+    return pushBarcodeHandler(code => {
+      setBarcode(code);
+      beep('ok');
+    });
+  }, []);
 
   /* ── تحميل المنتج للتعديل ───────────────────────────────────── */
   useEffect(() => {
@@ -2701,81 +2714,115 @@ export function ProductFormModal({
                         )}
                       </button>
                     </div>
-                    <div className="iv57-chips">
-                      <span className="iv57-hint">عدد النسخ لكل باركود:</span>
-                      <input
-                        className="iv57-num pf-copies-input"
-                        type="number"
-                        min={1}
-                        max={500}
-                        inputMode="numeric"
-                        value={labelCopies}
-                        onChange={e => {
-                          const raw = Math.max(
-                            1,
-                            Math.min(500, Math.round(Number(e.target.value) || 1)),
-                          );
-                          setLabelCopies(raw);
-                        }}
-                      />
-                      <button
-                        type="button"
-                        className="btn sm"
-                        disabled={labelBusy || barcode.trim().length === 0}
-                        onClick={() => void printLabel()}>
-                        {labelBusy ? 'جارٍ الطباعة…' : (<><Icon name="printer" size={15} /> طباعة {labelCopies} ملصق</>)}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn sm pf-pdf-btn"
-                        disabled={pdfBusy || barcode.trim().length === 0}
-                        title="تنزيل الملصقات كملف PDF للطباعة على أي طابعة ورقية والقص بالمقص"
-                        onClick={() => void downloadLabelsPdf()}>
-                        {pdfBusy ? (
-                          'جارٍ التجهيز…'
-                        ) : (
-                          <>
-                            <Icon name="download" size={15} /> تحميل PDF (
-                            {labelCopies})
-                          </>
-                        )}
-                      </button>
-                    </div>
-                    {/* v70 (الجولة 74 #4): خيارات ملف PDF — مقاس
-                        الملصق المربع وشكل الصفحة وعرض السعر. */}
-                    <div className="iv57-chips">
-                      <span className="iv57-hint">ملصق PDF:</span>
-                      <div className="sv57-seg" style={{margin: 0}}>
-                        {([40, 50, 60] as const).map(size => (
+                    {/* v73 (الجولة 77 #2): لوحة طباعة الملصقات —
+                        صُممت من جديد بطلب التاجر («شكلها مقرف وقديم»):
+                        عدّاد نسخ ب steppers بدل حقل رقمي عارٍ،
+                        وأزرار الإخراج في صف واحد واضح، وخيارات PDF
+                        داخل نفس اللوحة بفصل بصري نظيف. */}
+                    <div className="pf-label-tools">
+                      <div className="pf-lt-row">
+                        <div className="pf-copies-step" dir="ltr">
                           <button
                             type="button"
-                            key={size}
-                            className={labelSizeMm === size ? 'on' : ''}
-                            onClick={() => setLabelSizeMm(size)}>
-                            {size}مم
+                            className="pf-copies-btn"
+                            aria-label="إنقاص النسخ"
+                            disabled={labelCopies <= 1}
+                            onClick={() =>
+                              setLabelCopies(v => Math.max(1, v - 1))
+                            }>
+                            −
                           </button>
-                        ))}
-                      </div>
-                      <div className="sv57-seg" style={{margin: 0}}>
+                          <input
+                            className="pf-copies-value"
+                            type="number"
+                            min={1}
+                            max={500}
+                            inputMode="numeric"
+                            aria-label="عدد النسخ لكل باركود"
+                            value={labelCopies}
+                            onChange={e => {
+                              const raw = Math.max(
+                                1,
+                                Math.min(
+                                  500,
+                                  Math.round(Number(e.target.value) || 1),
+                                ),
+                              );
+                              setLabelCopies(raw);
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="pf-copies-btn"
+                            aria-label="زيادة النسخ"
+                            disabled={labelCopies >= 500}
+                            onClick={() =>
+                              setLabelCopies(v => Math.min(500, v + 1))
+                            }>
+                            +
+                          </button>
+                        </div>
+                        <span className="pf-lt-hint">
+                          نسخة لكل باركود
+                          <b> {labelCopies}</b>
+                        </span>
+                        <span className="pf-lt-spacer" />
                         <button
                           type="button"
-                          className={labelPageKind === 'square' ? 'on' : ''}
-                          onClick={() => setLabelPageKind('square')}>
-                          صفحات مربعة
+                          className="btn sm pf-lt-print"
+                          disabled={labelBusy || barcode.trim().length === 0}
+                          title="طباعة حرارية مباشرة (حتى 20 ملصق)"
+                          onClick={() => void printLabel()}>
+                          <Icon name="printer" size={15} />
+                          {labelBusy ? 'جارٍ الطباعة…' : 'طباعة حرارية'}
                         </button>
                         <button
                           type="button"
-                          className={labelPageKind === 'a4' ? 'on' : ''}
-                          onClick={() => setLabelPageKind('a4')}>
-                          ورق A4
+                          className="btn sm pf-pdf-btn"
+                          disabled={pdfBusy || barcode.trim().length === 0}
+                          title="تنزيل الملصقات كملف PDF للطباعة على أي طابعة ورقية والقص بالمقص"
+                          onClick={() => void downloadLabelsPdf()}>
+                          <Icon name="download" size={15} />
+                          {pdfBusy ? 'جارٍ التجهيز…' : 'ملف PDF'}
                         </button>
                       </div>
-                      <button
-                        type="button"
-                        className={`btn sm ${labelShowPrice ? '' : 'ghost'}`}
-                        onClick={() => setLabelShowPrice(v => !v)}>
-                        السعر {labelShowPrice ? 'ظاهر' : 'مخفي'}
-                      </button>
+                      {/* خيارات ملف PDF — مقاس الملصق المربع وشكل
+                          الصفحة وعرض السعر (v70 الجولة 74 #4). */}
+                      <div className="pf-lt-row pf-lt-opts">
+                        <span className="pf-lt-opts-cap">ملصق PDF:</span>
+                        <div className="sv57-seg" style={{margin: 0}}>
+                          {([40, 50, 60] as const).map(size => (
+                            <button
+                              type="button"
+                              key={size}
+                              className={labelSizeMm === size ? 'on' : ''}
+                              onClick={() => setLabelSizeMm(size)}>
+                              {size}مم
+                            </button>
+                          ))}
+                        </div>
+                        <div className="sv57-seg" style={{margin: 0}}>
+                          <button
+                            type="button"
+                            className={labelPageKind === 'square' ? 'on' : ''}
+                            onClick={() => setLabelPageKind('square')}>
+                            مربعة
+                          </button>
+                          <button
+                            type="button"
+                            className={labelPageKind === 'a4' ? 'on' : ''}
+                            onClick={() => setLabelPageKind('a4')}>
+                            A4
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          className={`pf-price-toggle ${labelShowPrice ? 'on' : ''}`}
+                          onClick={() => setLabelShowPrice(v => !v)}>
+                          <span className="pf-price-dot" />
+                          السعر {labelShowPrice ? 'ظاهر' : 'مخفي'}
+                        </button>
+                      </div>
                     </div>
                   </section>
 
@@ -2887,20 +2934,25 @@ export function ProductFormModal({
 
                         {/* v70 (الجولة 74 #8): تعديل يدوي مباشر لعدد
                             القطع لكل (لون × مقاس) — النقص والزيادة
-                            واقعيان، لا قيد بحاصل ضرب الربطة. */}
+                            واقعيان، لا قيد بحاصل ضرب الربطة.
+                            v73 (الجولة 77 #2): الشبكة صُممت من جديد —
+                            خلايا مستديرة بإطار مضيء عند التركيز، ورأس
+                            مقاسات برقائق، وعمود مجموع بارز، وزر إعادة
+                            الملء كشريط علامة واضح. */}
                         {lotDrafts.length > 0 && (
                           <div className="pf-lotgrid-wrap">
                             <div className="pf-lotgrid-head">
-                              <span className="iv57-hint">
-                                عدد القطع لكل مقاس — الربطة ملأت البداية
-                                عدّل ما شئت: الإجمالي الفعلي{' '}
-                                <b>{lotPieces} قطعة</b>
+                              <span className="pf-lotgrid-cap">
+                                القطع لكل (لون × مقاس) — الإجمالي الفعلي
+                                <b> {lotPieces} قطعة</b>
                               </span>
                               {lotManuallyEdited && (
                                 <button
                                   type="button"
-                                  className="btn sm ghost"
-                                  onClick={refillLotFromBundles}>
+                                  className="pf-refill-btn"
+                                  onClick={refillLotFromBundles}
+                                  title="إرجاع كل الخلايا إلى عدد الربطة">
+                                  <Icon name="refresh" size={14} />
                                   إعادة الملء من الربطة ({bundlesCount})
                                 </button>
                               )}
@@ -2945,7 +2997,7 @@ export function ProductFormModal({
                                           className="pf-lotgrid-cell"
                                           key={`c-${color}-${size}`}>
                                           <input
-                                            className="iv57-num pf-lotcell"
+                                            className="pf-lotcell"
                                             type="number"
                                             min={0}
                                             inputMode="numeric"

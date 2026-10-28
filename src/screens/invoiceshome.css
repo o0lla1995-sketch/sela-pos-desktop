@@ -887,3 +887,59 @@
   gap: 8px;
   align-items: flex-end;
 }
+
+/* ── v73 (الجولة 77 #4): شريط الأرصدة المتوقعة للبنوك والمحافظ
+   المفعّلة في الرئيسية — رقائق أفقية مضغوطة بشعار الجهة الحقيقي
+   ورصيد قناتها الصافي (يتف لف تلقائياً عند الضيق). ── */
+.ih-channels-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ih-channel-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 7px 12px 7px 9px;
+  min-width: 148px;
+  flex: 1 1 148px;
+  max-width: 240px;
+  transition: border-color var(--transition), transform 80ms cubic-bezier(0.2, 0.6, 0.3, 1);
+  cursor: default;
+}
+.ih-channel-chip:hover {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--line));
+  transform: translateY(-1px);
+}
+.ih-channel-chip.neg {
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 45%, var(--line));
+  background: var(--danger-soft);
+}
+.ih-channel-texts {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.ih-channel-name {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ih-channel-balance {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  text-align: start;
+}
+.ih-channel-chip.neg .ih-channel-balance {
+  color: var(--danger);
+}
