@@ -437,14 +437,19 @@ export function InvoicesScreen() {
         {PAYMENT_METHODS.map(method => (
           <button
             key={method.id}
-            className={`chip-toggle ${methodFilter === method.id ? 'on' : ''}`}
+            className={`chip-toggle pm-filter-chip ${
+              methodFilter === method.id ? 'on' : ''
+            }`}
             style={
               methodFilter === method.id
                 ? {background: method.color, borderColor: method.color}
                 : undefined
             }
             onClick={() => setMethodFilter(method.id)}>
-            {method.label}
+            {/* v74 (الجولة 78 — سطح المكتب #٢): شعار الجهة الرسمي
+                داخل رقاقة الفلترة نفسها — تمييز بصري فوري. */}
+            <PaymentMethodIcon method={method} size={22} />
+            <span>{method.label}</span>
           </button>
         ))}
       </div>
@@ -515,21 +520,31 @@ export function InvoicesScreen() {
                       }`}>
                       {row.payment_type === 'WHOLESALE' ? 'جملة' : 'مفرق'}
                     </span>
-                    {/* v70 (الجولة 74 #2): طريقة الدفع غير النقدية — */}
-                    {/* شارة ملوّنة للبنك/المحفظة (النقدي هو المعتاد). */}
-                    {row.payment_method != null &&
-                      row.payment_method !== '' &&
-                      row.payment_method !== 'cash' && (
+                    {/* v74 (الجولة 78 — سطح المكتب #٢): كل فاتورة تحمل
+                        شارة طريقة دفعها — شعار الجهة الرسمي + الاسم
+                        بلون العلامة، للنقدي كما للبنوك والمحافظ (كانت
+                        النقدية بلا شارة أصلاً والشارة نصاً فقط). */}
+                    {(() => {
+                      const payMethod = paymentMethodById(
+                        row.return_kind != null
+                          ? null
+                          : row.payment_method || 'cash',
+                      );
+                      return (
                         <span
-                          className="chip"
+                          className="chip ih-method-badge"
                           style={{
-                            background: `${paymentMethodById(row.payment_method).color}22`,
-                            color: paymentMethodById(row.payment_method).color,
+                            background: `${payMethod.color}1a`,
+                            color: payMethod.color,
                             fontWeight: 700,
                           }}>
-                          {paymentMethodById(row.payment_method).label}
+                          <PaymentMethodIcon method={payMethod} size={18} />
+                          {row.return_kind != null
+                            ? 'تسوية مرتجع'
+                            : payMethod.label}
                         </span>
-                      )}
+                      );
+                    })()}
                   </td>
                   <td className="ih-mut">{row.itemsCount} صنف</td>
                   <td>
@@ -1531,7 +1546,7 @@ function ReturnModal({
                             }`}
                             onClick={() => setSettleMethodId(channel.id)}
                             disabled={busy}>
-                            <PaymentMethodIcon method={channel} size={22} />
+                            <PaymentMethodIcon method={channel} size={26} />
                             <span className="name">{channel.label}</span>
                           </button>
                         ))}

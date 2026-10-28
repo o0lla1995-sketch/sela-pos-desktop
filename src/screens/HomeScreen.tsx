@@ -355,12 +355,15 @@ export function HomeScreen({goTo}: {goTo: (screen: string) => void}) {
                 className={`ih-channel-chip ${channel.balance < 0 ? 'neg' : ''}`}
                 key={channel.id}
                 title={`${channel.label} — الرصيد الصافي المتوقع الآن`}>
+                {/* v74 (الجولة 78 — سطح المكتب #١): الشعار أكبر بكثير —
+                    كانت ٣٠px «لا تكاد تري بالعين المجردة» بطلب التاجر،
+                    الآن ٤٦px داخل رقاقة أوسع. */}
                 <PaymentMethodIcon
                   method={{
                     id: channel.id,
                     label: channel.label,
                   }}
-                  size={30}
+                  size={46}
                 />
                 <span className="ih-channel-texts">
                   <span className="ih-channel-name">{channel.label}</span>

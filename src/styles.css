@@ -1615,6 +1615,25 @@ button.primary > .pos-fkey,
   border-radius: 10px;
 }
 
+/* v74 (الجولة 78 — سطح المكتب #٢): رقاقة فلترة طريقة الدفع بالشعار
+   الرسمي — الرقاقة تستوعب الشعار بجانب الاسم وتتوسط عمودياً. */
+.pm-filter-chip {
+  gap: 7px;
+  padding-inline: 10px;
+}
+.pm-filter-chip .pmi-real {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+/* شارة طريقة الدفع على صف الفاتورة — الشعار الصغير داخل الشارة. */
+.ih-method-badge {
+  gap: 5px;
+  padding: 2px 9px 2px 5px;
+  margin-inline-start: 4px;
+}
+.ih-method-badge .pmi-real {
+  padding: 3%;
+}
+
 /* شبكة بطاقات تفعيل الطرق (الإعدادات). */
 .pm-methods-grid {
   display: grid;

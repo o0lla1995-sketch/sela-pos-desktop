@@ -899,14 +899,15 @@
 .ih-channel-chip {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 11px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 7px 12px 7px 9px;
-  min-width: 148px;
-  flex: 1 1 148px;
-  max-width: 240px;
+  border-radius: 14px;
+  padding: 9px 15px 9px 11px;
+  min-width: 186px;
+  /* v74 (الجولة 78): رقاقة أوسع تستوعب الشعار ٤٦px */
+  flex: 1 1 186px;
+  max-width: 280px;
   transition: border-color var(--transition), transform 80ms cubic-bezier(0.2, 0.6, 0.3, 1);
   cursor: default;
 }

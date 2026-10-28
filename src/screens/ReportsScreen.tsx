@@ -1058,9 +1058,11 @@ export function ReportsScreen() {
                         style={{
                           display: 'flex',
                           alignItems: 'center',
-                          gap: 6,
+                          gap: 8,
                         }}>
-                        <PaymentMethodIcon method={method} size={22} />
+                        {/* v74 (الجولة 78 — سطح المكتب #١): شعار أكبر
+                            مرئي بوضوح (كان ٢٢px). */}
+                        <PaymentMethodIcon method={method} size={32} />
                         {method.label}
                       </span>
                       <span
@@ -1439,7 +1441,7 @@ export function ReportsScreen() {
               <span className="sv57-sec-title" style={{display: 'flex', alignItems: 'center', gap: 8}}>
                 <PaymentMethodIcon
                   method={displayMethod(methodDetail)}
-                  size={26}
+                  size={34}
                 />
                 سجل {displayMethod(methodDetail).label} —{' '}
                 {currentRange.from} ← {currentRange.to}
