@@ -13,7 +13,15 @@
 import {describe, expect, test} from 'vitest';
 import {readFileSync} from 'node:fs';
 
-const read = (p: string) => readFileSync(p, 'utf8') as string;
+/**
+ * تطبيع أسطر الملفات المقروءة (CRLF → LF): عدّاد ويندوز يُخرج
+ * الملفات بأسطر CRLF افتراضياً (لا يوجد .gitattributes يفرض LF)
+ * فأي مقارنة نصية متعددة الأسطر تفشل هناك دون هذا التطبيع —
+ * هذا بالضبط ما أسقط بناء v74.0.0 الأول على ويندوز بينما نجح
+ * نفس الاختبار على لينكس.
+ */
+const read = (p: string) =>
+  readFileSync(p, 'utf8').replace(/\r\n/g, '\n') as string;
 
 const HOME = 'src/screens/HomeScreen.tsx';
 const REPORTS = 'src/screens/ReportsScreen.tsx';
