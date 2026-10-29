@@ -97,6 +97,13 @@ export function InventoryScreen() {
   const [showArchived, setShowArchived] = useState(false);
   /** v32: شريحة «الصلاحية» — قرب الانتهاء/منتهي. */
   const [showExpiring, setShowExpiring] = useState(false);
+  /** v77 (الجولة 81 #٥أ): فلاتر حالة المخزون — نفد/منخفض/بلا تتبع.
+   *  طلب التاجر نصاً: «ان تضيف فلاتر التنبيه للمخزون مثل نفذ
+   *  والصلاحية وغيرها». قيمة واحدة في كل مرة (مثل شريحة الصلاحية)،
+   *  وتتركب مع فلاتر التصنيف والبحث. */
+  const [stockFilter, setStockFilter] = useState<
+    'none' | 'out' | 'low' | 'untracked'
+  >('none');
 
   // ── البيانات ─────────────────────────────────────────────────
   const [archivedProducts, setArchivedProducts] = useState<Product[]>([]);
@@ -189,6 +196,27 @@ export function InventoryScreen() {
       if (showExpiring && !expiringIds.has(product.id)) {
         return false;
       }
+      // v77 (الجولة 81 #٥أ): فلتر حالة المخزون — نفد/منخفض/بلا تتبع
+      // (يتكون مع التصنيف والبحث؛ «بلا تتبع» ليست حالة تنبيه لكنها
+      // مجموعة عمل يريد التاجر عزلها بنفس الأداة).
+      if (stockFilter !== 'none') {
+        if (stockFilter === 'untracked') {
+          if (product.stock_untracked !== 1) {
+            return false;
+          }
+        } else {
+          if (product.stock_untracked === 1) {
+            return false;
+          }
+          const state = stockStateOf(
+            product,
+            settings.lowStockDefaultThreshold,
+          );
+          if (state !== stockFilter) {
+            return false;
+          }
+        }
+      }
       if (
         query &&
         !product.name.toLowerCase().includes(query) &&
@@ -205,7 +233,15 @@ export function InventoryScreen() {
       );
     }
     return rows;
-  }, [products, search, filter, showExpiring, expiringIds]);
+  }, [
+    products,
+    search,
+    filter,
+    showExpiring,
+    stockFilter,
+    expiringIds,
+    settings.lowStockDefaultThreshold,
+  ]);
 
   /** عرض «المؤرشفة»: نفس البحث، بلا فلاتر التصنيف/الصلاحية. */
   const archivedFiltered = useMemo(() => {
@@ -257,44 +293,9 @@ export function InventoryScreen() {
       ?.scrollIntoView({block: 'nearest', inline: 'nearest'});
   }, [selRowId]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // نافذة ملف المنتج مفتوحة؟ الكيبورد ملكها (Ctrl+S للحفظ…).
-      if (editing !== undefined) return;
-      const target = e.target as HTMLElement | null;
-      if (
-        target != null &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.isContentEditable)
-      ) {
-        return;
-      }
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        moveRowSelection(1);
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        moveRowSelection(-1);
-      } else if (e.key === 'Home') {
-        e.preventDefault();
-        if (visible.length > 0) setSelRowId(visible[0].id);
-      } else if (e.key === 'End') {
-        e.preventDefault();
-        if (visible.length > 0) setSelRowId(visible[visible.length - 1].id);
-      } else if (e.key === 'Enter') {
-        if (selRowId == null) return;
-        const product = visible.find(p => p.id === selRowId);
-        if (product != null) {
-          e.preventDefault();
-          setEditing(product);
-        }
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [editing, moveRowSelection, visible, selRowId]);
+  // v77 (الجولة 81 #٥ج): مستمع المفاتيح نُقل بعد تعريف removeProduct
+  // (تعريفه أدناه) كي يصل إليه معالج مفتاح الحذف مباشرة — انظر
+  // التعليق الكامل فوق useEffect المُقابل تحت removeProduct.
 
   const countFor = useCallback(
     (categoryId: CategoryFilter) =>
@@ -312,6 +313,31 @@ export function InventoryScreen() {
         return state === 'low' || state === 'out';
       }).length,
     [products, settings.lowStockDefaultThreshold],
+  );
+
+  /* ── v77 (الجولة 81 #٥أ): عدادات فلاتر حالة المخزون — كل شريحة
+     تحمل رقمها الحقيقي كي يرى التاجر حجم كل مجموعة قبل الضغط. */
+  const outCount = useMemo(
+    () =>
+      products.filter(
+        product =>
+          product.stock_untracked !== 1 &&
+          stockStateOf(product, settings.lowStockDefaultThreshold) === 'out',
+      ).length,
+    [products, settings.lowStockDefaultThreshold],
+  );
+  const lowOnlyCount = useMemo(
+    () =>
+      products.filter(
+        product =>
+          product.stock_untracked !== 1 &&
+          stockStateOf(product, settings.lowStockDefaultThreshold) === 'low',
+      ).length,
+    [products, settings.lowStockDefaultThreshold],
+  );
+  const untrackedCount = useMemo(
+    () => products.filter(product => product.stock_untracked === 1).length,
+    [products],
   );
 
   /* ── v76 (الجولة 80 #١): قيمة البضاعة في المخزون — جمع تكلفتها
@@ -499,6 +525,14 @@ export function InventoryScreen() {
       if (showExpiring) {
         activeFilters.push('الصلاحية القريبة/المنتهية');
       }
+      // v77 (الجولة 81 #٥أ): تسمية فلتر حالة المخزون في ترويسة PDF.
+      if (stockFilter === 'out') {
+        activeFilters.push('نفد');
+      } else if (stockFilter === 'low') {
+        activeFilters.push('منخفض');
+      } else if (stockFilter === 'untracked') {
+        activeFilters.push('بلا تتبع');
+      }
       if (search.trim()) {
         activeFilters.push(`بحث: «${search.trim()}»`);
       }
@@ -542,6 +576,7 @@ export function InventoryScreen() {
     filtered,
     filter,
     showExpiring,
+    stockFilter,
     search,
     categories,
     categoryNameById,
@@ -620,6 +655,65 @@ export function InventoryScreen() {
     },
     [deleteBusyId, refresh, loadArchived, toast],
   );
+
+  /* ── v61 (الجولة 26 #2) ← v77 (الجولة 81 #٥ج): التنقل بأسهم
+     الكيبورد في جدول المنتجات — ↑/↓ يحرّكان صفّاً معيّناً، Enter
+     يفتح ملف المنتج للتعديل، والآن Delete يحذف المنتج المعيّن
+     مباشرة من الجدول دون فتحه (طلب التاجر نصاً: «ان يستطيع أيضا
+     يحذف المنتج من الكيبورد بدون فتح المنتج») — مع مربع التأكيد
+     نفسه وزر الحذف (أرشفة إن كان له سجل) وبقاء التحديد على الصف
+     التالي بعد الحذف كي يُحذف صفٌّ آخر بضغطة واحدة. المستمع يُعلَّن
+     هنا بعد تعريف removeProduct كي يصل إليه. ── */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // نافذة/صفحة ملف المنتج مفتوحة؟ الكيبورد ملكها (Ctrl+S للحفظ…).
+      if (editing !== undefined) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target != null &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        moveRowSelection(1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        moveRowSelection(-1);
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        if (visible.length > 0) setSelRowId(visible[0].id);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        if (visible.length > 0) setSelRowId(visible[visible.length - 1].id);
+      } else if (e.key === 'Enter') {
+        if (selRowId == null) return;
+        const product = visible.find(p => p.id === selRowId);
+        if (product != null) {
+          e.preventDefault();
+          setEditing(product);
+        }
+      } else if (e.key === 'Delete') {
+        // v77 (الجولة 81 #٥ج): حذف الصف المعيّن من الكيبورد بلا فتح.
+        if (selRowId == null) return;
+        const idx = visible.findIndex(p => p.id === selRowId);
+        const product = idx >= 0 ? visible[idx] : null;
+        if (product == null) return;
+        e.preventDefault();
+        // الصف الذي يحل محل المحذوف: التالي، وإلا السابق.
+        const nextProduct = visible[idx + 1] ?? visible[idx - 1] ?? null;
+        void removeProduct(product).then(() => {
+          setSelRowId(nextProduct?.id ?? null);
+        });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editing, moveRowSelection, visible, selRowId, removeProduct]);
 
   /* ── إدارة التصنيفات ───────────────────────────────────────── */
   const addCategory = useCallback(async () => {
@@ -841,11 +935,17 @@ export function InventoryScreen() {
       <div className="iv57-chips" style={{marginBottom: 14}}>
         <button
           className={`iv57-chip ${
-            filter === 'all' && !showArchived && !showExpiring ? 'on' : ''
+            filter === 'all' &&
+            !showArchived &&
+            !showExpiring &&
+            stockFilter === 'none'
+              ? 'on'
+              : ''
           }`}
           onClick={() => {
             setShowArchived(false);
             setShowExpiring(false);
+            setStockFilter('none');
             setFilter('all');
           }}>
           الكل <span className="cnt">{products.length}</span>
@@ -854,11 +954,17 @@ export function InventoryScreen() {
           <button
             key={category.id}
             className={`iv57-chip ${
-              filter === category.id && !showArchived && !showExpiring ? 'on' : ''
+              filter === category.id &&
+              !showArchived &&
+              !showExpiring &&
+              stockFilter === 'none'
+                ? 'on'
+                : ''
             }`}
             onClick={() => {
               setShowArchived(false);
               setShowExpiring(false);
+              setStockFilter('none');
               setFilter(category.id);
             }}>
             {category.name} <span className="cnt">{countFor(category.id)}</span>
@@ -884,6 +990,32 @@ export function InventoryScreen() {
             الصلاحية <span className="cnt">{expiringProducts.length}</span>
           </button>
         )}
+        {/* ── v77 (الجولة 81 #٥أ): فلاتر حالة المخزون — نفذ/منخفض/
+            بلا تتبع. تظهر دائماً (وليس عند وجودها فقط) كي يجد التاجر
+            الأداة في مكانها الثابت، وتتعطل عند عدم وجود عناصرها. */}
+        <button
+          className={`iv57-chip danger ${stockFilter === 'out' ? 'on' : ''}`}
+          disabled={outCount === 0 && stockFilter !== 'out'}
+          onClick={() => setStockFilter(stockFilter === 'out' ? 'none' : 'out')}
+          title="منتجات نفدت كميتها بالكامل">
+          نفذ <span className="cnt">{outCount}</span>
+        </button>
+        <button
+          className={`iv57-chip warn ${stockFilter === 'low' ? 'on' : ''}`}
+          disabled={lowOnlyCount === 0 && stockFilter !== 'low'}
+          onClick={() => setStockFilter(stockFilter === 'low' ? 'none' : 'low')}
+          title="تحت حد التنبيه لكن لم ينفد">
+          منخفض <span className="cnt">{lowOnlyCount}</span>
+        </button>
+        <button
+          className={`iv57-chip ${stockFilter === 'untracked' ? 'on' : ''}`}
+          disabled={untrackedCount === 0 && stockFilter !== 'untracked'}
+          onClick={() =>
+            setStockFilter(stockFilter === 'untracked' ? 'none' : 'untracked')
+          }
+          title="كمية مفتوحة — البيع لا يخصم ولا يُحجب">
+          بلا تتبع <span className="cnt">{untrackedCount}</span>
+        </button>
       </div>
 
       {/* إدارة التصنيفات */}
@@ -1172,7 +1304,14 @@ export function InventoryScreen() {
         {visible.length} منتجاً معروضاً
         {showArchived ? ' (المؤرشفة)' : ''}
         {showExpiring ? ' (الصلاحية — الأقرب انتهاءً أولاً)' : ''}
-        {' — '}عند التعديل تفتح نافذة ملف المنتج بكامل قدراتها (خصم،
+        {stockFilter === 'out'
+          ? ' (نفد)'
+          : stockFilter === 'low'
+          ? ' (منخفض)'
+          : stockFilter === 'untracked'
+          ? ' (بلا تتبع)'
+          : ''}
+        {' — '}عند التعديل تفتح صفحة ملف المنتج بكامل قدراتها (خصم،
         متغيرات، وحدات، استلام بضاعة).
       </div>
 

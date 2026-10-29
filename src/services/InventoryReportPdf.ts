@@ -320,11 +320,10 @@ function renderPages(payload: InventoryReportPayload): HTMLCanvasElement[] {
       newTablePage();
       zebra = false;
     }
-    const groupTrackedValue = group.rows.reduce(
-      (sum, r) =>
-        r.untracked ? sum : sum + r.costPrice * Math.max(0, r.quantity),
-      0,
-    );
+    // v77 (الجولة 81 #٥د): نص القيمة المتجاوز لحد الصفحة حُذف — كان
+    // يُرسم عند MARGIN+12 بمحاذاة يمين فيمتد يساراً خارج الحد (طلب
+    // التاجر نصاً حذفه مباشرة). حصيلة كل تصنيف تبقى محسوبة داخل
+    // صفوف منتجاته وفي الإجمالي الكبير أسفل الجدول.
     const groupTrackedCount = group.rows.filter(r => !r.untracked).length;
     ctx.fillStyle = '#F0F7FF';
     ctx.fillRect(MARGIN, tableY, TABLE_W, groupH);
@@ -352,14 +351,6 @@ function renderPages(payload: InventoryReportPayload): HTMLCanvasElement[] {
       tableY + groupH / 2,
       `600 12.5px ${FONT}`,
       INK_SOFT,
-    );
-    text(
-      ctx,
-      `قيمة التصنيف: ${(Math.round(groupTrackedValue * 100) / 100).toFixed(2)}`,
-      MARGIN + 12,
-      tableY + groupH / 2,
-      `800 13.5px ${FONT}`,
-      '#1D4ED8',
     );
     tableY += groupH;
     zebra = false;

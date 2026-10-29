@@ -797,27 +797,62 @@ button.sv57-kpi.sv57-kpi-btn:hover {
   box-shadow: var(--ring);
 }
 
-/* ═══════════ v76 (الجولة 80 #٤ب): شريط تبويبات التقارير ═══════════
-   طلب التاجر: «تحسين وتنظيم صفحة التقارير بشكل احترافي… حتى مع
-   كمية كبيرة من البيانات». الأقسام التسعة كانت مكدسة في تمرير
-   واحد طويل؛ الآن أربع تبويبات مستقلة والشريط ثابت أعلى الشاشة
-   أثناء التمرير (sticky) بخلفية معتمة كي لا تظهر البطاقات من
-   خلفه. ── */
+/* ═══════════ v76 (الجولة 80 #٤ب) ← v77 (الجولة 81 #٥هـ): تبويبات
+   التقارير ═══════════
+   طلب التاجر (الجولة 80): «تحسين وتنظيم صفحة التقارير بشكل احترافي»
+   فجاءت أربع تبويبات. طلب التاجر (الجولة 81) نصاً: «تنقل التبويبات
+   في صفحة التقارير تطفو وتتحرك عند التمرير وليست ثابتة اجعلها
+   ثابتة» — الشريط كان sticky داخل حاوية التمرير فكان يطفو منزاحاً
+   عن الحافة الحقيقية (فرق padding) وتنزلق البطاقات خلف خلفيته
+   الشفافة مع اهتزاز الرسم أثناء smooth-scroll في WebView. الحل
+   الجذري: لا sticky إطلاقاً — الشاشة عمودان: رأس ثابت (العنوان +
+   الفترة + التبويبات) لا يتحرك أبداً، ومحتوى يتمرر في صندوقه
+   الخاص (.rep-scroll). هذا سلوك حتمي في كل WebView ولا يعتمد
+   على دعم sticky أصلاً. ── */
+.screen.rep-screen {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* الشاشة نفسها لا تتمرر — التمرير للمحتوى وحده */
+  padding: 0; /* الحشو ينزل إلى الرأس ومنطقة التمرير */
+  scroll-behavior: auto;
+}
+.rep-fixed-head {
+  flex-shrink: 0;
+  padding: 20px 26px 12px;
+  background: var(--bg); /* معتمة تماماً — لا شيء يمر خلفها */
+  border-bottom: 1px solid var(--line-soft);
+  z-index: 5;
+}
+.rep-fixed-head h1 {
+  margin-bottom: 3px;
+}
+.rep-fixed-head .subtitle {
+  margin-bottom: 14px;
+}
+.rep-fixed-head .toolbar {
+  margin-bottom: 10px;
+}
+.rep-fixed-head .rep-tabs {
+  margin: 0 0 4px;
+}
+.rep-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 26px 30px;
+}
 .rep-tabs {
-  position: sticky;
-  top: 8px;
-  z-index: 30;
+  position: static; /* داخل الرأس الثابت — لا التصاق مطلقاً */
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 7px;
   max-width: 980px;
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
-  backdrop-filter: blur(6px);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 14px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
   margin-bottom: 2px;
 }
 .rep-tab {
@@ -860,8 +895,11 @@ button.sv57-kpi.sv57-kpi-btn:hover {
   .rep-tab .lbl-hint {
     display: none;
   }
-  .rep-tabs {
-    top: 4px;
+  .rep-fixed-head {
+    padding: 14px 14px 10px;
+  }
+  .rep-scroll {
+    padding: 12px 14px 24px;
   }
 }
 @media (max-width: 560px) {

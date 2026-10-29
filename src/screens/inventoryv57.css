@@ -47,6 +47,32 @@
   background: var(--surface-2);
   color: var(--muted);
 }
+/* ── v77 (الجولة 81 #٥أ): رقائق حالة المخزون — نفذ بالأحمر، منخفض
+   بالكهرماني، والمعطّلة (لا عناصر لها) باهتة غير قابلة للضغط. ── */
+.iv57-chip.danger:not(.on) {
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 45%, var(--line));
+  color: var(--danger, #dc2626);
+}
+.iv57-chip.danger.on {
+  background: var(--danger, #dc2626);
+  border-color: var(--danger, #dc2626);
+}
+.iv57-chip.warn:not(.on) {
+  border-color: color-mix(in srgb, var(--warn, #b45309) 45%, var(--line));
+  color: var(--warn, #b45309);
+}
+.iv57-chip.warn.on {
+  background: var(--warn, #b45309);
+  border-color: var(--warn, #b45309);
+}
+.iv57-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.iv57-chip:disabled:hover {
+  border-color: var(--line);
+  color: var(--ink-soft);
+}
 
 /* v75 (الجولة 79): رقاقة مخصصة داخل غلاف — زر ✐ صغير يحذفها من
    القائمة الدائمة (المحفوظة في الإعدادات) دون لمس المفعّل منها. */
@@ -374,19 +400,66 @@
   padding: 12px 0;
 }
 
-/* ── نافذة ملف المنتج (pf-) ────────────────────────────────── */
-.pf-overlay {
+/* ── ملف المنتج (pf-) — v77 (الجولة 81 #٥ب): صفحة مستقلة ──────
+   طلب التاجر نصاً: «ممكن تحويلها لصفحة مستقلة يكون شكلها مرتب
+   ونظيف». كان غلافها نافذة منبثقة (overlay + modal وسط الشاشة
+   بخلفية معتمة)؛ الآن طبقة كاملة تملأ نافذة التطبيق: شريط علوي
+   ثابت (رجوع + هوية المنتج)، محتوى يتمرر في الوسط، وشريط سفلي
+   دائم لأزرار الحفظ — تجربة صفحة كاملة لا يغطيها شيء. */
+.pf-page {
+  position: fixed;
+  inset: 0;
   z-index: 70;
-}
-/* v59 (جولة المستخدم #3): أعرض وأرحب — كان 1160px والعناصر متزاحمة.
- * خصوصية أعلى: .modal.pf-modal (فئتان) — قاعدة .modal الأساسية
- * (640px) كانت تطغى على .pf-modal وحدها بسبب ترتيب تحميل الملفات،
- * فبقيت النافذة 640px ضيقة مهما كبر المقاس هنا — جذر «الازدحام». */
-.modal.pf-modal {
-  width: min(1480px, 97vw);
-  max-height: 94vh;
+  background: var(--bg);
   display: flex;
   flex-direction: column;
+}
+.pf-page-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line-soft);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+.pf-page-bar .pf-back {
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pf-page-title {
+  min-width: 0;
+  line-height: 1.45;
+}
+.pf-page-title b {
+  font-size: 16px;
+}
+.pf-page-body {
+  flex: 1;
+  min-height: 0;
+  width: min(1480px, 100%);
+  margin: 0 auto;
+}
+.pf-page-foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-top: 1px solid var(--line-soft);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
+}
+@media (max-width: 640px) {
+  .pf-page-bar {
+    padding: 10px 14px;
+    gap: 10px;
+  }
+  .pf-page-foot {
+    padding: 10px 14px;
+    flex-wrap: wrap;
+  }
 }
 .pf-head .pf-sub {
   font-size: 11px;

@@ -2136,26 +2136,36 @@ export function ProductFormModal({
   }, [baseUnitChoices, units, baseUnitName]);
 
   return (
-    <div className="overlay pf-overlay">
-      <div className="modal pf-modal">
-        <div className="modal-head">
-          <div>
-            <b>
-              {editingId != null ? 'ملف المنتج — تعديل' : 'ملف المنتج — إضافة'}{' '}
-              <span className="pf-sub">· {modeConfig.label}</span>
-            </b>
-            <div className="pf-sub">
-              {editingLabel} — {copy.nameLabel} والأسعار والمخزون والوحدات
-              والمتغيرات
-            </div>
+    /* ── v77 (الجولة 81 #٥ب): ملف المنتج صفحة مستقلة كاملة — طلب
+        التاجر نصاً «ممكن تحويلها لصفحة مستقلة يكون شكلها مرتب
+        ونظيف» بدل النافذة المنبثقة المزاحة عن سياق المخزون. نفس
+        المكوّن ومنطقه كاملاً؛ الغلاف فقط: طبقة ثابتة تملأ الشاشة
+        برأس علوي (رجوع + هوية المنتج) وجهاز سفلي دائم للحفظ —
+        والمحتوى يتمرر بينهما. Escape وCtrl+S كما كانا. ── */
+    <div className="pf-page">
+      <div className="pf-page-bar">
+        <button
+          className="btn ghost pf-back"
+          onClick={() => onClose(false)}
+          title="رجوع — Esc">
+          رجوع ←
+        </button>
+        <div className="pf-page-title">
+          <b>
+            {editingId != null
+              ? 'تعديل المنتج'
+              : 'إضافة منتج جديد'}{' '}
+            <span className="pf-sub">· {modeConfig.label}</span>
+          </b>
+          <div className="pf-sub">
+            {editingLabel} — {copy.nameLabel} والأسعار والمخزون والوحدات
+            والمتغيرات
           </div>
-          <button className="btn sm ghost" onClick={() => onClose(false)}>
-            إغلاق
-          </button>
         </div>
+      </div>
 
         {loading ? (
-          <div className="modal-body">
+          <div className="pf-body pf-page-body">
             <div className="empty">
               <div className="icon">⏳</div>
               جارٍ تحميل المنتج…
@@ -2163,7 +2173,7 @@ export function ProductFormModal({
           </div>
         ) : (
           <>
-            <div className="modal-body pf-body">
+            <div className="pf-body pf-page-body">
               {archived && (
                 <div className="pf-archived-banner">
                   <span>
@@ -3824,7 +3834,7 @@ export function ProductFormModal({
               </div>
             </div>
 
-            <div className="modal-foot">
+            <div className="pf-page-foot">
               {editingId != null && !archived && (
                 <button
                   className="btn danger"
@@ -3862,7 +3872,6 @@ export function ProductFormModal({
             </div>
           </>
         )}
-      </div>
     </div>
   );
 }

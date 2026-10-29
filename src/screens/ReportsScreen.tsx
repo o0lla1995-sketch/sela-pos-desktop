@@ -696,7 +696,16 @@ export function ReportsScreen() {
 
   // ──────────────────────────────────────────────────────────────
   return (
-    <div className="screen">
+    <div className="screen rep-screen">
+      {/* ── v77 (الجولة 81 #٥هـ): الرأس ثابت بالكامل — طلب التاجر
+          نصاً «تنقل التبويبات في صفحة التقارير تطفو وتتحرك عند
+          التمرير وليست ثابتة اجعلها ثابتة». الشريط كان sticky داخل
+          حاوية التمرير فيطفو بانزياح تحت حافة الشاشة وتنزلق البطاقات
+          خلف خلفيته الشفافة مع اهتزاز الرسم في WebView. الحل الجذري:
+          الهيكل عمودان ثابت/متمرر — العنوان والفترة والتبويبات في
+          رأس لا يتحرك أبداً، والمحتوى وحده يتمرر في صندوقه الخاص،
+          فلا sticky أصلاً ولا اعتماد على دعم WebView له. ── */}
+      <div className="rep-fixed-head">
       <h1>التقارير</h1>
       <div className="subtitle">
         المبيعات والنقد والديون والخزينة — القيم بالشيكل ₪
@@ -735,6 +744,30 @@ export function ReportsScreen() {
         </button>
       </div>
 
+      {/* ── v77 (الجولة 81 #٥هـ): التبويبات داخل الرأس الثابت — تظهر
+          متى وُجدت الحزمة وتبقى مثبتة في مكانها مهما طال التمرير. ── */}
+      {bundle != null && summary != null && (
+        <div className="rep-tabs" role="tablist" dir="rtl">
+          {TABS.map(tab => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.key}
+              className={`rep-tab ${activeTab === tab.key ? 'on' : ''}`}
+              onClick={() => setActiveTab(tab.key)}
+              title={tab.hint}>
+              <Icon name={tab.icon} size={17} />
+              <span className="lbl">{tab.label}</span>
+              {activeTab === tab.key && <span className="lbl-hint">{tab.hint}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      </div>
+
+      {/* ── v77 (الجولة 81 #٥هـ): منطقة التمرير — المحتوى وحده. ── */}
+      <div className="rep-scroll">
       {loading && bundle == null ? (
         <div className="card">
           <div className="sv57-empty">
@@ -743,25 +776,6 @@ export function ReportsScreen() {
           </div>
         </div>
       ) : bundle != null && summary != null ? (
-        <>
-          {/* ── v76 (الجولة 80 #٤ب): شريط التبويبات الثابت — أربع
-              مناطق محاسبية واضحة بدل التمرير الطويل الواحد. ── */}
-          <div className="rep-tabs" role="tablist" dir="rtl">
-            {TABS.map(tab => (
-              <button
-                key={tab.key}
-                type="button"
-                role="tab"
-                aria-selected={activeTab === tab.key}
-                className={`rep-tab ${activeTab === tab.key ? 'on' : ''}`}
-                onClick={() => setActiveTab(tab.key)}
-                title={tab.hint}>
-                <Icon name={tab.icon} size={17} />
-                <span className="lbl">{tab.label}</span>
-                {activeTab === tab.key && <span className="lbl-hint">{tab.hint}</span>}
-              </button>
-            ))}
-          </div>
         <div className="sv57-stack">
           {/* ── v76 (الجولة 80 #٤ب): تبويب «الملخص» — KPIs
               الإجمالية + رسما الأداء وساعات الذروة. ── */}
@@ -1494,7 +1508,6 @@ export function ReportsScreen() {
           </div>
           </>)}
         </div>
-        </>
       ) : (
         <div className="card">
           <div className="sv57-empty">
@@ -1503,6 +1516,7 @@ export function ReportsScreen() {
           </div>
         </div>
       )}
+      </div>
 
       {/* v72 (الجولة 76 #6): نافذة سجل القناة التفصيلي — كل حركة
           داخل/خارج مع رصيد متسلسل + كشف PDF احترافي بنفس الفلاتر. */}

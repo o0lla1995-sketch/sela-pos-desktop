@@ -126,21 +126,36 @@ describe('v76 — ④ب صفحة التقارير بتبويبات', () => {
     expect(src).toContain('</>)}');
   });
 
-  test('الشريط ثابت أعلى الشاشة أثناء التمرير', () => {
+  test('الشريط ثابت أعلى الشاشة أثناء التمرير (v77: رأس ثابت كامل)', () => {
+    /* v77 (الجولة 81 #٥هـ): الشريط كان sticky داخل حاوية التمرير
+       فيطفو منزاحاً عن الحافة وتنزلق البطاقات خلفه؛ الآن الرأس
+       (العنوان + الفترة + التبويبات) ثابت بالبنية نفسها خارج
+       صندوق التمرير (.rep-fixed-head) والمحتوى وحده يتمرر
+       (.rep-scroll) — ثبات حتمي في كل WebView بلا sticky.
+       (sticky في الملف يبقى لرؤوس الجداول فقط .sv57-table-scroll). */
     const css = read(REPORTS_CSS);
-    expect(css).toContain('.rep-tabs {');
-    expect(css).toContain('position: sticky');
+    expect(css).toContain('.screen.rep-screen {');
+    expect(css).toContain('.rep-fixed-head {');
+    expect(css).toContain('.rep-scroll {');
+    // بلوك .rep-tabs الرئيسي (بداية سطر) بلا sticky.
+    const tabsBlock = css.match(/^\.rep-tabs \{[^}]*\}/m)?.[0] ?? '';
+    expect(tabsBlock).not.toContain('sticky');
+    expect(tabsBlock).toContain('position: static;');
     expect(css).toContain('.rep-tab.on {');
     expect(css).toContain('.rep-tab .lbl-hint {');
+    const src = read(REPORTS);
+    expect(src).toContain('className="screen rep-screen"');
+    expect(src).toContain('className="rep-fixed-head"');
+    expect(src).toContain('className="rep-scroll"');
   });
 });
 
 describe('v76 — الإصدار', () => {
-  test('76.0.0 (20)', () => {
+  test('77.0.0 (21) — محدّث للجولة 81', () => {
     const src = read('src/core/config.ts');
-    expect(src).toContain("APP_VERSION = '76.0.0'");
-    expect(src).toContain('APP_BUILD_CODE = 20');
+    expect(src).toContain("APP_VERSION = '77.0.0'");
+    expect(src).toContain('APP_BUILD_CODE = 21');
     const pkg = read('package.json');
-    expect(pkg).toContain('"version": "76.0.0"');
+    expect(pkg).toContain('"version": "77.0.0"');
   });
 });
