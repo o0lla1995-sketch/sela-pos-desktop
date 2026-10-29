@@ -5,6 +5,10 @@
  *     تكاد تري بالعين المجردة» بطلب التاجر نصاً: الرئيسية 30→46،
  *     التقارير 22→32 و26→34، الفواتير (التسوية) 22→26، الإعدادات
  *     38→46.
+ *     ← حُدّثت للجولة 80 (#٤أ): الشعار يبدو صغيراً داخل إطاره
+ *        (padding 6%→2.5% + قص الحواف المدمجة) فكُبّرت الأرقام
+ *        مرة أخرى: الرئيسية 54، التقارير 36، التسوية 32، الإعدادات
+ *        52، الفلترة 28، شارة الصف 24.
  *  ② الفواتير مميزة بطريقة الدفع التي تمت بها: كل صف يحمل شارة
  *     الشعار الرسمي + الاسم بلون العلامة — للنقدي كما للبنوك
  *     والمحافظ (النقدي كانت بلا شارة أصلاً)، ورقائق الفلترة
@@ -32,29 +36,29 @@ const CHANNELS_CSS = 'src/screens/invoiceshome.css';
 const CONFIG = 'src/core/config.ts';
 
 describe('v74 — ① أيقونات البنوك والمحافظ كبيرة ومرئية', () => {
-  test('الرئيسية: شعار القنوات 46px داخل رقاقة أوسع', () => {
+  test('الرئيسية: شعار القنوات 54px داخل رقاقة أوسع (حُدّث للجولة 80)', () => {
     const src = read(HOME);
-    expect(src).toContain('size={46}');
+    expect(src).toContain('size={54}');
     expect(src).not.toContain('size={30}');
     const css = read(CHANNELS_CSS);
-    expect(css).toContain('min-width: 186px');
+    expect(css).toContain('min-width: 196px');
   });
 
-  test('التقارير: شعارات أرصدة القنوات 32px وسجل القناة 34px', () => {
+  test('التقارير: شعارات أرصدة القنوات 36px وسجل القناة 34px (حُدّث للجولة 80)', () => {
     const src = read(REPORTS);
-    expect(src).toContain('<PaymentMethodIcon method={method} size={32} />');
+    expect(src).toContain('<PaymentMethodIcon method={method} size={36} />');
     expect(src).toContain('size={34}');
     expect(src).not.toContain('<PaymentMethodIcon method={method} size={22} />');
   });
 
-  test('الإعدادات: بطاقات التفعيل بشعار 46px', () => {
+  test('الإعدادات: بطاقات التفعيل بشعار 52px (حُدّث للجولة 80)', () => {
     const src = read(SETTINGS);
-    expect(src).toContain('<PaymentMethodIcon method={method} size={46} />');
+    expect(src).toContain('<PaymentMethodIcon method={method} size={52} />');
   });
 
-  test('فواتير المرتجع: رقائق التسوية بشعار 26px', () => {
+  test('فواتير المرتجع: رقائق التسوية بشعار 32px (حُدّث للجولة 80)', () => {
     const src = read(INVOICES);
-    expect(src).toContain('<PaymentMethodIcon method={channel} size={26} />');
+    expect(src).toContain('<PaymentMethodIcon method={channel} size={32} />');
   });
 });
 
@@ -72,11 +76,11 @@ describe('v74 — ② الفواتير مميزة بطريقة الدفع', () =
     );
   });
 
-  test('رقائق فلترة طريقة الدفع تحمل الشعار الرسمي', () => {
+  test('رقائق فلترة طريقة الدفع تحمل الشعار الرسمي (حُدّث للجولة 80)', () => {
     const src = read(INVOICES);
     expect(src).toContain('pm-filter-chip');
     expect(src).toContain(
-      '<PaymentMethodIcon method={method} size={22} />',
+      '<PaymentMethodIcon method={method} size={28} />',
     );
     const css = read(STYLES);
     expect(css).toContain('.pm-filter-chip {');
@@ -85,9 +89,9 @@ describe('v74 — ② الفواتير مميزة بطريقة الدفع', () =
 });
 
 describe('v74 — ③ الإصدار', () => {
-  test('75.0.0 (19) — محدّث للجولة 79', () => {
+  test('76.0.0 (20) — محدّث للجولة 80', () => {
     const src = read(CONFIG);
-    expect(src).toContain("APP_VERSION = '75.0.0'");
-    expect(src).toContain('APP_BUILD_CODE = 19');
+    expect(src).toContain("APP_VERSION = '76.0.0'");
+    expect(src).toContain('APP_BUILD_CODE = 20');
   });
 });

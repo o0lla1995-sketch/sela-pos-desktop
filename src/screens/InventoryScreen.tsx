@@ -314,6 +314,40 @@ export function InventoryScreen() {
     [products, settings.lowStockDefaultThreshold],
   );
 
+  /* ── v76 (الجولة 80 #١): قيمة البضاعة في المخزون — جمع تكلفتها
+     وكميتها لكل منتج متتبع الكمية. منتجات «الكمية المفتوحة»
+     (stock_untracked=1) لا كمية معروفة لها فلا تُحتسب قيمتها —
+     تُعد وتُعرض منفصلة كي يعرف التاجر بدقة ما الذي يشمله الرقم.
+     المتغيرات محسوبة تلقائياً: products.stock_quantity يساوي دائماً
+     مجموع مخزون متغيراتها (VariantRepo v35). ── */
+  const stockValue = useMemo(() => {
+    let totalCostValue = 0;
+    let totalRetailValue = 0;
+    let trackedCount = 0;
+    let untrackedCount = 0;
+    let outCount = 0;
+    for (const product of products) {
+      if (product.stock_untracked === 1) {
+        untrackedCount += 1;
+        continue;
+      }
+      trackedCount += 1;
+      const qty = Math.max(0, product.stock_quantity ?? 0);
+      if (qty <= 0) {
+        outCount += 1;
+      }
+      totalCostValue += product.cost_price * qty;
+      totalRetailValue += finalPriceOf(product) * qty;
+    }
+    return {
+      totalCostValue: Math.round(totalCostValue * 100) / 100,
+      totalRetailValue: Math.round(totalRetailValue * 100) / 100,
+      trackedCount,
+      untrackedCount,
+      outCount,
+    };
+  }, [products]);
+
   const categoryNameById = useMemo(
     () => new Map(categories.map(c => [c.id, c.name] as const)),
     [categories],
@@ -441,6 +475,80 @@ export function InventoryScreen() {
       setSyncing(false);
     }
   }, [syncing, toast]);
+
+  /* ── v76 (الجولة 80 #٢): تقرير PDF بالمخزون كاملاً — يصدّر
+     المنتجات النشطة (بالفلاتر النشطة إن وجدت) مجمّعة بالتصنيف
+     مع قيمة كل سطر وكل تصنيف والإجمالي الكبير. ── */
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const exportInventoryPdf = useCallback(async () => {
+    if (pdfBusy || filtered.length === 0) {
+      return;
+    }
+    setPdfBusy(true);
+    try {
+      const {exportInventoryReportPdf} = await import(
+        '../services/InventoryReportPdf'
+      );
+      const activeFilters: string[] = [];
+      if (filter !== 'all') {
+        const cat = categories.find(c => c.id === filter);
+        if (cat != null) {
+          activeFilters.push(`تصنيف: ${cat.name}`);
+        }
+      }
+      if (showExpiring) {
+        activeFilters.push('الصلاحية القريبة/المنتهية');
+      }
+      if (search.trim()) {
+        activeFilters.push(`بحث: «${search.trim()}»`);
+      }
+      const filtersLabel =
+        activeFilters.length > 0
+          ? `فلاتر: ${activeFilters.join(' · ')}`
+          : 'كل المنتجات النشطة';
+      const result = await exportInventoryReportPdf({
+        storeName: settings.storeName || 'متجر سيلا',
+        filtersLabel,
+        rows: filtered.map(product => ({
+          name: product.name,
+          barcode: (product.barcode ?? '').trim(),
+          category:
+            categoryNameById.get(product.category_id ?? -1) ?? 'بلا تصنيف',
+          costPrice: product.cost_price,
+          quantity: product.stock_quantity,
+          unitLabel: baseUnitLabelOf(product, BASE_UNIT_NAME),
+          untracked: product.stock_untracked === 1,
+          stockState:
+            product.stock_untracked === 1
+              ? 'untracked'
+              : stockStateOf(product, settings.lowStockDefaultThreshold),
+        })),
+      });
+      toast(
+        `تم حفظ تقرير المخزون (${result.count} منتجاً · ${result.pages} صفحة): ${result.path}`,
+        'success',
+        6000,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes('أُلغيت')) {
+        toast(message, 'error', 6000);
+      }
+    } finally {
+      setPdfBusy(false);
+    }
+  }, [
+    pdfBusy,
+    filtered,
+    filter,
+    showExpiring,
+    search,
+    categories,
+    categoryNameById,
+    settings.storeName,
+    settings.lowStockDefaultThreshold,
+    toast,
+  ]);
 
   /* ── الحذف/الأرشفة/الاسترجاع (v23) ─────────────────────────── */
   const removeProduct = useCallback(
@@ -599,6 +707,22 @@ export function InventoryScreen() {
 
       {/* ملخص سريع */}
       <div className="grid-4">
+        {/* ── v76 (الجولة 80 #١): قيمة البضاعة الحالية في المخزون
+            بالكامل — تكلفة × كمية لكل منتج متتبع، بدقة، مع بيان
+            منتجات الكمية المفتوحة التي لا تُحتسب. ── */}
+        <div className="card kpi inv-value-card">
+          <span className="label">قيمة البضاعة في المخزون (تكلفة)</span>
+          <span className="value brand" dir="ltr">
+            {formatMoney(stockValue.totalCostValue)}
+          </span>
+          <span className="label">
+            قيمة بيعها {formatMoney(stockValue.totalRetailValue)} · متتبع{' '}
+            {stockValue.trackedCount}
+            {stockValue.untrackedCount > 0
+              ? ` · ${stockValue.untrackedCount} كمية مفتوحة بلا قيمة محسوبة`
+              : ''}
+          </span>
+        </div>
         <div className="card kpi">
           <span className="label">منتجات نشطة</span>
           <span className="value brand">{products.length}</span>
@@ -612,13 +736,6 @@ export function InventoryScreen() {
           <span className="label">نفد أو تحت حد التنبيه</span>
         </div>
         <div className="card kpi">
-          <span className="label">صلاحية قريبة/منتهية</span>
-          <span className="value" style={{color: 'var(--danger)'}}>
-            {expiringProducts.length}
-          </span>
-          <span className="label">نافذة التنبيه {settings.expiryAlertDays} يوم</span>
-        </div>
-        <div className="card kpi">
           <span className="label">مدرج أونلاين (سيلا)</span>
           <span className="value ok">
             {products.filter(p => p.online_listed === 1).length}
@@ -626,6 +743,40 @@ export function InventoryScreen() {
           <span className="label">
             {catalogDirty ? 'تغييرات بانتظار المزامنة…' : 'المزامنة ترسل المدرج فقط'}
           </span>
+        </div>
+      </div>
+
+      {/* ── v76 (الجولة 80 #١): شريط تفصيل قيمة المخزون — يجمع
+          المعادلة كاملة أمام عين التاجر: المتتبع، النافد، الكمية
+          المفتوحة، وهامش القيمة البيعية. ── */}
+      <div className="inv-value-strip">
+        <div className="inv-value-cell">
+          <span className="k">قيمة بالتكلفة</span>
+          <span className="v brand" dir="ltr">
+            {formatMoney(stockValue.totalCostValue)}
+          </span>
+        </div>
+        <div className="inv-value-cell">
+          <span className="k">قيمة بالبيع</span>
+          <span className="v ok" dir="ltr">
+            {formatMoney(stockValue.totalRetailValue)}
+          </span>
+        </div>
+        <div className="inv-value-cell">
+          <span className="k">هامش متوقع</span>
+          <span className="v" dir="ltr">
+            {formatMoney(
+              stockValue.totalRetailValue - stockValue.totalCostValue,
+            )}
+          </span>
+        </div>
+        <div className="inv-value-cell">
+          <span className="k">منتجات متتبعة الكمية</span>
+          <span className="v">{stockValue.trackedCount}</span>
+        </div>
+        <div className="inv-value-cell">
+          <span className="k">كمية مفتوحة (بلا تتبع)</span>
+          <span className="v warn">{stockValue.untrackedCount}</span>
         </div>
       </div>
 
@@ -669,6 +820,21 @@ export function InventoryScreen() {
             {syncing ? 'جارٍ الآن…' : '🔄 مزامنة الكتالوج'}
           </button>
         )}
+        {/* ── v76 (الجولة 80 #٢): تقرير PDF للمخزون بالتفصيل — كل
+            المنتجات مجمّعة بالتصنيف مع القيمة الإجمالية. ── */}
+        <button
+          className="btn ghost inv-pdf-btn"
+          disabled={pdfBusy || products.length === 0}
+          onClick={() => void exportInventoryPdf()}>
+          {pdfBusy ? (
+            'جارٍ البناء…'
+          ) : (
+            <>
+              <Icon name="printer" size={15} />
+              تقرير PDF
+            </>
+          )}
+        </button>
       </div>
 
       {/* رقائق الفلترة — الكل + التصنيفات + المؤرشفة + الصلاحية */}

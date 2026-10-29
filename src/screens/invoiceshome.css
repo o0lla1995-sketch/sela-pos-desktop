@@ -904,10 +904,11 @@
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 9px 15px 9px 11px;
-  min-width: 186px;
-  /* v74 (الجولة 78): رقاقة أوسع تستوعب الشعار ٤٦px */
-  flex: 1 1 186px;
-  max-width: 280px;
+  min-width: 196px;
+  /* v74 (الجولة 78): رقاقة أوسع تستوعب الشعار ٤٦px
+     v76 (الجولة 80 #٤أ): الشعار ٥٤px بعد قص الحواف المدمجة */
+  flex: 1 1 196px;
+  max-width: 300px;
   transition: border-color var(--transition), transform 80ms cubic-bezier(0.2, 0.6, 0.3, 1);
   cursor: default;
 }

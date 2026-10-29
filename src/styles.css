@@ -1594,12 +1594,15 @@ button.primary > .pos-fkey,
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 /* v73 (الجولة 77): الشعار الرسمي الحقيقي داخل رقاقة بيضاء مستديرة —
-   نمط أنظمة الدفع العالمية (Visa/Mastercard في أي تطبيق بنكي). */
+   نمط أنظمة الدفع العالمية (Visa/Mastercard في أي تطبيق بنكي).
+   v76 (الجولة 80 #٤أ): الحواف المدمجة داخل ملفات الشعارات قُصّت
+   (سكربت trim_pm_logos) والحشوة 6% صارت 2.5% — الشعار يملأ إطاره
+   بالكامل بدل أن «يبدو صغيراً في اطار الصورة» بطلب التاجر. */
 .pmi-real {
   border-radius: 22%;
   background: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.14);
-  padding: 6%;
+  padding: 2.5%;
 }
 .pmi-real img {
   width: 100%;
@@ -1631,7 +1634,7 @@ button.primary > .pos-fkey,
   margin-inline-start: 4px;
 }
 .ih-method-badge .pmi-real {
-  padding: 3%;
+  padding: 2%;
 }
 
 /* شبكة بطاقات تفعيل الطرق (الإعدادات). */

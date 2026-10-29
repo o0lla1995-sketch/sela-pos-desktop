@@ -1012,3 +1012,61 @@
   font-size: 10.5px;
   color: var(--muted);
 }
+
+/* ═══════════════ v76 (الجولة 80 #١): شريط قيمة البضاعة ═══════════════ */
+
+/* بطاقة قيمة المخزون في صف الملخص — الرقم الأهم في الصفحة. */
+.inv-value-card .value {
+  font-size: 24px;
+  letter-spacing: -0.3px;
+}
+
+/* شريط تفصيل المعادلة: تكلفة / بيع / هامش / متتبع / مفتوح —
+   خمس خلايا متساوية بفواصل داخلية، تتكدس بأمان على الشاشات
+   الضيقة (minmax يلف كل خليتين معاً). */
+.inv-value-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0;
+  margin-top: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.inv-value-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 14px;
+  border-inline-start: 1px solid var(--line);
+  min-width: 0;
+}
+.inv-value-cell:first-child {
+  border-inline-start: none;
+}
+.inv-value-cell .k {
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inv-value-cell .v {
+  font-size: 16.5px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.inv-value-cell .v.warn {
+  color: var(--warn);
+}
+.inv-value-cell .v.ok {
+  color: var(--ok);
+}
+
+/* ── زر تقرير PDF (الجولة 80 #٢) ── */
+.inv-pdf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}

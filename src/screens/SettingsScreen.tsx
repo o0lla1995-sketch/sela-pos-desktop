@@ -1219,7 +1219,7 @@ export function SettingsScreen({goTo}: {goTo?: (key: string) => void}) {
                       },
                     });
                   }}>
-                  <PaymentMethodIcon method={method} size={46} />
+                  <PaymentMethodIcon method={method} size={52} />
                   <span className="pm-method-texts">
                     <b>{method.label}</b>
                     <span>

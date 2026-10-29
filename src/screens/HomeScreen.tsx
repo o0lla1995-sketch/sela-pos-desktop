@@ -363,7 +363,7 @@ export function HomeScreen({goTo}: {goTo: (screen: string) => void}) {
                     id: channel.id,
                     label: channel.label,
                   }}
-                  size={46}
+                  size={54}
                 />
                 <span className="ih-channel-texts">
                   <span className="ih-channel-name">{channel.label}</span>

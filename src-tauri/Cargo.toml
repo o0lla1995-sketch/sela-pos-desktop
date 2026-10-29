@@ -1,6 +1,6 @@
 [package]
 name = "sela-pos-desktop"
-version = "75.0.0"
+version = "76.0.0"
 description = "سيلا POS لسطح المكتب — نظام نقاط بيع متكامل (ويندوز)"
 edition = "2021"
 

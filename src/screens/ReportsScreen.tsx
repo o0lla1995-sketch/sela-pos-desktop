@@ -653,6 +653,47 @@ export function ReportsScreen() {
 
   const summary = bundle?.summary ?? null;
 
+  /* ── v76 (الجولة 80 #٤ب): تنظيم صفحة التقارير بتبويبات — طلب
+     التاجر نصاً «تحسين وتنظيم صفحة التقارير بشكل احترافي… حتى مع
+     كمية كبيرة من البيانات». الأقسام التسعة كانت مكدسة في تمرير
+     واحد طويل؛ الآن أربع تبويبات مستقلة: الملخص (KPIs + الرسمان)،
+     النقد والخزينة (النقد + القنوات + الخزينة)، الديون والقسائم،
+     المنتجات والفواتير — كل تبويب يحمّل من نفس الـ bundle (لا
+     استعلامات إضافية) والشريط ثابت أعلى الشاشة أثناء التمرير. ── */
+  type ReportTab = 'overview' | 'cash' | 'debts' | 'products';
+  const [activeTab, setActiveTab] = useState<ReportTab>('overview');
+  const TABS: {
+    key: ReportTab;
+    label: string;
+    icon: Parameters<typeof Icon>[0]['name'];
+    hint: string;
+  }[] = [
+    {
+      key: 'overview',
+      label: 'الملخص',
+      icon: 'chart',
+      hint: 'مؤشرات المبيعات وأداؤها وساعات الذروة',
+    },
+    {
+      key: 'cash',
+      label: 'النقد والخزينة',
+      icon: 'wallet',
+      hint: 'النقد المحصّل وأرصدة القنوات والخزينة',
+    },
+    {
+      key: 'debts',
+      label: 'الديون والقسائم',
+      icon: 'book',
+      hint: 'مبيعات الدين بالفترة وقسائم الحملات',
+    },
+    {
+      key: 'products',
+      label: 'المنتجات والفواتير',
+      icon: 'list',
+      hint: 'الأكثر إيراداً وربحاً وتفصيل الفواتير',
+    },
+  ];
+
   // ──────────────────────────────────────────────────────────────
   return (
     <div className="screen">
@@ -702,7 +743,29 @@ export function ReportsScreen() {
           </div>
         </div>
       ) : bundle != null && summary != null ? (
+        <>
+          {/* ── v76 (الجولة 80 #٤ب): شريط التبويبات الثابت — أربع
+              مناطق محاسبية واضحة بدل التمرير الطويل الواحد. ── */}
+          <div className="rep-tabs" role="tablist" dir="rtl">
+            {TABS.map(tab => (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === tab.key}
+                className={`rep-tab ${activeTab === tab.key ? 'on' : ''}`}
+                onClick={() => setActiveTab(tab.key)}
+                title={tab.hint}>
+                <Icon name={tab.icon} size={17} />
+                <span className="lbl">{tab.label}</span>
+                {activeTab === tab.key && <span className="lbl-hint">{tab.hint}</span>}
+              </button>
+            ))}
+          </div>
         <div className="sv57-stack">
+          {/* ── v76 (الجولة 80 #٤ب): تبويب «الملخص» — KPIs
+              الإجمالية + رسما الأداء وساعات الذروة. ── */}
+          {activeTab === 'overview' && (<>
           {/* ── 1) ملخص المبيعات ─────────────────────────────── */}
           <div className="card sv57-sec">
             <div className="sv57-sec-head">
@@ -816,9 +879,11 @@ export function ReportsScreen() {
               يظهر هنا.
             </div>
           </div>
+          </>)}
 
           {/* ── 4) النقد والديون ─────────────────────────────── */}
-          {cash != null && (
+          {/* v76 (الجولة 80 #٤ب): تبويب «النقد والخزينة». ── */}
+          {activeTab === 'cash' && cash != null && (
             <div className="card sv57-sec">
               <div className="sv57-sec-head">
                 <div className="sv57-sec-title">النقد والديون</div>
@@ -975,7 +1040,8 @@ export function ReportsScreen() {
           )}
 
           {/* ── 5) مبيعات الدين بالفترة (الدلاء الأربعة) ─────── */}
-          {debt != null && (
+          {/* v76 (الجولة 80 #٤ب): تبويب «الديون والقسائم». ── */}
+          {activeTab === 'debts' && debt != null && (
             <div className="card sv57-sec">
               <div className="sv57-sec-head">
                 <div>
@@ -1031,7 +1097,8 @@ export function ReportsScreen() {
           )}
 
           {/* ── 5.5) أرصدة المحافظ والبنوك (v70 → v72 الجولة 76 #6) ── */}
-          {payMethods.length > 0 && (
+          {/* v76 (الجولة 80 #٤ب): تبويب «النقد والخزينة». ── */}
+          {activeTab === 'cash' && payMethods.length > 0 && (
             <div className="card sv57-sec">
               <div className="sv57-sec-head">
                 <div>
@@ -1062,7 +1129,7 @@ export function ReportsScreen() {
                         }}>
                         {/* v74 (الجولة 78 — سطح المكتب #١): شعار أكبر
                             مرئي بوضوح (كان ٢٢px). */}
-                        <PaymentMethodIcon method={method} size={32} />
+                        <PaymentMethodIcon method={method} size={36} />
                         {method.label}
                       </span>
                       <span
@@ -1101,7 +1168,8 @@ export function ReportsScreen() {
           )}
 
           {/* ── 6) قسائم الحملات ─────────────────────────────── */}
-          {cash != null && (
+          {/* v76 (الجولة 80 #٤ب): تبويب «الديون والقسائم». ── */}
+          {activeTab === 'debts' && cash != null && (
             <div className="card sv57-sec">
               <div className="sv57-sec-head">
                 <div>
@@ -1157,7 +1225,8 @@ export function ReportsScreen() {
           )}
 
           {/* ── 7) الخزينة (لقطة الآن عبر التاريخ) ───────────── */}
-          {treasury != null && (
+          {/* v76 (الجولة 80 #٤ب): تبويب «النقد والخزينة». ── */}
+          {activeTab === 'cash' && treasury != null && (
             <div className="card sv57-sec">
               <div className="sv57-sec-head">
                 <div>
@@ -1263,6 +1332,9 @@ export function ReportsScreen() {
             </div>
           )}
 
+          {/* ── v76 (الجولة 80 #٤ب): تبويب «المنتجات والفواتير» —
+              الأكثر إيراداً وربحاً + التفصيل القابل للتصدير. ── */}
+          {activeTab === 'products' && (<>
           {/* ── 8) الأكثر إيراداً وربحاً ──────────────────────── */}
           <div className="card sv57-sec">
             <div className="sv57-sec-head">
@@ -1420,7 +1492,9 @@ export function ReportsScreen() {
               </div>
             )}
           </div>
+          </>)}
         </div>
+        </>
       ) : (
         <div className="card">
           <div className="sv57-empty">

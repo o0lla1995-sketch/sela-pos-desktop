@@ -448,7 +448,7 @@ export function InvoicesScreen() {
             onClick={() => setMethodFilter(method.id)}>
             {/* v74 (الجولة 78 — سطح المكتب #٢): شعار الجهة الرسمي
                 داخل رقاقة الفلترة نفسها — تمييز بصري فوري. */}
-            <PaymentMethodIcon method={method} size={22} />
+            <PaymentMethodIcon method={method} size={28} />
             <span>{method.label}</span>
           </button>
         ))}
@@ -538,7 +538,7 @@ export function InvoicesScreen() {
                             color: payMethod.color,
                             fontWeight: 700,
                           }}>
-                          <PaymentMethodIcon method={payMethod} size={18} />
+                          <PaymentMethodIcon method={payMethod} size={24} />
                           {row.return_kind != null
                             ? 'تسوية مرتجع'
                             : payMethod.label}
@@ -1546,7 +1546,7 @@ function ReturnModal({
                             }`}
                             onClick={() => setSettleMethodId(channel.id)}
                             disabled={busy}>
-                            <PaymentMethodIcon method={channel} size={26} />
+                            <PaymentMethodIcon method={channel} size={32} />
                             <span className="name">{channel.label}</span>
                           </button>
                         ))}
