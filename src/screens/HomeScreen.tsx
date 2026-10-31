@@ -389,6 +389,28 @@ export function HomeScreen({goTo}: {goTo: (screen: string) => void}) {
           <span className="ih-quick-icon"><Icon name="cart" size={26} /></span>
           <span className="ih-quick-label">بيع جديد</span>
         </button>
+        {/* v71 (الجولة 83 #٦): ديون المتجر والفواتير في الإجراءات
+            السريعة — طلب التاجر نصاً: «أريد في تطبيق سطح المكتب
+            إضافة زر ديون المتجر وزر الفواتير في الإجراءات السريعة». */}
+        <button
+          className="ih-quick-card"
+          title="دفتر ديون المتجر المحلية — الزبائن والتحصيلات وكشوف PDF"
+          onClick={() => goTo('debts')}>
+          <span className="ih-quick-icon"><Icon name="book" size={26} /></span>
+          <span className="ih-quick-label">ديون المتجر</span>
+          {(localBook?.outstandingMinor ?? 0) > 0 && (
+            <span className="ih-online-badge" style={{background: 'var(--warn)'}}>
+              {localBook?.debtorsCount ?? 0}
+            </span>
+          )}
+        </button>
+        <button
+          className="ih-quick-card"
+          title="مركز الفواتير — بحث ومراجعة ومرتجعات وإعادة طباعة"
+          onClick={() => goTo('invoices')}>
+          <span className="ih-quick-icon"><Icon name="clipboard" size={26} /></span>
+          <span className="ih-quick-label">الفواتير</span>
+        </button>
         <button className="ih-quick-card" onClick={() => goTo('stocktake')}>
           <span className="ih-quick-icon"><Icon name="clipboard" size={26} /></span>
           <span className="ih-quick-label">جرد</span>

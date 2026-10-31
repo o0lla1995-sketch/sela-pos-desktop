@@ -19,6 +19,7 @@ import {
   useCartStore,
   cartTotals,
   unitPriceFor,
+  UNTRACKED_STOCK,
 } from '../stores/cartStore';
 import {useCatalogStore, useToastStore} from '../state/appStores';
 import {useSettingsStore, type PosProductView} from '../stores/settingsStore';
@@ -50,11 +51,18 @@ import {
 } from '../core/config';
 import {applyAmountKey, AMOUNT_KEYPAD_KEYS} from '../core/amountKeypad';
 import {Icon} from '../components/Icon';
-import {QuickProductSheet} from '../components/QuickProductSheet';
+import {SaleRepo} from '../database/repositories/SaleRepo';
+import {UnitRepo} from '../database/repositories/UnitRepo';
+import {VariantRepo} from '../database/repositories/VariantRepo';
+import {parsePackageCount} from '../services/QuickProductService';
+import {baseUnitLabelOf} from '../core/types';
 import type {
   CartLine,
   Product,
+  ProductUnit,
   ProductVariant,
+  SaleItemRecord,
+  SaleRecord,
   SilaCustomer,
   LocalCustomerBalance,
 } from '../core/types';
@@ -95,6 +103,121 @@ interface WeightPickState {
   product: Product;
 }
 
+/** v71 (الجولة 83 #٥): بناء أسطر سلة من بنود فاتورة سابقة —
+ *  «الرجوع للفاتورة السابقة» بطلب التاجر نصاً (نفس منطق الأندرويد):
+ *  مطابقة المنتجات الحية من الكتالوج، والأسعار من الفاتورة نفسها
+ *  (لا تُعاد تسعيرتها)، ومعامل تحويل الوحدات/الباكجات/الربط من
+ *  القطع الأساسية المسجلة (base_quantity ÷ quantity). */
+async function buildRecallLines(
+  items: SaleItemRecord[],
+  products: Product[],
+): Promise<{lines: CartLine[]; missing: number}> {
+  const byId = new Map(products.map(p => [p.id, p]));
+  const out: CartLine[] = [];
+  let missing = 0;
+
+  const pushLine = (line: CartLine) => {
+    const existing = out.find(entry => entry.key === line.key);
+    if (existing != null) {
+      existing.quantity += line.quantity;
+      return;
+    }
+    out.push(line);
+  };
+
+  for (const item of items) {
+    const product = byId.get(item.product_id);
+    if (product == null) {
+      missing += 1;
+      continue;
+    }
+
+    let variants = product.variants ?? [];
+    if (
+      item.variant_id != null &&
+      !variants.some(v => v.id === item.variant_id)
+    ) {
+      try {
+        variants = await VariantRepo.listByProduct(product.id);
+      } catch {
+        variants = [];
+      }
+    }
+    const variant =
+      item.variant_id != null
+        ? variants.find(v => v.id === item.variant_id) ?? null
+        : null;
+
+    let unit: ProductUnit | null = null;
+    if (
+      variant == null &&
+      item.variant_color == null &&
+      item.unit_name != null &&
+      item.unit_name !== '' &&
+      item.unit_name !== 'قطعة'
+    ) {
+      try {
+        const rows = await UnitRepo.listForProduct(product.id);
+        unit = rows.find(row => row.unitName === item.unit_name) ?? null;
+      } catch {
+        unit = null;
+      }
+    }
+
+    const qty = item.quantity > 0 ? item.quantity : 1;
+    const baseQty =
+      item.base_quantity != null && item.base_quantity > 0
+        ? item.base_quantity
+        : qty;
+    const conversion =
+      unit != null
+        ? unit.conversion
+        : baseQty > qty + 0.0001
+        ? Math.round((baseQty / qty) * 1000) / 1000
+        : 1;
+
+    const untracked = product.stock_untracked === 1;
+    let availableStock = untracked
+      ? UNTRACKED_STOCK
+      : product.stock_quantity;
+    if (!untracked) {
+      if (item.variant_color != null && conversion > 0) {
+        availableStock = Math.floor(product.stock_quantity / conversion);
+      } else if (
+        variant != null &&
+        variant.kind === 'variant' &&
+        variant.stock_quantity > 0
+      ) {
+        availableStock = variant.stock_quantity;
+      }
+    }
+
+    pushLine({
+      key: `${product.id}:${unit?.unit_id ?? 0}:${item.variant_id ?? 0}`,
+      productId: product.id,
+      name: product.name,
+      unitPrice: item.unit_price,
+      costPrice: item.cost_price,
+      retailPrice: item.unit_price,
+      wholesalePrice: item.unit_price,
+      quantity: qty,
+      availableStock,
+      unitId: unit?.unit_id ?? null,
+      unitName:
+        item.unit_name && item.unit_name !== ''
+          ? item.unit_name
+          : baseUnitLabelOf(product, product.base_unit_name ?? 'قطعة'),
+      conversion,
+      byWeight: product.sold_by_weight === 1,
+      variantId: item.variant_id ?? null,
+      variantLabel: item.variant_label ?? null,
+      bundleColor: item.variant_color ?? null,
+      discountPct: 0,
+    });
+  }
+  return {lines: out, missing};
+}
+
 interface DebtConfirmState {
   kind: 'sila' | 'local';
   customerId: string | null;
@@ -130,6 +253,8 @@ export function PosScreen() {
   const addVariantLine = useCartStore(s => s.addVariantLine);
   const addBundleLine = useCartStore(s => s.addBundleLine);
   const addSizedLine = useCartStore(s => s.addSizedLine);
+  const addPackageLine = useCartStore(s => s.addPackageLine);
+  const restoreLines = useCartStore(s => s.restoreLines);
   const increment = useCartStore(s => s.increment);
   const decrement = useCartStore(s => s.decrement);
   const removeLine = useCartStore(s => s.removeLine);
@@ -141,8 +266,24 @@ export function PosScreen() {
 
   // ── واجهة ──
   const [search, setSearch] = useState('');
-  // v58 (الجولة 62): الإضافة السريعة لمود «نقطة البيع».
-  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  /** v71 (الجولة 83 #٥): آخر فاتورة — تُعرض في السلة الفارغة كي
+   *  يرجع إليها التاجر بلمسة واحدة (طلبه نصاً). */
+  const [lastSale, setLastSale] = useState<SaleRecord | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (lines.length === 0) {
+      SaleRepo.listRecent(1)
+        .then(rows => {
+          if (alive) setLastSale(rows[0] ?? null);
+        })
+        .catch(() => {
+          if (alive) setLastSale(null);
+        });
+    }
+    return () => {
+      alive = false;
+    };
+  }, [lines.length]);
   const [categoryId, setCategoryId] = useState<number | 'all'>('all');
   const [view, setView] = useState<PosProductView>(settings.posProductView);
   const [busy, setBusy] = useState(false);
@@ -219,6 +360,53 @@ export function PosScreen() {
     },
     [addProductToCart, pricingMode, toast],
   );
+
+  /** v71 (الجولة 83 #٥): الرجوع للفاتورة السابقة — يعيد بنود آخر
+   *  فاتورة إلى السلة بأسعارها الأصلية (المسودة تُستبدل كاملة):
+   *  للتتميم عليها ببيع جديد أو لمراجعتها سريعاً. الفاتورة
+   *  الأصلية تبقى مسجلة؛ الإلغاء من مركز الفواتير (مرتجع). */
+  const recallLastInvoice = useCallback(async () => {
+    try {
+      const rows = await SaleRepo.listRecent(1);
+      const sale = rows[0] ?? null;
+      if (sale == null) {
+        toast('لا توجد فواتير سابقة بعد', 'info');
+        return;
+      }
+      const items = await SaleRepo.getItemsForSale(sale.id);
+      const {lines: restored, missing} = await buildRecallLines(
+        items,
+        useCatalogStore.getState().products,
+      );
+      if (restored.length === 0) {
+        toast(
+          'تعذر استرجاع الفاتورة — منتجاتها لم تعد موجودة في المخزون',
+          'error',
+        );
+        return;
+      }
+      restoreLines(
+        restored,
+        sale.payment_type === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL',
+        sale.discount,
+      );
+      beep('ok');
+      toast(
+        `استُرجعت الفاتورة ${sale.invoice_number} — ${restored.length} صنف في السلة${
+          missing > 0 ? ` (تخطي ${missing} صنف لم يعد موجوداً)` : ''
+        }`,
+        'success',
+        4500,
+      );
+    } catch (error) {
+      toast(
+        error instanceof Error
+          ? error.message
+          : 'تعذر استرجاع الفاتورة السابقة',
+        'error',
+      );
+    }
+  }, [restoreLines, toast]);
 
   // ── توجيه الماسح العام: منتج / رمز صِلة / قسيمة ──
   useEffect(() => {
@@ -545,6 +733,7 @@ export function PosScreen() {
   // القسيمة — أزرار السلة تحمل شاراتها كي يكتشفها الكاشير بلا
   // دليل. البحث انتقل لـ F6 ومفرق/جملة لـ F7 كي لا تتصادم مع
   // التعيين الجديد، وF9 إتمام البيع كما كان منذ v58.
+  // v71 (الجولة 83 #٥): F8 الرجوع للفاتورة السابقة (والسلة فارغة).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'F1') {
@@ -581,6 +770,21 @@ export function PosScreen() {
       } else if (e.key === 'F7') {
         e.preventDefault();
         setPricingMode(pricingMode === 'RETAIL' ? 'WHOLESALE' : 'RETAIL');
+      } else if (e.key === 'F8') {
+        // v71 (الجولة 83 #٥): الرجوع للفاتورة السابقة — يعمل فقط
+        //  والسلة فارغة (كما طلب التاجر) كي لا يستبدل بيعاً جارياً.
+        e.preventDefault();
+        if (
+          lines.length === 0 &&
+          paySheet == null &&
+          debtConfirm == null &&
+          weightPick == null &&
+          variantPick == null
+        ) {
+          void recallLastInvoice();
+        } else if (lines.length > 0) {
+          toast('السلة غير فارغة — فُرّغها أولاً كي ترجع للفاتورة السابقة', 'info');
+        }
       } else if (e.key === 'F9') {
         e.preventDefault();
         if (lines.length > 0 && !busy) openPaySheet();
@@ -597,7 +801,7 @@ export function PosScreen() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [pricingMode, setPricingMode, lines.length, busy, paySheet, debtConfirm, weightPick, variantPick, silaPaired, clearCart, openLocalPicker, openSilaPicker, toast, openPaySheet]);
+  }, [pricingMode, setPricingMode, lines.length, busy, paySheet, debtConfirm, weightPick, variantPick, silaPaired, clearCart, openLocalPicker, openSilaPicker, toast, openPaySheet, recallLastInvoice]);
 
   // ── صرف قسيمة على السلة (v20) ──
   const redeemVoucherOnCart = useCallback(async () => {
@@ -1039,14 +1243,9 @@ export function PosScreen() {
             <Icon name="layoutCards" size={16} />
           </button>
         </div>
-        {settings.storeMode === 'pos' ? (
-          <button
-            className="btn sm success"
-            onClick={() => setQuickAddOpen(true)}
-            title="إضافة منتج سريع (حبة/علبة/غرام)">
-            + سريع
-          </button>
-        ) : null}
+        {/* v71 (الجولة 83 #٣): زر «منتج سريع» حُذف من صفحة البيع
+            بطلب التاجر — الإضافة السريعة تبقى من شاشة المخزون،
+            وصفحة البيع للبيع فقط. */}
         <span className="pos-scanhint">
           <Icon name="scan" size={15} />
           المسح العام نشط — وجّه القارئ نحو أي مكان
@@ -1137,6 +1336,21 @@ export function PosScreen() {
               <div className="pos-cart-empty">
                 <Icon name="cart" size={30} />
                 <div>اضغط منتجاً لإضافته أو امسح باركوده…</div>
+                {/* v71 (الجولة 83 #٥): الرجوع للفاتورة السابقة من
+                    السلة الفارغة بلمسة واحدة — آخر فاتورة برقمها
+                    وإجماليها (طلب التاجر نصاً). */}
+                {lastSale != null && (
+                  <button
+                    className="btn sm"
+                    style={{marginTop: 8}}
+                    title="استرجاع بنود آخر فاتورة إلى السلة بأسعارها الأصلية — F8"
+                    onClick={() => void recallLastInvoice()}>
+                    <Icon name="undo" size={14} />
+                    الرجوع للفاتورة السابقة · {lastSale.invoice_number} ·{' '}
+                    {formatMoney(lastSale.total_amount)}
+                    <span className="pos-fkey">F8</span>
+                  </button>
+                )}
               </div>
             )}
             {lines.map(line => (
@@ -1497,7 +1711,14 @@ export function PosScreen() {
               const r = addBundleLine(variantPick.product, color, qty);
               if (!r.added && r.reason) toast(r.reason, 'error');
             } else if (variant.kind === 'size') {
-              const r = addSizedLine(variantPick.product, variant, qty);
+              // v71 (الجولة 83 #٢): «N حبات» = باكج بيع بالعدد —
+              //  يخصم المخزون بالقطع ويميّز في الفاتورة؛ أحجام
+              //  المطاعم تبقى كما كانت تماماً.
+              const packageCount = parsePackageCount(variant.size);
+              const r =
+                packageCount != null
+                  ? addPackageLine(variantPick.product, variant, packageCount, qty)
+                  : addSizedLine(variantPick.product, variant, qty);
               if (!r.added && r.reason) toast(r.reason, 'error');
             } else {
               const r = addVariantLine(variantPick.product, pricingMode, variant, qty);
@@ -1869,11 +2090,8 @@ export function PosScreen() {
         </div>
       )}
 
-      {/* v58 (الجولة 62): نافذة الإضافة السريعة لمود نقطة البيع. */}
-      <QuickProductSheet
-        open={quickAddOpen}
-        onClose={() => setQuickAddOpen(false)}
-      />
+      {/* v71 (الجولة 83 #٣): نافذة «منتج سريع» حُذفت من صفحة البيع
+          بطلب التاجر — الإضافة السريعة تبقى من شاشة المخزون. */}
     </div>
   );
 }

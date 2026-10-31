@@ -5,12 +5,20 @@
  * نفس منطق الأندرويد (QuickProductService مشترك حرفياً): اسم + سعر
  * + طريقة بيع (حبة/علبة/غرام) + مخزون اختياري — السجائر تُضاف في
  * ثوانٍ وتُباع بالحبة المفردة أو بالعلبة أو بالغرام.
+ *
+ * v71 (الجولة 83 #٢/#٣): خيارات بيع بالعدد (باكجات) — طلب التاجر
+ * نصاً: «نفس الصنف يباع بالقطعة بشيكل واحد مع خيارات أخرى تظهر عند
+ * اختيار المنتج في البيع — 3 حبات بـ2 شيكل أو 5 حبات بـ3 شيكل،
+ * مثل المطاعم والكافيهات ولكن ليس أحجاماً بل عدداً». الباركود حُذف
+ * من النافذة بطلبه الصريح.
  */
-import React, {useEffect, useMemo, useState} from 'react';
-import {QuickProductService, type QuickSellBy} from '../services/QuickProductService';
-import {useCatalogStore} from '../state/appStores';
-import {useToastStore} from '../state/appStores';
-import {pushBarcodeHandler, beep} from '../lib/scanner';
+import React, {useMemo, useState} from 'react';
+import {
+  QuickProductService,
+  quickPackageLabel,
+  type QuickSellBy,
+} from '../services/QuickProductService';
+import {useCatalogStore, useToastStore} from '../state/appStores';
 
 const SELL_BY_OPTIONS: {key: QuickSellBy; label: string; hint: string}[] = [
   {key: 'piece', label: 'بالحبة', hint: 'سعر الحبة — وسعر العلبة يُشتق'},
@@ -25,6 +33,14 @@ function parsePositiveNumber(text: string): number | null {
   }
   return value;
 }
+
+/** v71: صف باكج بيع بالعدد كحقول نص خام — التحويل لحظة الحفظ فقط. */
+interface PackageRow {
+  count: string;
+  price: string;
+}
+
+const EMPTY_PACKAGE: PackageRow = {count: '', price: ''};
 
 export function QuickProductSheet({
   open,
@@ -43,21 +59,10 @@ export function QuickProductSheet({
   const [perBox, setPerBox] = useState('20');
   const [gramPrice, setGramPrice] = useState('');
   const [stock, setStock] = useState('');
-  const [barcode, setBarcode] = useState('');
   const [busy, setBusy] = useState(false);
-
-  /* v73 (الجولة 77 #1): الماسح اللاسلكي ← حقل الباركود — النافذة
-   *  تفتح فوق شاشة البيع فيعلو معالجها معالج السلة طوال فتحها:
-   *  مسح الجوال يعبّئ باركود المنتج الجديد بدل إضافته للسلة. */
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    return pushBarcodeHandler(code => {
-      setBarcode(code);
-      beep('ok');
-    });
-  }, [open]);
+  /** v71 (الجولة 83 #٢): خيارات بيع بالعدد — مطوية افتراضياً. */
+  const [packagesOpen, setPackagesOpen] = useState(false);
+  const [packageRows, setPackageRows] = useState<PackageRow[]>([]);
 
   const perBoxCount = useMemo(() => {
     const parsed = parsePositiveNumber(perBox);
@@ -84,6 +89,31 @@ export function QuickProductSheet({
     return null;
   }
 
+  /** v71: تحويل صفوف الباكجات لحظة الحفظ — الصف الفارغ يُتجاهل؛
+   *  الناقص يوقف الحفظ برسالة تحدد المشكلة. */
+  const parsePackageRows = () => {
+    const out: {count: number; price: number}[] = [];
+    for (const row of packageRows) {
+      const countText = row.count.replace(',', '.').trim();
+      const priceText = row.price.replace(',', '.').trim();
+      if (countText.length === 0 && priceText.length === 0) {
+        continue;
+      }
+      const count = Number(countText);
+      if (!Number.isFinite(count) || count < 2 || !Number.isInteger(count)) {
+        throw new Error('عدد الحبات في خيار البيع — رقماً صحيحاً 2 أو أكثر');
+      }
+      const price = Number(priceText);
+      if (!Number.isFinite(price) || price <= 0) {
+        throw new Error(
+          `سعر خيار «${quickPackageLabel(count)}» — أدخل رقماً أكبر من صفر`,
+        );
+      }
+      out.push({count, price});
+    }
+    return out;
+  };
+
   const save = async () => {
     const trimmed = name.trim();
     if (!trimmed) {
@@ -92,6 +122,7 @@ export function QuickProductSheet({
     }
     setBusy(true);
     try {
+      const packages = parsePackageRows();
       const stockInput = parsePositiveNumber(stock);
       await QuickProductService.createQuickProduct({
         name: trimmed,
@@ -106,16 +137,25 @@ export function QuickProductSheet({
         boxPriceOverride:
           sellBy === 'piece' ? parsePositiveNumber(boxPrice) : null,
         stockInput,
-        barcode: barcode.trim() || null,
+        barcode: null,
+        packages,
       });
       await refreshCatalog();
-      toast(`أُضيف «${trimmed}» — متاح في نقطة البيع فوراً`, 'success');
+      toast(
+        `أُضيف «${trimmed}» — متاح في نقطة البيع فوراً${
+          packages.length > 0
+            ? ` بـ${packages.length + 1} خيارات بيع (حبة + ${packages.length} باكج)`
+            : ''
+        }`,
+        'success',
+      );
       setName('');
       setPiecePrice('');
       setBoxPrice('');
       setGramPrice('');
       setStock('');
-      setBarcode('');
+      setPackagesOpen(false);
+      setPackageRows([]);
       onClose();
     } catch (error) {
       toast(
@@ -129,7 +169,7 @@ export function QuickProductSheet({
 
   return (
     <div className="overlay">
-      <div className="modal" style={{width: 'min(520px, 94vw)'}}>
+      <div className="modal" style={{width: 'min(560px, 94vw)'}}>
         <div className="modal-head">
           <div>
             <b>إضافة منتج سريع</b>
@@ -242,14 +282,84 @@ export function QuickProductSheet({
               placeholder="اختياري"
             />
           </div>
-          <div className="field">
-            <label>باركود (اختياري)</label>
-            <input
-              value={barcode}
-              onChange={e => setBarcode(e.target.value)}
-              placeholder="امسحه أو اكتبه"
-            />
-          </div>
+
+          {/* v71 (الجولة 83 #٢): خيارات بيع بالعدد (باكجات) — قسم
+              مطوي حتى يبقى المسار السريع كما هو. */}
+          {sellBy !== 'gram' ? (
+            <div className="field">
+              <button
+                className={`btn sm ${packagesOpen ? 'ghost' : 'primary'}`}
+                onClick={() => setPackagesOpen(prev => !prev)}>
+                {packagesOpen ? 'إخفاء خيارات البيع بالعدد' : '+ خيارات بيع بالعدد — باكجات (اختياري)'}
+              </button>
+              {packagesOpen ? (
+                <div style={{marginTop: 8, display: 'grid', gap: 8}}>
+                  <div className="sub">
+                    كل خيار = عدد حبات بسعره المميز (مثال: 3 حبات بـ2
+                    شيكل). تظهر عند اختيار المنتج في البيع قبل إضافته
+                    للسلة — مع خيار الحبة المفردة دائماً — ويميزها
+                    الفاتورة بعدد الحبات.
+                  </div>
+                  {packageRows.map((row, index) => (
+                    <div
+                      key={index}
+                      className="qp-package-row"
+                      style={{display: 'flex', gap: 8, alignItems: 'flex-end'}}>
+                      <div style={{flex: 1}}>
+                        <label className="sub">عدد الحبات</label>
+                        <input
+                          value={row.count}
+                          onChange={e =>
+                            setPackageRows(prev =>
+                              prev.map((r, i) =>
+                                i === index
+                                  ? {...r, count: e.target.value.replace(',', '.')}
+                                  : r,
+                              ),
+                            )
+                          }
+                          placeholder="3"
+                          inputMode="numeric"
+                        />
+                      </div>
+                      <div style={{flex: 1}}>
+                        <label className="sub">سعر الباكج ₪</label>
+                        <input
+                          value={row.price}
+                          onChange={e =>
+                            setPackageRows(prev =>
+                              prev.map((r, i) =>
+                                i === index
+                                  ? {...r, price: e.target.value.replace(',', '.')}
+                                  : r,
+                              ),
+                            )
+                          }
+                          placeholder="2"
+                          inputMode="decimal"
+                        />
+                      </div>
+                      <button
+                        className="btn sm ghost"
+                        title="حذف الخيار"
+                        onClick={() =>
+                          setPackageRows(prev => prev.filter((_, i) => i !== index))
+                        }>
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    className="btn sm ghost"
+                    onClick={() =>
+                      setPackageRows(prev => [...prev, {...EMPTY_PACKAGE}])
+                    }>
+                    + إضافة خيار آخر
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <div className="modal-foot">
           <span className="spacer" />

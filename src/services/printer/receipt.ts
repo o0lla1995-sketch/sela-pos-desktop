@@ -6,8 +6,8 @@
  * thank-you footer → feed & cut.
  */
 import {ReceiptBuilder} from './escpos';
-import {formatDateTime} from '../../core/format';
-import {paymentMethodLabel} from '../../core/paymentMethods';
+import {formatDateTime, formatQty} from '../../core/format';
+import {paymentMethodReceiptLabel} from '../../core/paymentMethods';
 import {APP_NAME, RECEIPT_WIDTH_58, RECEIPT_WIDTH_80} from '../../core/config';
 import type {SaleRecord, SaleItemRecord} from '../../core/types';
 
@@ -80,6 +80,15 @@ export function buildReceiptJob(data: ReceiptData, settings: ReceiptSettings) {
           : LABELS.paymentRetail
       }`,
     )
+    /* v71 (الجولة 83 #١): طريقة الدفع على الإيصال دائماً — نقدي
+     *  وبنك ومحفظة بالنوع والجهة (طلب التاجر: «الفاتورة تفتقر إلى
+     *  طريقة الدفع سواء نقدي أو محفظة أو بنك ونوعه»). كانت تُطبع
+     *  للطرق غير النقدية فقط أسفل الإجمالي — الآن سطر ترويسة
+     *  دائم كالأندرويد v66 بالضبط، يُقرأ من سجل الفاتورة نفسه
+     *  فينطبق على الطباعة الأولى وإعادة الطباعة معاً. */
+    .textLine(
+      `طريقة الدفع: ${paymentMethodReceiptLabel(data.sale.payment_method)}`,
+    )
     .separator(width);
 
   // ── Items ─────────────────────────────────────────────────────
@@ -90,6 +99,8 @@ export function buildReceiptJob(data: ReceiptData, settings: ReceiptSettings) {
       data.productNameById.get(item.product_id) ?? `#${item.product_id}`;
     // v35 (الجولة 43): وصف المتغير (لون · مقاس / حجم / ربطة) بعد
     //  الاسم — الفاتورة تميز ما بيع تحديداً من كل موديل.
+    // v71 (الجولة 83 #٢): باكجات العدد «3 حبات» تدخل هنا أيضاً —
+    //  تمييز الاختيار كما طلب التاجر نصاً.
     const variantSuffix = (item as {variant_label?: string | null})
       .variant_label
       ? ` (${(item as {variant_label?: string | null}).variant_label})`
@@ -98,6 +109,13 @@ export function buildReceiptJob(data: ReceiptData, settings: ReceiptSettings) {
       item.unit_name && item.unit_name !== 'قطعة' ? ` (${item.unit_name})` : '';
     b.truncate(`${name}${variantSuffix}${unitSuffix}`, width);
     b.qtyPriceLine(item.quantity, item.unit_price, item.total_line_price);
+    // v71 (الجولة 83 #١): تفاصيل القطع تحت سطر الأصناف متعددة
+    //  القطع — وحدة أكبر (علبتان = 40 حبة) أو باكج (باكجان من
+    //  3 حبات = 6 حبات) كي تُقرأ الفاتورة بلا لبس.
+    const baseQty = item.base_quantity ?? null;
+    if (baseQty != null && baseQty > item.quantity + 0.0001) {
+      b.textLine(`= ${formatQty(baseQty)} قطعة`);
+    }
   }
 
   // ── Totals ────────────────────────────────────────────────────
@@ -118,17 +136,8 @@ export function buildReceiptJob(data: ReceiptData, settings: ReceiptSettings) {
       .bold(false);
   }
 
-  // ── v70 (الجولة 74 #2): طريقة الدفع غير النقدية — سطر عربي
-  // واضح تحت الإجمالي (النقدي هو المعتاد ولا يزيد سطراً على
-  // إيصارات المتجر القائمة). يعمل التاجر بها على تتبع ما دخل
-  // حسابه البنكي أو محفظته الإلكترونية.
-  const methodId = data.sale.payment_method ?? null;
-  if (methodId != null && methodId !== '' && methodId !== 'cash') {
-    b.align(2)
-      .bold(true)
-      .textLine(`طريقة الدفع: ${paymentMethodLabel(methodId)}`)
-      .bold(false);
-  }
+  /* v71 (الجولة 83 #١): سطر طريقة الدفع غير النقدية تحت الإجمالي
+   *  حُذف — انتقل للترويسة حيث يُطبع دائماً بنفس بنية الأندرويد. */
 
   // ── Footer ────────────────────────────────────────────────────
   b.separator(width)
