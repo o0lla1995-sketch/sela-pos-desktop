@@ -162,7 +162,12 @@ CREATE TABLE IF NOT EXISTS sales (
   client_ref TEXT,
   -- v70 (الجولة 74 #2): طريقة الدفع المختارة (بنك/محفظة/نقدي)
   -- لتتبع الأرصدة — NULL = نقدي (توافق المبيعات القديمة).
-  payment_method TEXT
+  payment_method TEXT,
+  -- v80 (الجولة 85): تعديل الفاتورة عبر نقطة البيع — كم مرة عُدّلت
+  -- (0 = أبداً) ووقت آخر تعديل. التعديل يستبدل محتوى الفاتورة
+  -- نفسها داخل معاملة واحدة ويسوّي الفرق (نفس الأندرويد v73).
+  edit_count INTEGER NOT NULL DEFAULT 0,
+  edited_at TEXT
 );
 CREATE TABLE IF NOT EXISTS sale_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -236,6 +241,20 @@ CREATE INDEX IF NOT EXISTS idx_sale_returns_created ON sale_returns(created_at);
 CREATE INDEX IF NOT EXISTS idx_sri_return ON sale_return_items(return_id);
 CREATE INDEX IF NOT EXISTS idx_sri_sale_item ON sale_return_items(sale_item_id);
 CREATE INDEX IF NOT EXISTS idx_srex_return ON sale_return_exchanges(return_id);
+-- ── v80 (الجولة 85): سجل تعديل الفواتير عبر نقطة البيع — لقطة
+-- كاملة (JSON) قبل التعديل وبعده لكل عملية؛ المرتجعات السابقة
+-- المطوية داخل التعديل تُحفظ هنا (حذفها من جداولها الحية ضروري
+-- لمعادلة الخزينة، والتاريخ يبقى للمحاسب).
+CREATE TABLE IF NOT EXISTS sale_edits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+  edited_at TEXT NOT NULL,
+  before_json TEXT NOT NULL,
+  after_json TEXT NOT NULL,
+  delta_minor INTEGER NOT NULL DEFAULT 0,
+  note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sale_edits_sale ON sale_edits(sale_id);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
 CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
@@ -611,6 +630,10 @@ fn heal_v57(conn: &Connection) -> Result<()> {
         // بلا سبب ويبقى السالب بعد السداد من محفظة/بنك) — يُحتسب
         // في الدين القائم فقط، والسداد وحده يُغذّي قناة الدفع.
         ("local_debts", "origin", "TEXT NOT NULL DEFAULT 'sale'"),
+        // ── v80 (الجولة 85): تعديل الفاتورة عبر نقطة البيع —
+        // العداد ووقت آخر تعديل (نفس الأندرويد v73/ترحيل v34).
+        ("sales", "edit_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("sales", "edited_at", "TEXT"),
     ];
     for (table, column, ddl) in upgrades {
         if !has_column(conn, table, column) {
@@ -692,6 +715,19 @@ fn heal_v57(conn: &Connection) -> Result<()> {
                ON local_payments(local_customer_id, created_at DESC);",
         )?;
     }
+    // ── v80 (الجولة 85): سجل تدقيق تعديل الفواتير (idempotent).
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS sale_edits (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+           edited_at TEXT NOT NULL,
+           before_json TEXT NOT NULL,
+           after_json TEXT NOT NULL,
+           delta_minor INTEGER NOT NULL DEFAULT 0,
+           note TEXT
+         );
+         CREATE INDEX IF NOT EXISTS idx_sale_edits_sale ON sale_edits(sale_id);",
+    )?;
     // ── فهارس لا تُنشأ إلا بعد ضمان أعمدتها (درس v23.0.1) ──
     conn.execute_batch(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_stocktake_items_line

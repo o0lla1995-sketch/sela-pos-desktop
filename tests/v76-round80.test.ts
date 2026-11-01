@@ -153,9 +153,9 @@ describe('v76 — ④ب صفحة التقارير بتبويبات', () => {
 describe('v76 — الإصدار', () => {
   test('79.0.0 (23) — محدّث للجولة 81', () => {
     const src = read('src/core/config.ts');
-    expect(src).toContain("APP_VERSION = '79.0.0'");
-    expect(src).toContain('APP_BUILD_CODE = 23');
+    expect(src).toContain("APP_VERSION = '80.0.0'");
+    expect(src).toContain('APP_BUILD_CODE = 24');
     const pkg = read('package.json');
-    expect(pkg).toContain('"version": "79.0.0"');
+    expect(pkg).toContain('"version": "80.0.0"');
   });
 });

@@ -19,6 +19,7 @@ import {
 } from '../core/config';
 import type {
   CartLine,
+  InvoiceEditSession,
   PricingMode,
   Product,
   ProductUnit,
@@ -312,6 +313,19 @@ interface CartState {
   lines: CartLine[];
   pricingMode: PricingMode;
   discount: number;
+  /** v80 (الجولة 85): جلسة تعديل فاتورة مفتوحة — السلة تمثل النسخة
+   *  المعدلة من هذه الفاتورة، وعند الإتمام تُستبدل الفاتورة
+   *  الأصلية بها (بلا فاتورة جديدة). null = بيع طبيعي. */
+  editSession: InvoiceEditSession | null;
+  /** v80: فتح فاتورة للتعديل — يستبدل السلة كاملة ويضبط الجلسة. */
+  beginEdit: (
+    lines: CartLine[],
+    mode: PricingMode,
+    discount: number,
+    session: InvoiceEditSession,
+  ) => void;
+  /** v80: إلغاء التعديل — تفريغ السلة وإسقاط الجلسة. */
+  cancelEdit: () => void;
   addProduct: (
     product: Product,
     mode: PricingMode,
@@ -385,6 +399,9 @@ interface DraftSnapshot {
   lines: CartLine[];
   pricingMode: PricingMode;
   discount: number;
+  /** v80 (الجولة 85): الجلسة تُحفظ مع المسودة — إغلاق التطبيق أثناء
+   *  التعديل لا يفقدها (نفس انضباط مسودة البيع). */
+  editSession?: InvoiceEditSession | null;
 }
 
 /** Normalizes draft lines loaded from older versions. */
@@ -406,20 +423,36 @@ function loadDraft(): DraftSnapshot {
       lines: draft.lines.map(normalizeLine),
       pricingMode: draft.pricingMode === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL',
       discount: Number(draft.discount) || 0,
+      // v80 (الجولة 85): الجلسة المحفوظة تنجو مع المسودة.
+      editSession: draft.editSession ?? null,
     };
   }
-  return {lines: [], pricingMode: 'RETAIL', discount: 0};
+  return {
+    lines: [],
+    pricingMode: 'RETAIL',
+    discount: 0,
+    editSession: null,
+  };
 }
 
 function saveDraft(
   lines: CartLine[],
   pricingMode: PricingMode,
   discount: number,
+  editSession?: InvoiceEditSession | null,
 ): void {
+  // v80 (الجولة 85): تعديلات السلة العادية لا تُمس الجلسة — تُقرأ
+  //  من الحالة الحية كي لا تسقط من المسودة عند أي إضافة/حذف/كمية
+  //  أثناء التعديل؛ وتُمرّر صراحة عند فتح/إلغاء الجلسة.
+  const session =
+    editSession !== undefined
+      ? editSession
+      : useCartStore.getState().editSession;
   setJson(KEYS.cartDraft, {
     lines,
     pricingMode,
     discount,
+    editSession: session,
   } satisfies DraftSnapshot);
 }
 
@@ -468,8 +501,13 @@ function bundleUsed(
   return used;
 }
 
+// v80 (الجولة 85): الجلسة قيمة قاطعة في الحالة — المسودة القديمة
+// بلا جلسة تعني null (بيع طبيعي).
+const initialDraft = loadDraft();
+
 export const useCartStore = create<CartState>((set, get) => ({
-  ...loadDraft(),
+  ...initialDraft,
+  editSession: initialDraft.editSession ?? null,
 
   addProduct: (product, mode, unit = null, quantity = 1) => {
     const state = get();
@@ -754,19 +792,49 @@ export const useCartStore = create<CartState>((set, get) => ({
   restoreLines: (lines, mode, discount) => {
     // استرجاع فاتورة سابقة — الأسطر جاهزة بأسعارها الأصلية؛
     // التطبيع يحمي من مسودات قديمة ناقصة الحقول.
+    // v80 (الجولة 85): النسخ كسلة جديدة هو بيع طبيعي — أي جلسة
+    //  تعديل مفتوحة تُسقط (لا تختلط فاتورة بالأخرى).
     const restored = (lines ?? []).map(normalizeLine).filter(
       line => line != null && line.quantity > 0,
     );
+    const nextMode = mode === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL';
+    const nextDiscount = Math.max(0, Number.isFinite(discount) ? discount : 0);
     set({
       lines: restored,
-      pricingMode: mode === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL',
-      discount: Math.max(0, Number.isFinite(discount) ? discount : 0),
+      pricingMode: nextMode,
+      discount: nextDiscount,
+      editSession: null,
     });
-    saveDraft(
-      restored,
-      mode === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL',
-      Math.max(0, Number.isFinite(discount) ? discount : 0),
+    saveDraft(restored, nextMode, nextDiscount, null);
+  },
+
+  /** v80 (الجولة 85): فتح فاتورة للتعديل — السلة تصبح النسخة
+   *  المعدلة من الفاتورة (أسعارها الأصلية وخصمها ونمط تسعيرها). */
+  beginEdit: (lines, mode, discount, session) => {
+    const restored = (lines ?? []).map(normalizeLine).filter(
+      line => line != null && line.quantity > 0,
     );
+    const nextMode = mode === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL';
+    const nextDiscount = Math.max(0, Number.isFinite(discount) ? discount : 0);
+    set({
+      lines: restored,
+      pricingMode: nextMode,
+      discount: nextDiscount,
+      editSession: session,
+    });
+    saveDraft(restored, nextMode, nextDiscount, session);
+  },
+
+  /** v80: إلغاء التعديل — السلة تُفرّغ والجلسة تسقط والفاتورة
+   *  الأصلية تبقى كما هي لم تُمس. */
+  cancelEdit: () => {
+    set({lines: [], discount: 0, editSession: null});
+    saveDraft([], useCartStore.getState().pricingMode, 0, null);
+    try {
+      storage.delete(KEYS.cartDraft);
+    } catch {
+      // Best effort cleanup only.
+    }
   },
 
   setLineUnit: (product, unit) => {
@@ -943,8 +1011,9 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
 
   clear: () => {
-    set({lines: [], discount: 0});
-    saveDraft([], useCartStore.getState().pricingMode, 0);
+    // v80 (الجولة 85): التفريغ يسقط جلسة التعديل أيضاً.
+    set({lines: [], discount: 0, editSession: null});
+    saveDraft([], useCartStore.getState().pricingMode, 0, null);
     try {
       storage.delete(KEYS.cartDraft);
     } catch {

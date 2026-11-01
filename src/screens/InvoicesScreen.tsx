@@ -32,7 +32,7 @@ import {UnitRepo} from '../database/repositories/UnitRepo';
 import {VariantRepo} from '../database/repositories/VariantRepo';
 import {LocalDebtsRepo} from '../database/repositories/LocalDebtsRepo';
 import {SilaRepo} from '../services/sila/SilaRepo';
-import {applyProductDiscount} from '../stores/cartStore';
+import {applyProductDiscount, useCartStore} from '../stores/cartStore';
 import {buildReturnReceiptJob} from '../services/printer/returnReceipt';
 import {ThermalPrinterService} from '../services/printer/ThermalPrinterService';
 import {useEnterConfirm} from '../lib/useEnterConfirm';
@@ -117,7 +117,14 @@ function stepFor(remaining: number): number {
 // ══════════════════════════════════════════════════════════════════
 // الشاشة — القائمة + الفلاتر + الترقيم
 // ══════════════════════════════════════════════════════════════════
-export function InvoicesScreen() {
+export function InvoicesScreen({
+  /** v80 (الجولة 85 #٢): الانتقال لتبويب نقطة البيع عند فتح فاتورة
+   *  للإرجاع/الاستبدال بالتعديل السهل (زر الإرجاع يفتح الفاتورة في
+   *  السلة بدل نافذة الإرجاع القديمة — طلب التاجر نصاً). */
+  goTo,
+}: {
+  goTo?: (key: 'pos') => void;
+} = {}) {
   const toast = useToastStore(s => s.show);
   const settings = useSettingsStore(s => s.settings);
   const printerConnected = usePrinterStore(s => s.status === 'connected');
@@ -134,6 +141,42 @@ export function InvoicesScreen() {
       showProfit: settings.showProfitOnReceipt,
     }),
     [settings],
+  );
+
+  /** v80 (الجولة 85 #٢): فتح هذه الفاتورة في نقطة البيع للإرجاع
+   *  والاستبدال بالتعديل السهل — تُبنى السلة من الكميات المتبقية
+   *  بأسعارها الأصلية ويُنتقل لتبويب نقطة البيع حيث شريط التعديل:
+   *  حذف/تقليل كمية = إرجاع، إضافة أو تبديل = استبدال، وعند إتمام
+   *  التعديل تُستبدل الفاتورة الأصلية بالنسخة المعدلة ويسوّى الفرق
+   *  (نفس منطق الخصم والرجوع للمخزون — بطلب التاجر نصاً). */
+  const openInvoiceEditFromInvoices = useCallback(
+    async (saleId: number) => {
+      try {
+        const prep = await InvoiceService.prepareInvoiceEdit(saleId);
+        useCartStore.getState().beginEdit(
+          prep.lines,
+          prep.session.originalPricingMode,
+          prep.session.originalDiscount,
+          prep.session,
+        );
+        setDetailId(null);
+        goTo?.('pos');
+        toast(
+          `فُتحت ${prep.session.invoiceNumber} في نقطة البيع — عدّل الأصناف كما تشاء ثم أتم التعديل`,
+          'success',
+          5500,
+        );
+      } catch (error) {
+        toast(
+          error instanceof Error
+            ? error.message
+            : 'تعذر فتح الفاتورة في نقطة البيع',
+          'error',
+          5000,
+        );
+      }
+    },
+    [goTo, toast],
   );
 
   // ── النطاق والفلاتر ────────────────────────────────────────────
@@ -600,7 +643,11 @@ export function InvoicesScreen() {
         {reachedEnd && rows.length > PAGE_SIZE && ' — لا مزيد من الفواتير'}
       </div>
 
-      {/* تفاصيل الفاتورة */}
+      {/* تفاصيل الفاتورة — v80 (الجولة 85 #٢): زر الإرجاع/الاستبدال
+          يفتح الفاتورة في نقطة البيع للتعديل (حذف/تقليل = إرجاع،
+          إضافة/تبديل = استبدال) وعند الإتمام تُستبدل الفاتورة
+          الأصلية بالنسخة المعدلة ويسوّى الفرق — طلب التاجر نصاً بدل
+          نافذة الإرجاع والاستبدال القديمة. */}
       {detailId != null && (
         <DetailModal
           saleId={detailId}
@@ -608,7 +655,7 @@ export function InvoicesScreen() {
           reloadSignal={detailReload}
           enterEnabled={returnId == null}
           onClose={() => setDetailId(null)}
-          onReturn={() => setReturnId(detailId)}
+          onReturn={() => void openInvoiceEditFromInvoices(detailId)}
         />
       )}
 
@@ -883,6 +930,12 @@ function DetailModal({
               <span className="chip warn">
                 منها مرتجع {formatMoney(returnedSoFar / 100)}
               </span>
+            )}
+            {/* v80 (الجولة 85): فاتورة معدلة عبر نقطة البيع — وسم
+                دائم بعدد مرات التعديل (المحتوى الحالي هو النسخة
+                الأخيرة، والتاريخ الكامل في سجل التدقيق). */}
+            {(sale?.edit_count ?? 0) > 0 && (
+              <span className="chip warn">معدلة ×{sale?.edit_count}</span>
             )}
           </span>
           <span style={{display: 'flex', gap: 8}}>

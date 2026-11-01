@@ -1120,3 +1120,99 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ── v80 (الجولة 85): تعديل الفاتورة عبر نقطة البيع ──
+   شريط التعديل داخل السلة + نافذتا خيار الرجوع وإتمام التعديل. */
+.pos-edit-banner {
+  border: 1px solid var(--info, #38bdf8);
+  background: color-mix(in srgb, var(--info, #38bdf8) 12%, transparent);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pos-edit-banner-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--info, #38bdf8);
+}
+.pos-edit-banner-head b {
+  flex: 1;
+  font-size: 13px;
+}
+.pos-edit-banner-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.pos-edit-delta {
+  font-weight: 700;
+}
+.pos-edit-delta.neg {
+  color: var(--danger);
+}
+.pos-edit-delta.pos {
+  color: var(--success, #22c55e);
+}
+.pos-edit-delta.warn {
+  color: var(--warning, #f59e0b);
+}
+.pos-edit-delta.muted,
+.pos-edit-summary .muted {
+  color: var(--text-dim, #9aa0aa);
+  font-weight: 600;
+}
+.pos-edit-booknote {
+  font-size: 12px;
+  color: var(--text-dim, #9aa0aa);
+  text-align: center;
+  padding: 6px 4px;
+}
+.pos-edit-summary {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-soft, #2c313a);
+  border-radius: 12px;
+  padding: 4px 12px;
+  margin-top: 8px;
+}
+.pos-edit-summary > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-soft, #2c313a);
+  font-size: 13px;
+}
+.pos-edit-summary > div:last-child {
+  border-bottom: none;
+}
+.pos-edit-summary span {
+  color: var(--text-dim, #9aa0aa);
+}
+.pos-edit-hint {
+  font-size: 12.5px;
+  color: var(--text-dim, #9aa0aa);
+  margin: 10px 0 0;
+  text-align: right;
+}
+.pos-edit-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+.pos-edit-actions .btn {
+  flex: 1;
+}
+.pos-edit-note {
+  font-size: 11.5px;
+  color: var(--text-faint, #6b7280);
+  text-align: center;
+  margin: 8px 0 0;
+}

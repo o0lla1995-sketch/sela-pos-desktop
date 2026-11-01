@@ -377,7 +377,9 @@ export function App() {
               )}
               {screen === 'invoices' && (
                 <ErrorBoundary label="الفواتير">
-                  <InvoicesScreen />
+                  {/* v80 (الجولة 85 #٢): فتح فاتورة للتعديل من صفحة
+                      الفواتير ينتقل لنقطة البيع مباشرة. */}
+                  <InvoicesScreen goTo={key => setScreen(key)} />
                 </ErrorBoundary>
               )}
               {screen === 'online-orders' && (
