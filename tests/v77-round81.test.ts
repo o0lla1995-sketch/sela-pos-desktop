@@ -170,11 +170,11 @@ describe('v77 — ٥هـ تبويبات التقارير ثابتة بالبني
 describe('v77 — الإصدار', () => {
   test('79.0.0 (23)', () => {
     const src = read('src/core/config.ts');
-    expect(src).toContain("APP_VERSION = '80.0.0'");
-    expect(src).toContain('APP_BUILD_CODE = 24');
+    expect(src).toContain("APP_VERSION = '81.0.0'");
+    expect(src).toContain('APP_BUILD_CODE = 25');
     const pkg = read('package.json');
-    expect(pkg).toContain('"version": "80.0.0"');
+    expect(pkg).toContain('"version": "81.0.0"');
     const conf = read('src-tauri/tauri.conf.json');
-    expect(conf).toContain('"version": "80.0.0"');
+    expect(conf).toContain('"version": "81.0.0"');
   });
 });

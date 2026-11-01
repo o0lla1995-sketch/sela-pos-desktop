@@ -146,11 +146,11 @@ describe('v80 — ٦ الإيصال والإصدار', () => {
     expect(read(TYPES)).toContain('export interface InvoiceEditSession');
   });
 
-  test('80.0.0 (24) في كل ملفات الإصدار', () => {
-    expect(read(CONFIG)).toContain("APP_VERSION = '80.0.0'");
-    expect(read(CONFIG)).toContain('APP_BUILD_CODE = 24');
-    expect(read('package.json')).toContain('"version": "80.0.0"');
-    expect(read('src-tauri/tauri.conf.json')).toContain('"version": "80.0.0"');
-    expect(read('src-tauri/Cargo.toml')).toContain('version = "80.0.0"');
+  test('81.0.0 (25) في كل ملفات الإصدار', () => {
+    expect(read(CONFIG)).toContain("APP_VERSION = '81.0.0'");
+    expect(read(CONFIG)).toContain('APP_BUILD_CODE = 25');
+    expect(read('package.json')).toContain('"version": "81.0.0"');
+    expect(read('src-tauri/tauri.conf.json')).toContain('"version": "81.0.0"');
+    expect(read('src-tauri/Cargo.toml')).toContain('version = "81.0.0"');
   });
 });

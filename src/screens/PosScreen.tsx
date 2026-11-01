@@ -2224,13 +2224,22 @@ export function PosScreen() {
                         aria-checked={editSettleMethod === method.id}
                         key={method.id}
                         className={`pos-pay-method ${
-                          editSettleMethod === method.id ? 'active' : ''
+                          editSettleMethod === method.id ? 'sel' : ''
                         }`}
                         onClick={() => setEditSettleMethod(method.id)}>
-                        <span className="pos-pay-method-icon">
-                          {method.label.slice(0, 1)}
+                        {/* v81 (الجولة 86 #١): الشعارات الحقيقية بدل حرف
+                         * نصي — طلب التاجر: «صور تظهر كنص فقط». نفس
+                         * بطاقات نافذة الدفع (أيقونة الهوية + الاسم +
+                         * نوع القناة) والتمييز بنفس فئة sel. */}
+                        <PaymentMethodIcon method={method} size={40} />
+                        <span className="pm-name">{method.label}</span>
+                        <span className="pm-kind-label">
+                          {method.kind === 'cash'
+                            ? 'الخزينة النقدية'
+                            : method.kind === 'bank'
+                            ? 'تحويل بنكي'
+                            : 'محفظة إلكترونية'}
                         </span>
-                        <b>{method.label}</b>
                       </button>
                     ))}
                   </div>
