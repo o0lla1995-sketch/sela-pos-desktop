@@ -335,6 +335,9 @@ CREATE TABLE IF NOT EXISTS local_debts (
   invoice_ref TEXT NOT NULL UNIQUE,
   amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
   description TEXT,
+  -- v79 (الجولة 84 #١): 'sale' دين بيع INV-L / 'direct' دين مباشر
+  -- بلا بيع (لا يلمس معادلة الخزينة — دين قائم فقط).
+  origin TEXT NOT NULL DEFAULT 'sale',
   migrated INTEGER NOT NULL DEFAULT 0,
   migrated_ref TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -602,6 +605,12 @@ fn heal_v57(conn: &Connection) -> Result<()> {
         // ── v72 (الجولة 76 #5): قناة المصدر/الوجهة لحركات الخزينة
         // (سحب/إيداع/مصروف) — NULL = نقدي (توافق كامل مع التاريخ).
         ("cash_movements", "payment_method", "TEXT"),
+        // ── v79 (الجولة 84 #١): أصل الدين المحلي — 'sale' نشأ عن
+        // فاتورة بيع دين INV-L، 'direct' دين مباشر بلا بيع. الدين
+        // المباشر لا يُخصم من «النقد بالخزينة» (كان يجعلها سالبة
+        // بلا سبب ويبقى السالب بعد السداد من محفظة/بنك) — يُحتسب
+        // في الدين القائم فقط، والسداد وحده يُغذّي قناة الدفع.
+        ("local_debts", "origin", "TEXT NOT NULL DEFAULT 'sale'"),
     ];
     for (table, column, ddl) in upgrades {
         if !has_column(conn, table, column) {
@@ -617,6 +626,17 @@ fn heal_v57(conn: &Connection) -> Result<()> {
     if !has_column(conn, "sales", "return_kind") {
         conn.execute_batch("ALTER TABLE sales ADD COLUMN return_kind TEXT")?;
     }
+    // ── v79 (الجولة 84 #١): ترحيل قيم أصل الدين القائمة — كل دين
+    // بلا فاتورة بيع مقابلة في sales = دين مباشر. المعرّف (idempotent)
+    // وآمن للتشغيل كل إقلاع: ديون البيع لها صف sales دائم (لا يُحذف
+    // إلا في مسحٍ شامل يمحو الدفتر كله أو استعادة نسخة تعيد الاثنين
+    // معاً)، وNOT EXISTS (وليس NOT IN) لأن invoice_number يقبل NULL.
+    conn.execute_batch(
+        "UPDATE local_debts SET origin = 'direct'
+          WHERE NOT EXISTS (
+            SELECT 1 FROM sales s WHERE s.invoice_number = local_debts.invoice_ref
+          );",
+    )?;
     // stocktake_items: إعادة البناء بصفوف المتغيرات (ترحيل v22).
     if !has_column(conn, "stocktake_items", "variant_id") {
         conn.execute_batch(

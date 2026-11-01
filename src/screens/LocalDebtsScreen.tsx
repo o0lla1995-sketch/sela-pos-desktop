@@ -715,6 +715,13 @@ export function LocalDebtsScreen() {
                       <tr key={d.id}>
                         <td>
                           <span className="dc-ref">{d.invoice_ref}</span>
+                          {d.origin === 'direct' && (
+                            <span
+                              className="chip muted"
+                              style={{marginInlineStart: 6}}>
+                              دين مباشر
+                            </span>
+                          )}
                           {d.migrated === 1 && (
                             <span
                               className="chip muted"
@@ -980,7 +987,8 @@ export function LocalDebtsScreen() {
               </div>
               <div className="dc-hint">
                 يُرقَّم الدين بسند INV-L خاصاً بدفتر المتجر ويضاف إلى الدين
-                القائم فوراً.
+                القائم فوراً — ولا يُخصم من النقد بالخزينة إطلاقاً؛ سداده
+                وحده يُغذّي قناة الدفع التي دُفع بها (نقد/محفظة/بنك).
               </div>
             </div>
             <div className="modal-foot">
