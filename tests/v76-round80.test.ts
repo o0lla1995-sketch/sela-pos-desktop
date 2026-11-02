@@ -78,12 +78,18 @@ describe('v76 — ② تقرير PDF للمخزون بالتفصيل', () => {
 });
 
 describe('v76 — ④أ شعارات الجهات تملأ إطارها', () => {
-  test('الحشوة انخفضت من 6% إلى 2.5%', () => {
+  test('الحشوة انخفضت من 6% إلى 2.5% (ثم صُحّحت لبكسل ثابت في v84)', () => {
     const css = read(STYLES);
-    expect(css).toContain('padding: 2.5%;');
+    // v84 (الجولة 90 #٣): الحشوة النسبية كانت خطأً صامتاً — النسبة
+    // تُحسب من عرض الحاوية الخارجية لا من عرض الرقاقة، ففي الصفوف
+    // العريضة (تقارير v83) التهمت العرض كله واختفت الشعارات. الآن
+    // بكسل ثابت: 2px للرقاقة و1px لشارة الفاتورة.
+    expect(css).toContain('padding: 2px;');
     expect(css).not.toContain('padding: 6%;');
+    expect(css).not.toContain('padding: 2.5%;');
     // شارة الصف داخل الفواتير
-    expect(css).toContain('padding: 2%;');
+    expect(css).toContain('padding: 1px;');
+    expect(css).not.toContain('padding: 2%;');
   });
 
   test('سكربت قص الحواف المدمجة قابل لإعادة التشغيل', () => {
@@ -155,9 +161,9 @@ describe('v76 — ④ب صفحة التقارير بتبويبات', () => {
 describe('v76 — الإصدار', () => {
   test('79.0.0 (23) — محدّث للجولة 81', () => {
     const src = read('src/core/config.ts');
-    expect(src).toContain("APP_VERSION = '83.0.0'");
-    expect(src).toContain('APP_BUILD_CODE = 27');
+    expect(src).toContain("APP_VERSION = '84.0.0'");
+    expect(src).toContain('APP_BUILD_CODE = 28');
     const pkg = read('package.json');
-    expect(pkg).toContain('"version": "83.0.0"');
+    expect(pkg).toContain('"version": "84.0.0"');
   });
 });

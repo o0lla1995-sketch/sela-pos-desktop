@@ -79,8 +79,185 @@ if (typeof window !== 'undefined' && window.location.search.includes('lock')) {
   state.config.set('applock_pin_salt_v1', 'dev-preview-salt');
 }
 
+/* v84 (الجولة 90): دفاتر القنوات للمعاينة البصرية — كي تُعاين بطاقة
+   «أرصدة المحافظ والبنوك الآن» في التقارير بشعاراتها وأرقامها كما
+   يراها التاجر، لا بطاقة فارغة. أعمدة نفس استعلام methodLedgerTotals
+   (snake_case كما تعيده النواة). */
+const MOCK_METHOD_LEDGERS: Record<string, unknown>[] = [
+  {
+    method: 'bank_palestine',
+    sales_in: 3200,
+    sales_cnt: 21,
+    rep_in: 400,
+    rep_cnt: 3,
+    deposits_in: 500,
+    refunds_out: 120,
+    refunds_cnt: 1,
+    wd_out: 1000,
+    exp_out: 60,
+    mov_cnt: 4,
+  },
+  {
+    method: 'bank_quds',
+    sales_in: 1750.5,
+    sales_cnt: 12,
+    rep_in: 0,
+    rep_cnt: 0,
+    deposits_in: 250,
+    refunds_out: 0,
+    refunds_cnt: 0,
+    wd_out: 500,
+    exp_out: 0,
+    mov_cnt: 2,
+  },
+  {
+    method: 'bank_islami',
+    sales_in: 980,
+    sales_cnt: 7,
+    rep_in: 150,
+    rep_cnt: 1,
+    deposits_in: 0,
+    refunds_out: 45,
+    refunds_cnt: 1,
+    wd_out: 0,
+    exp_out: 0,
+    mov_cnt: 1,
+  },
+  {
+    method: 'jawwal_pay',
+    sales_in: 5400,
+    sales_cnt: 38,
+    rep_in: 620,
+    rep_cnt: 5,
+    deposits_in: 800,
+    refunds_out: 310,
+    refunds_cnt: 2,
+    wd_out: 2000,
+    exp_out: 120,
+    mov_cnt: 6,
+  },
+  {
+    method: 'palpay',
+    sales_in: 2610.25,
+    sales_cnt: 19,
+    rep_in: 0,
+    rep_cnt: 0,
+    deposits_in: 0,
+    refunds_out: 75,
+    refunds_cnt: 1,
+    wd_out: 1500,
+    exp_out: 0,
+    mov_cnt: 3,
+  },
+  {
+    method: 'malchat',
+    sales_in: 1330,
+    sales_cnt: 9,
+    rep_in: 200,
+    rep_cnt: 2,
+    deposits_in: 0,
+    refunds_out: 0,
+    refunds_cnt: 0,
+    wd_out: 600,
+    exp_out: 40,
+    mov_cnt: 2,
+  },
+  {
+    method: 'cash',
+    sales_in: 8200,
+    sales_cnt: 64,
+    rep_in: 950,
+    rep_cnt: 8,
+    deposits_in: 0,
+    refunds_out: 260,
+    refunds_cnt: 3,
+    wd_out: 4000,
+    exp_out: 380,
+    mov_cnt: 9,
+  },
+];
+
+/* v84 (الجولة 90): فاتورة نقدية وهمية واحدة للمعاينة البصرية لمسار
+   تعديل الفاتورة (شريط السلة المضغوط + نافذة إتمام التعديل) —
+   تُفتح من زر «الرجوع للفاتورة السابقة» (F8) ثم خيار التعديل.
+   الأصناف من منتجات المعاينة أعلاه (1 و2 و3). */
+const MOCK_SALE: Record<string, unknown> = {
+  id: 101,
+  invoice_number: 'INV-20261102-0007',
+  total_amount: 17.25,
+  total_cost: 9.5,
+  total_profit: 7.75,
+  discount: 0,
+  payment_type: 'RETAIL',
+  payment_method: 'cash',
+  created_at: '2026-11-02 14:32',
+  returned_minor: 0,
+  return_kind: null,
+  cashier_id: null,
+  cashier_name: null,
+  edit_count: 0,
+  edited_at: null,
+};
+const MOCK_SALE_ITEMS: Record<string, unknown>[] = [
+  {
+    id: 501,
+    sale_id: 101,
+    product_id: 1,
+    product_name: 'كوكا كولا 330مل',
+    quantity: 2,
+    unit_price: 3.75,
+    unit_cost: 1.9,
+    variant_label: null,
+    line_total: 7.5,
+  },
+  {
+    id: 502,
+    sale_id: 101,
+    product_id: 2,
+    product_name: 'ماء معدني 1.5ل',
+    quantity: 1,
+    unit_price: 3.0,
+    unit_cost: 1.5,
+    variant_label: null,
+    line_total: 3.0,
+  },
+  {
+    id: 503,
+    sale_id: 101,
+    product_id: 3,
+    product_name: 'شوكولاتة جالاكسي',
+    quantity: 3,
+    unit_price: 2.25,
+    unit_cost: 1.1,
+    variant_label: null,
+    line_total: 6.75,
+  },
+];
+
 function sqlMock(sql: string): {rows: Record<string, unknown>[]; insertId: null; rowsAffected: number} {
   const clean = sql.trim().toLowerCase();
+  if (clean.startsWith('select method')) {
+    return {
+      rows: MOCK_METHOD_LEDGERS,
+      insertId: null,
+      rowsAffected: 0,
+    };
+  }
+  if (clean.startsWith('select s.*, lc.display_name as cashier_name')) {
+    return {rows: [MOCK_SALE], insertId: null, rowsAffected: 0};
+  }
+  if (clean.startsWith('select * from sales order by id desc')) {
+    return {rows: [MOCK_SALE], insertId: null, rowsAffected: 0};
+  }
+  if (clean.startsWith('select * from sale_items where sale_id')) {
+    return {rows: MOCK_SALE_ITEMS, insertId: null, rowsAffected: 0};
+  }
+  if (clean.startsWith('select * from sale_returns where sale_id')) {
+    return {rows: [], insertId: null, rowsAffected: 0};
+  }
+  if (clean.startsWith('select sri.sale_item_id')) {
+    return {rows: [], insertId: null, rowsAffected: 0};
+  }
   if (clean.startsWith('select id, name, store_mode from categories')) {
     return {
       rows: state.categories as unknown as Record<string, unknown>[],

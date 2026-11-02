@@ -60,11 +60,11 @@ describe('v81 — ١ قنوات التسوية بشعاراتها الحقيقي
 });
 
 describe('v81 — ٢ الإصدار', () => {
-  test('83.0.0 (26) في كل ملفات الإصدار', () => {
-    expect(read(CONFIG)).toContain("APP_VERSION = '83.0.0'");
-    expect(read(CONFIG)).toContain('APP_BUILD_CODE = 27');
-    expect(read('package.json')).toContain('"version": "83.0.0"');
-    expect(read('src-tauri/tauri.conf.json')).toContain('"version": "83.0.0"');
-    expect(read('src-tauri/Cargo.toml')).toContain('version = "83.0.0"');
+  test('84.0.0 (28) في كل ملفات الإصدار', () => {
+    expect(read(CONFIG)).toContain("APP_VERSION = '84.0.0'");
+    expect(read(CONFIG)).toContain('APP_BUILD_CODE = 28');
+    expect(read('package.json')).toContain('"version": "84.0.0"');
+    expect(read('src-tauri/tauri.conf.json')).toContain('"version": "84.0.0"');
+    expect(read('src-tauri/Cargo.toml')).toContain('version = "84.0.0"');
   });
 });

@@ -569,6 +569,23 @@ export function PosScreen() {
     [editSession, busy, lines, discountInput, pricingMode, printerStatus, clearCart, toast, refreshCatalog],
   );
 
+  /** v84 (الجولة 90 #٢): إلغاء التعديل بتأكيد صريح — موحّد في مكان
+   *  واحد (كان نفس الحوار مكرراً ثلاث مرات: ✕ الشريط وF1 وزر
+   *  التفريغ)؛ التأكيد كي لا يظن التاجر أن الفاتورة تغيّرت. */
+  const cancelEditWithConfirm = useCallback(() => {
+    if (editSession == null) {
+      return;
+    }
+    if (
+      window.confirm(
+        `سيُلغى تعديل الفاتورة ${editSession.invoiceNumber} وتُفرَّغ السلة — الفاتورة الأصلية تبقى كما هي لم تُمس. متابعة؟`,
+      )
+    ) {
+      cancelEdit();
+      toast('أُلغي تعديل الفاتورة — الأصلية لم تتغير', 'info');
+    }
+  }, [editSession, cancelEdit, toast]);
+
   // ── توجيه الماسح العام: منتج / رمز صِلة / قسيمة ──
   useEffect(() => {
     setActiveBarcodeHandler((code: string) => {
@@ -954,14 +971,7 @@ export function PosScreen() {
         // v80 (الجولة 85): تفريغ أثناء تعديل فاتورة = إلغاء التعديل
         //  — بتأكيد صريح كي لا يظن التاجر أن الفاتورة تغيّرت.
         if (editSession != null) {
-          if (
-            window.confirm(
-              `سيُلغى تعديل الفاتورة ${editSession.invoiceNumber} وتُفرَّغ السلة — الفاتورة الأصلية تبقى كما هي لم تُمس. متابعة؟`,
-            )
-          ) {
-            cancelEdit();
-            toast('أُلغي تعديل الفاتورة — الأصلية لم تتغير', 'info');
-          }
+          cancelEditWithConfirm();
         } else if (lines.length > 0) {
           clearCart();
           beep('ok');
@@ -1025,7 +1035,9 @@ export function PosScreen() {
         }
       } else if (e.key === 'F9') {
         e.preventDefault();
-        if (lines.length > 0 && !busy) openPaySheet();
+        // v84 (الجولة 90 #٢): أثناء التعديل تفتح F9 نافذة الإتمام ولو
+        // كانت السلة فارغة (إرجاع كامل للفاتورة).
+        if ((lines.length > 0 || editSession != null) && !busy) openPaySheet();
       } else if (e.key === 'Escape') {
         // v58: Escape يغلق كل النوافذ المفتوحة — دفع/دين/متغير/وزن/
         // اختيار زبون/قسيمة (كانت لوحتا الاختيار لا تُغلقان به).
@@ -1201,7 +1213,8 @@ export function PosScreen() {
         debtSheet != null ||
         voucherSheet ||
         weightPick != null ||
-        variantPick != null
+        variantPick != null ||
+        editSettleOpen
       ) {
         return;
       }
@@ -1270,7 +1283,7 @@ export function PosScreen() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [paySheet, debtConfirm, debtSheet, voucherSheet, weightPick, variantPick, filtered, selId, tryAdd, setSearch, moveSelection, gridColumns]);
+  }, [paySheet, debtConfirm, debtSheet, voucherSheet, weightPick, variantPick, editSettleOpen, filtered, selId, tryAdd, setSearch, moveSelection, gridColumns]);
 
   // ── تأكيد الوزن (زر الإضافة + Enter من الكيبورد) ──
   const confirmWeight = useCallback(() => {
@@ -1339,6 +1352,36 @@ export function PosScreen() {
     onKey: next => setWeightValue(next.slice(0, WEIGHT_QTY_DECIMALS + 2)),
     onConfirm: confirmWeight,
     onCancel: () => setWeightPick(null),
+  });
+  // v84 (الجولة 90 #١): نافذة إتمام تعديل الفاتورة — الأسهم تنقل
+  // بين قنوات التسوية (نقدي + بنوك ومحافظ) وEnter يؤكد فوراً وEsc
+  // يغلق («لا يتم التنقل بسهولة بين المحافظ والبنوك التي سوف يتم
+  // تحصيل الفرق فيها» — طلب التاجر نصاً؛ نفس اختصارات نافذة الدفع
+  // العادية منذ v71 كي لا يتعلم الكاشير نظامين).
+  useAmountKeyboard({
+    active: editSettleOpen && editSession != null,
+    text: '',
+    onKey: () => undefined,
+    onConfirm: () => {
+      if (!busy) void settleEdit(editSettleMethod);
+    },
+    onCancel: () => setEditSettleOpen(false),
+    onArrow: delta => {
+      if (
+        editSession == null ||
+        payMethods.length < 2 ||
+        editSession.book === 'local' ||
+        editSession.book === 'sila'
+      ) {
+        return;
+      }
+      const idx = payMethods.findIndex(m => m.id === editSettleMethod);
+      const next =
+        idx === -1
+          ? 0
+          : (idx + delta + payMethods.length) % payMethods.length;
+      setEditSettleMethod(payMethods[next].id);
+    },
   });
   // القسيمة: حقل نصي طبيعي + Enter يصرفها.
   useAmountKeyboard({
@@ -1556,68 +1599,58 @@ export function PosScreen() {
         {/* ── السلة ── */}
         <aside className="pos-cart">
           {/* ── v80 (الجولة 85): شريط تعديل الفاتورة — يظهر في كل
-              حالات السلة حتى الإتمام أو الإلغاء: رقم الفاتورة
-              الأصلية، الأصل مقابل الجديد، الفرق الحي، وأزرار
-              الإتمام/الإلغاء. عند الإتمام تُستبدل الفاتورة الأصلية
-              بهذه النسخة المعدلة (نفس الرقم) ويسوّى الفرق. */}
+              حالات السلة حتى الإتمام أو الإلغاء.
+              v84 (الجولة 90 #٢): مضغوط لسطر واحد (رقم الفاتورة +
+              الأصل ← الجديد + الفرق الحي + زر ✕) — كان ثلاث كتل
+              (رأس + أرقام + زر إتمام كبير) تأكل ~120px من السلة
+              («اشعار تعديل الفاتورة كبير جدا ويأخذ حيز كبير في
+              السلة» — طلب التاجر نصاً). زر الإتمام انتقل لزر
+              الشحن الكبير أسفل السلة (تسميته تتبدل أثناء التعديل)،
+              فبقي الشريط معلومات فقط. */}
           {editSession != null && (
-            <div className="pos-edit-banner">
-              <div className="pos-edit-banner-head">
-                <Icon name="edit" size={15} />
-                <b>تعديل الفاتورة {editSession.invoiceNumber}</b>
-                <button
-                  className="btn ghost sm"
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        `سيُلغى تعديل الفاتورة ${editSession.invoiceNumber} وتُفرَّغ السلة — الفاتورة الأصلية تبقى كما هي لم تُمس. متابعة؟`,
-                      )
-                    ) {
-                      cancelEdit();
-                      toast('أُلغي تعديل الفاتورة — الأصلية لم تتغير', 'info');
-                    }
-                  }}
-                  title="إلغاء التعديل — Esc/F1">
-                  إلغاء
-                </button>
-              </div>
-              <div className="pos-edit-banner-row">
-                <span>
-                  الأصل:{' '}
-                  {formatMoney(
-                    (editSession.originalTotalMinor -
-                      editSession.priorRefundedMinor) /
-                      100,
-                  )}
-                </span>
-                <span>الجديد: {formatMoney(totals.total)}</span>
-                {(() => {
-                  const delta =
-                    Math.round(totals.total * 100) -
-                    (editSession.originalTotalMinor -
-                      editSession.priorRefundedMinor);
-                  if (Math.abs(delta) < 1) {
-                    return <span className="pos-edit-delta muted">بلا فرق</span>;
-                  }
-                  return delta > 0 ? (
-                    <span className="pos-edit-delta neg">
-                      على الزبون +{formatMoney(delta / 100)}
-                    </span>
-                  ) : (
-                    <span className="pos-edit-delta pos">
-                      يُرَد للزبون {formatMoney(-delta / 100)}
-                    </span>
+            <div
+              className="pos-edit-banner"
+              title="أثناء التعديل السلة هي النسخة المعدلة — عند الإتمام تُستبدل الفاتورة الأصلية بها ويسوّى الفرق">
+              <Icon name="edit" size={13} />
+              <b>تعديل الفاتورة {editSession.invoiceNumber}</b>
+              <span className="pos-edit-nums">
+                الأصل{' '}
+                {formatMoney(
+                  (editSession.originalTotalMinor -
+                    editSession.priorRefundedMinor) /
+                    100,
+                )}{' '}
+                ← الجديد {formatMoney(totals.total)}
+              </span>
+              {(() => {
+                const delta =
+                  Math.round(totals.total * 100) -
+                  (editSession.originalTotalMinor -
+                    editSession.priorRefundedMinor);
+                if (totals.total <= 0.005) {
+                  return (
+                    <span className="pos-edit-delta warn">إرجاع كامل</span>
                   );
-                })()}
-              </div>
+                }
+                if (Math.abs(delta) < 1) {
+                  return <span className="pos-edit-delta muted">بلا فرق</span>;
+                }
+                return delta > 0 ? (
+                  <span className="pos-edit-delta neg">
+                    على الزبون +{formatMoney(delta / 100)}
+                  </span>
+                ) : (
+                  <span className="pos-edit-delta pos">
+                    يُرَد {formatMoney(-delta / 100)}
+                  </span>
+                );
+              })()}
               <button
-                className="btn brand block"
-                onClick={openPaySheet}
-                disabled={busy}>
-                <Icon name="check" size={15} />
-                {lines.length === 0
-                  ? 'إتمام التعديل (إرجاع كامل)'
-                  : 'إتمام التعديل'}
+                type="button"
+                className="pos-edit-x"
+                onClick={cancelEditWithConfirm}
+                title="إلغاء التعديل — الفاتورة الأصلية تبقى كما هي (F1)">
+                <Icon name="x" size={13} />
               </button>
             </div>
           )}
@@ -1633,16 +1666,10 @@ export function PosScreen() {
               <button
                 className="btn ghost sm"
                 onClick={() => {
-                  // v80 (الجولة 85): تفريغ أثناء التعديل = إلغاء التعديل.
+                  // v80 (الجولة 85): تفريغ أثناء التعديل = إلغاء التعديل
+                  // (v84: الحوار موحّد في cancelEditWithConfirm).
                   if (editSession != null) {
-                    if (
-                      window.confirm(
-                        `سيُلغى تعديل الفاتورة ${editSession.invoiceNumber} وتُفرَّغ السلة — الفاتورة الأصلية تبقى كما هي لم تُمس. متابعة؟`,
-                      )
-                    ) {
-                      cancelEdit();
-                      toast('أُلغي تعديل الفاتورة — الأصلية لم تتغير', 'info');
-                    }
+                    cancelEditWithConfirm();
                     return;
                   }
                   clearCart();
@@ -1790,10 +1817,17 @@ export function PosScreen() {
           <div className="pos-cart-actions">
             <button
               className="pos-charge-btn"
-              disabled={lines.length === 0 || busy}
+              disabled={(editSession == null && lines.length === 0) || busy}
               onClick={openPaySheet}>
               <Icon name="check" size={20} />
-              إتمام البيع — F9
+              {/* v84 (الجولة 90 #٢): أثناء التعديل الزر نفسه يصبح زر
+               * إتمام التعديل (ويسمح بسلة فارغة = إرجاع كامل) — بقي
+               * مكان الإتمام واحداً معروفاً أسفل السلة بدل زرين. */}
+              {editSession != null
+                ? lines.length === 0
+                  ? 'إتمام التعديل (إرجاع كامل)'
+                  : 'إتمام التعديل — F9'
+                : 'إتمام البيع — F9'}
             </button>
             {/* v80 (الجولة 85): أثناء تعديل فاتورة تختفي أزرار
                 الدين والقسيمة — التعديل يبقى على دفتر الفاتورة
@@ -2216,6 +2250,7 @@ export function PosScreen() {
               </p>
               {editSession.book !== 'local' && editSession.book !== 'sila' ? (
                 payMethods.length > 1 ? (
+                  <>
                   <div className="pos-pay-methods" role="radiogroup" aria-label="قناة التسوية">
                     {payMethods.map(method => (
                       <button
@@ -2243,20 +2278,38 @@ export function PosScreen() {
                       </button>
                     ))}
                   </div>
+                  {/* v84 (الجولة 90 #١): نفس اختصارات نافذة الدفع —
+                   * الأسهم تنقل بين القنوات وEnter يؤكد («لا يتم
+                   * التنقل بسهولة بين المحافظ والبنوك» — طلب التاجر). */}
+                  <div className="pos-pay-kbd-hint">
+                    الأسهم للتنقل بين القنوات · Enter للتأكيد · Esc للإلغاء
+                  </div>
+                  </>
                 ) : null
               ) : null}
+              {/* v84 (الجولة 90 #١): زر تأكيد كبير بارز بعرض النافذة —
+               * كان `btn brand block` ولا فئة منهما معرفة في CSS فيظهر
+               * رمادياً صغيراً («زر التأكيد فيها صغير» — طلب التاجر
+               * نصاً). الآن primary lg كزر إتمام البيع، واسم القناة
+               * المختارة داخل نصه كي يكون قرار التحصيل صريحاً. */}
               <button
-                className="btn brand block"
+                className="btn primary lg block pos-edit-confirm-btn"
                 disabled={busy}
                 onClick={() => void settleEdit(editSettleMethod)}>
                 <Icon
                   name={printerStatus === 'connected' ? 'printer' : 'check'}
-                  size={15}
+                  size={17}
                 />
                 {busy
                   ? 'جارٍ حفظ التعديل…'
                   : totals.total <= 0.005
                   ? 'تأكيد الإرجاع الكامل'
+                  : editSession.book !== 'local' &&
+                    editSession.book !== 'sila' &&
+                    payMethods.length > 1
+                  ? `تأكيد التعديل واستبدال الفاتورة — عبر ${paymentMethodById(
+                      editSettleMethod,
+                    ).label}`
                   : 'تأكيد التعديل واستبدال الفاتورة'}
               </button>
               <p className="pos-edit-note">
