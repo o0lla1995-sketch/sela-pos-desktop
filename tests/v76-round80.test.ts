@@ -113,8 +113,10 @@ describe('v76 — ④ب صفحة التقارير بتبويبات', () => {
     expect(src).toContain("{activeTab === 'overview' && (<>");
     // النقد والخزينة: النقد المحصّل + أرصدة القنوات + الخزينة
     expect(src).toContain('{activeTab === \'cash\' && cash != null && (');
+    // v83 (الجولتان 88+89): بطاقة القنوات صارت «أرصدة الآن» — شرطها
+    // channelNowRows (اتحاد الفترة والأرصدة الحية).
     expect(src).toContain(
-      '{activeTab === \'cash\' && payMethods.length > 0 && (',
+      '{activeTab === \'cash\' && channelNowRows.length > 0 && (',
     );
     expect(src).toContain('{activeTab === \'cash\' && treasury != null && (');
     // الديون والقسائم
@@ -153,9 +155,9 @@ describe('v76 — ④ب صفحة التقارير بتبويبات', () => {
 describe('v76 — الإصدار', () => {
   test('79.0.0 (23) — محدّث للجولة 81', () => {
     const src = read('src/core/config.ts');
-    expect(src).toContain("APP_VERSION = '82.0.0'");
-    expect(src).toContain('APP_BUILD_CODE = 26');
+    expect(src).toContain("APP_VERSION = '83.0.0'");
+    expect(src).toContain('APP_BUILD_CODE = 27');
     const pkg = read('package.json');
-    expect(pkg).toContain('"version": "82.0.0"');
+    expect(pkg).toContain('"version": "83.0.0"');
   });
 });

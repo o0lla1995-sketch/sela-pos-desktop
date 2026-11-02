@@ -1530,6 +1530,11 @@ export const SaleRepo = {
       ) {
         const absDelta = Math.abs(editDeltaMinor);
         // أسماء معروضة للتاجر في نصوص السندات (لا معرفات تقنية).
+        // v83 (الجولتان 88+89 #٣): هذه الفئات الثلاث مطابقة حرفياً لـ
+        //  INVOICE_EDIT_SETTLEMENT_CATEGORIES في CashRepo — هو ما
+        //  يستبعدها من سجل الحركات وكشف الفترة (خارج إطار عمليات
+        //  الخزينة) بينما تبقى هنا وفي listForMethod توازن كشف كل
+        //  قناة. اختبار v83 يحرس التطابق بين النسختين.
         const chosenLabel = paymentMethodById(chosenSettleMethod).label;
         const originalLabel = paymentMethodById(originalPaymentMethod).label;
         // السند على القناة المختارة: تحصيل الفرق من الزبون أو ردّه له.

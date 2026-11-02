@@ -46,9 +46,13 @@ describe('v74 — ① أيقونات البنوك والمحافظ كبيرة و
 
   test('التقارير: شعارات أرصدة القنوات 36px وسجل القناة 34px (حُدّث للجولة 80)', () => {
     const src = read(REPORTS);
-    expect(src).toContain('<PaymentMethodIcon method={method} size={36} />');
+    // v83 (الجولتان 88+89): بطاقة القنوات صارت صفوف أرصدة «الآن» —
+    // الشعار فيها 40px (كان 36px في شبكة KPI القديمة)؛ سجل القناة
+    // التفصيلي 34px كما هو.
+    expect(src).toContain('<PaymentMethodIcon method={method} size={40} />');
     expect(src).toContain('size={34}');
     expect(src).not.toContain('<PaymentMethodIcon method={method} size={22} />');
+    expect(src).not.toContain('<PaymentMethodIcon method={method} size={36} />');
   });
 
   test('الإعدادات: بطاقات التفعيل بشعار 52px (حُدّث للجولة 80)', () => {
@@ -91,7 +95,7 @@ describe('v74 — ② الفواتير مميزة بطريقة الدفع', () =
 describe('v74 — ③ الإصدار', () => {
   test('79.0.0 (23) — محدّث للجولة 81', () => {
     const src = read(CONFIG);
-    expect(src).toContain("APP_VERSION = '82.0.0'");
-    expect(src).toContain('APP_BUILD_CODE = 26');
+    expect(src).toContain("APP_VERSION = '83.0.0'");
+    expect(src).toContain('APP_BUILD_CODE = 27');
   });
 });

@@ -3,8 +3,9 @@
  * ─────────────────────────────────────────────────────────────────
  * منطق CashMovementsScreen الأندرويد (v25→v39) منقولاً إلى React DOM:
  *
- *  • «النقد المتوقع بالخزينة الآن» — بعد خصم كل المصروفات والمسحوبات
- *    وإضافة الإيداعات (CashService.drawerNowMinor، لحظة بلحظة).
+ *  • «الإجمالي في الخزينة الآن» (v83 — الجولتان 88+89، مطابق أندرويد
+ *    v77): النقد بالدرج + أرصدة كل البنوك والمحافظ برقم واحد — بعد
+ *    خصم كل المصروفات والمسحوبات وإضافة الإيداعات، لحظة بلحظة.
  *  • ثلاث حركات موثقة بسندات مرقمة لا تُعدّل ولا تُحذف: مصروف (EXP-)
  *    بفئة من سلة الفئات، سحب رصيد (WD-)، وإيداع (DEP-).
  *  • السحب مؤمَّن: رمز PIN عبر PinPad إن كان مضبوطاً؛ إن كانت البصمة
@@ -108,6 +109,12 @@ export function CashMovementsScreen() {
     null,
   );
   const [drawerMinor, setDrawerMinor] = useState<number | null>(null);
+  /** v83 (الجولتان 88+89 — مطابق أندرويد v77 #٢): أرصدة كل بنك/محفظة
+   *  مفعّلة الآن (دفترها عبر التاريخ) — تُحمّل أفضل جهد داخل load()
+   *  وهي ما يغذّي الرقم الكبير «الإجمالي في الخزينة الآن». */
+  const [channelBalances, setChannelBalances] = useState<
+    {id: string; label: string; balance: number}[]
+  >([]);
   const [loading, setLoading] = useState(true);
 
   // ── أزرار التصدير/الطباعة ────────────────────────────────────
@@ -156,6 +163,24 @@ export function CashMovementsScreen() {
     } finally {
       setLoading(false);
     }
+    // v83 (الجولتان 88+89 #٢): أرصدة البنوك والمحافظ المفعّلة — أفضل
+    //  جهد خارج try الرئيسي كي لا يعطّل السجل أبداً؛ هي ما يغذّي الرقم
+    //  الكبير (الإجمالي في الخزينة الآن).
+    try {
+      const active = activePaymentMethods(
+        useSettingsStore.getState().settings.paymentMethodsEnabled,
+      ).filter(m => m.id !== 'cash');
+      const balances = await Promise.all(
+        active.map(async m => ({
+          id: m.id,
+          label: m.label,
+          balance: await ReportService.methodBalanceNow(m.id),
+        })),
+      );
+      setChannelBalances(balances);
+    } catch {
+      // أرصدة القنوات معلوماتية — تبقى الأرقام السابقة.
+    }
   }, [from, to, toast]);
 
   useEffect(() => {
@@ -169,6 +194,16 @@ export function CashMovementsScreen() {
   );
 
   const [quick, setQuick] = useState<'today' | 'last7' | 'month' | null>(null);
+
+  /** v83 (الجولتان 88+89 — مطابق أندرويد v77 #٢): الإجمالي في الخزينة
+   *  الآن = النقد بالدرج + أرصدة كل البنوك والمحافظ برقم واحد — هو
+   *  الرقم الكبير في رأس الشاشة (طلب التاجر نصاً: «بدلا من رقم النقد
+   *  بالخزينة الان يظهر الاجمالي في الخزينة الان»). */
+  const treasuryNowMinor =
+    drawerMinor == null
+      ? null
+      : drawerMinor +
+      channelBalances.reduce((sum, ch) => sum + Math.round(ch.balance * 100), 0);
   const applyQuick = useCallback((key: 'today' | 'last7' | 'month') => {
     setQuick(key);
     const today = localToday();
@@ -461,12 +496,19 @@ export function CashMovementsScreen() {
       {/* رأس الخزينة */}
       <div className="card dc-treasury">
         <div>
-          <div className="label">النقد المتوقع بالخزينة الآن</div>
+          {/* v83 (الجولتان 88+89 — مطابق أندرويد v77 #٢): الرقم الكبير
+              هو «الإجمالي في الخزينة الآن» — النقد بالدرج + كل البنوك
+              والمحافظ برقم واحد بطلب التاجر («بدلا من رقم النقد بالخزينة
+              الان يظهر الاجمالي في الخزينة الان»). */}
+          <div className="label">الإجمالي في الخزينة الآن</div>
           <div className="amount">
-            {drawerMinor == null ? '…' : shekels(drawerMinor)}
+            {treasuryNowMinor == null
+              ? '…'
+              : shekels(treasuryNowMinor)}
           </div>
           <div className="dc-hint">
-            بعد خصم كل المصروفات والمسحوبات وإضافة الإيداعات — لحظة بلحظة
+            النقد بالدرج + البنوك والمحافظ — بعد كل المصروفات والمسحوبات
+            والإيداعات
           </div>
         </div>
         <div className="dc-today">

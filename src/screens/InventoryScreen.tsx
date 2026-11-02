@@ -970,16 +970,22 @@ export function InventoryScreen() {
             {category.name} <span className="cnt">{countFor(category.id)}</span>
           </button>
         ))}
-        {archivedProducts.length > 0 && (
-          <button
-            className={`iv57-chip ${showArchived ? 'on' : ''}`}
-            onClick={() => {
-              setShowExpiring(false);
-              setShowArchived(!showArchived);
-            }}>
-            المؤرشفة <span className="cnt">{archivedProducts.length}</span>
-          </button>
-        )}
+        {/* v83 (الجولتان 88+89 — مطابق أندرويد v76 #٢): رقاقة
+            «المؤرشفة» تظهر دائماً حتى وهي فارغة (تعطّل عند عدم وجود
+            مؤرشفات كفلاتر المخزون أعلاه) — كانت تظهر فقط عند وجود
+            مؤرشفات أصلاً فلا يكتشف التاجر الميزة أبداً ولا يجد مدخلها
+            (طلب التاجر نصاً: خيار المنتجات المؤرشفة في خيارات صفحة
+            المنتج مع إمكانية الاسترداد). */}
+        <button
+          className={`iv57-chip ${showArchived ? 'on' : ''}`}
+          disabled={archivedProducts.length === 0 && !showArchived}
+          title="المحذوفة ذات سجل مبيعات/جرد — استردادها متاح دائماً"
+          onClick={() => {
+            setShowExpiring(false);
+            setShowArchived(!showArchived);
+          }}>
+          المؤرشفة <span className="cnt">{archivedProducts.length}</span>
+        </button>
         {expiringProducts.length > 0 && (
           <button
             className={`iv57-chip ${showExpiring ? 'on' : ''}`}
@@ -1277,12 +1283,18 @@ export function InventoryScreen() {
                       )}
                     </button>
                     {product.is_archived === 1 ? (
+                      /* v83 (الجولتان 88+89 #٢): زر استرداد بلمسة
+                          واحدة من الصف نفسه — بنص صريح لا أيقونة
+                          وحدها (كانت أيقونة «↩» بلا كلمة فلا يعرف
+                          التاجر ماذا تفعل). المسار الكامل عبر ملف
+                          المنتج باقٍ أيضاً. */
                       <button
                         className="btn sm ghost"
-                        title="استرجاع للرف"
+                        title="استرداد المنتج المؤرشف للرف والبيع"
                         disabled={deleteBusyId === product.id}
                         onClick={() => void unarchiveProduct(product)}>
                         <Icon name="undo" size={15} />
+                        استرداد
                       </button>
                     ) : (
                       <button

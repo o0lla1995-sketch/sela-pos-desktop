@@ -48,7 +48,6 @@ import type {ReportRangeKey} from '../core/types';
 import {Icon} from '../components/Icon';
 import './settingsv57.css';
 import {
-  PAYMENT_KIND_LABELS,
   displayMethod,
 } from '../core/paymentMethods';
 import {PaymentMethodIcon} from '../components/PaymentMethodIcon';
@@ -300,6 +299,16 @@ export function ReportsScreen() {
   const [payMethods, setPayMethods] = useState<
     Awaited<ReturnType<typeof ReportRepo.methodLedgerTotals>>
   >([]);
+  /** v83 (الجولتان 88+89 — مطابق أندرويد v76 #٣+٤): الأرصدة الحية
+   *  لكل قناة — دفترها عبر التاريخ (رصيد «الآن»). كان العرض يجمع
+   *  صافي الفترة تحت عنوان «أرصدة» فيقرأه التاجر رصيداً حالياً:
+   *  بعد تصفير قناة بالسحب ثم بيع/إيداع جديد يظهر الصافي سالباً
+   *  وكأن القيمة أُضيفت إلى ما سُحب («لخبطة في فهم الحسابات»).
+   *  الرصيد الحقيقي هو دفتر القناة عبر التاريخ؛ حركة الفترة سطر
+   *  تفصيلي تحته. */
+  const [liveMethods, setLiveMethods] = useState<
+    Awaited<ReturnType<typeof ReportRepo.methodLedgerTotals>>
+  >([]);
   /** نافذة تفاصيل قناة واحدة (سجل الحركات + كشف PDF). */
   const [methodDetail, setMethodDetail] = useState<string | null>(null);
   const [methodRows, setMethodRows] = useState<
@@ -326,19 +335,26 @@ export function ReportsScreen() {
         rangeKey === 'custom' ? {from, to} : undefined;
       const key: ReportRangeKey =
         rangeKey === 'custom' ? 'custom' : rangeKey;
-      const [nextBundle, nextTreasury, nextDebt, nextDetail, nextPayMethods] =
+      const [nextBundle, nextTreasury, nextDebt, nextDetail, nextPayMethods, nextLiveMethods] =
         await Promise.all([
           ReportService.loadBundle(key, custom),
           ReportService.treasurySnapshot(),
           ReportRepo.debtSalesSummary(rangeFor(key, custom)),
           ReportService.salesDetail(key, custom),
           ReportRepo.methodLedgerTotals(rangeFor(key, custom)),
+          // v83 (الجولتان 88+89 #٣+٤): الأرصدة الحية عبر التاريخ — رصيد
+          //  كل قناة «الآن» (نفس معادلة السقف في سندات السحب/المصروف).
+          ReportRepo.methodLedgerTotals({
+            from: '2000-01-01',
+            to: '2999-12-31',
+          }),
         ]);
       setBundle(nextBundle);
       setTreasury(nextTreasury);
       setDebt(nextDebt);
       setDetail(nextDetail);
       setPayMethods(nextPayMethods);
+      setLiveMethods(nextLiveMethods);
     } catch (e) {
       toast(
         e instanceof Error ? e.message : 'تعذر تحميل التقارير',
@@ -354,6 +370,52 @@ export function ReportsScreen() {
   const currentRange = useMemo(
     () => rangeFor(rangeKey, rangeKey === 'custom' ? {from, to} : undefined),
     [rangeKey, from, to],
+  );
+
+  /* ── v83 (الجولتان 88+89 #٣+٤): صفوف القنوات «الآن» — اتحاد من
+     له حركة بالفترة مع من له رصيد قائم عبر التاريخ (غير الصفري)،
+     بلا نقدي (له خلية «النقد بالخزينة الآن»). الرصيد المعروض لكل
+     قناة هو دفترها عبر التاريخ — نفس معادلة السقف في سندات
+     السحب/المصروف — وحركة الفترة سطر تفصيلي تحته. ── */
+  const channelNowRows = useMemo(() => {
+    type LedgerRow = (typeof payMethods)[number];
+    const byId = new Map<
+      string,
+      {id: string; period: LedgerRow | null; live: LedgerRow | null}
+    >();
+    for (const row of payMethods) {
+      if (row.method === 'cash') {
+        continue;
+      }
+      byId.set(row.method, {id: row.method, period: row, live: null});
+    }
+    for (const row of liveMethods) {
+      if (row.method === 'cash') {
+        continue;
+      }
+      const hit = byId.get(row.method);
+      if (hit != null) {
+        hit.live = row;
+      } else if (row.net !== 0) {
+        byId.set(row.method, {id: row.method, period: null, live: row});
+      }
+    }
+    return Array.from(byId.values());
+  }, [payMethods, liveMethods]);
+
+  /** v83: مجموع أرصدة البنوك والمحافظ الآن. */
+  const channelsNowTotal = useMemo(
+    () => channelNowRows.reduce((sum, row) => sum + (row.live?.net ?? 0), 0),
+    [channelNowRows],
+  );
+
+  /** v83: إجمالي الخزينة الآن — النقد بالدرج + كل البنوك والمحافظ.
+   *  «الخزينة» في ذهن التاجر هي كل مال المتجر أينما كان، لا الدرج
+   *  وحده («حتى في الخزينة يظهر فقط النقد بالخزينة دون باقي
+   *  المحافظ والبنوك» — طلب التاجر نصاً). */
+  const treasuryNowTotal = useMemo(
+    () => (treasury?.cashTotal ?? 0) + channelsNowTotal,
+    [treasury, channelsNowTotal],
   );
 
   // v72 (الجولة 76 #6): تحميل سجل القناة التفصيلي عند فتح نافذتها.
@@ -914,9 +976,15 @@ export function ReportsScreen() {
                 <span className="amount">
                   {formatMoney(cash.collected)}
                 </span>
+                {/* v83 (الجولتان 88+89 #٤): salesCash = الإيراد مطروحاً
+                    منه فواتير الدين وبضاعة القسائم — أي كل المبيعات
+                    المدفوعة لحظة البيع بكل القنوات (نقد + بنوك
+                    ومحافظ)، فالتسمية القديمة «مبيعات نقدية» كانت
+                    تُلبِس — طلب التاجر: «حتى في الخزينة يظهر فقط
+                    النقد دون باقي المحافظ والبنوك». */}
                 <span className="meta">
-                  مبيعات نقدية {formatMoney(cash.salesCash)} + مقبوضات
-                  (ديون وحملات) {formatMoney(cash.collections)}
+                  مبيعات (نقد + بنوك ومحافظ) {formatMoney(cash.salesCash)} +
+                  مقبوضات (ديون وحملات) {formatMoney(cash.collections)}
                 </span>
               </div>
 
@@ -966,7 +1034,7 @@ export function ReportsScreen() {
                 (cash.withdrawalsCount ?? 0) > 0 ||
                 (cash.depositsCount ?? 0) > 0 ? (
                 <CollapseSection
-                  title="صافي النقد بالفترة (بعد المصروفات والمسحوبات)"
+                  title="صافي حركة الخزينة بالفترة (كل القنوات)"
                   valueText={formatMoney(cash.netCashAfterMovements)}
                   tone={(cash.netCashAfterMovements ?? 0) >= 0 ? 'ok' : 'danger'}
                   open={openSections.movements === true}
@@ -1002,16 +1070,27 @@ export function ReportsScreen() {
                     </div>
                   )}
                   <div className="sv57-row-line total">
-                    <span className="k">صافي النقد بالفترة</span>
+                    <span className="k">صافي حركة الفترة (بعد المصروفات والمسحوبات)</span>
                     <span className={`v ${(cash.netCashAfterMovements ?? 0) >= 0 ? 'ok' : 'danger'}`}>
                       {formatMoney(cash.netCashAfterMovements)}
                     </span>
                   </div>
+                  {/* v83 (الجولتان 88+89 #٤): تمييز صريح — حركة الفترة قد
+                      تكون سالبة بعد سحب الأرصدة (تصفير) وهذا طبيعي ولا
+                      يعني رصيداً سالباً؛ الأرصدة الحقيقية الآن في الخلايا
+                      وبطاقة القنوات أدناه. */}
+                  <div className="sv57-note">
+                    هذا صافي ما دخل وخرج خلال الفترة المحددة فقط (كل
+                    القنوات معاً) — قد يكون سالباً بعد سحب رصيد، وهذا
+                    طبيعي ولا يعني رصيداً سالباً. الأرصدة الحقيقية الآن:
+                    «النقد بالخزينة الآن» و«إجمالي الخزينة الآن» وبطاقة
+                    أرصدة المحافظ والبنوك أدناه.
+                  </div>
                 </CollapseSection>
               ) : null}
 
-              {/* الدين القائم الآن + النقد بالخزينة الآن */}
-              <div className="sv57-duo">
+              {/* الدين القائم الآن + النقد بالخزينة الآن + الإجمالي */}
+              <div className="sv57-trio">
                 <div className="sv57-kpi">
                   <span className="label">الدين القائم الآن</span>
                   <span className="value warn">
@@ -1042,6 +1121,22 @@ export function ReportsScreen() {
                   <span className="sub">
                     بعد خصم كل المصروفات والمسحوبات — لحظة بلحظة
                   </span>
+                </div>
+                {/* v83 (الجولتان 88+89 #٣): إجمالي الخزينة الآن — النقد
+                    بالدرج + كل البنوك والمحافظ. «الخزينة» هي كل مال
+                    المتجر أينما كان، لا الدرج وحده — طلب التاجر نصاً
+                    («حتى في الخزينة يظهر فقط النقد بالخزينة دون باقي
+                    المحافظ والبنوك»). */}
+                <div className="sv57-kpi">
+                  <span className="label">إجمالي الخزينة الآن</span>
+                  <span
+                    className="value brand"
+                    style={
+                      treasuryNowTotal < 0 ? {color: 'var(--danger)'} : undefined
+                    }>
+                    {formatMoney(treasuryNowTotal)}
+                  </span>
+                  <span className="sub">نقد بالدرج + بنوك ومحافظ</span>
                 </div>
               </div>
 
@@ -1110,73 +1205,105 @@ export function ReportsScreen() {
             </div>
           )}
 
-          {/* ── 5.5) أرصدة المحافظ والبنوك (v70 → v72 الجولة 76 #6) ── */}
+          {/* ── 5.5) أرصدة المحافظ والبنوك الآن (v70 → v72 → v83) ── */}
           {/* v76 (الجولة 80 #٤ب): تبويب «النقد والخزينة». ── */}
-          {activeTab === 'cash' && payMethods.length > 0 && (
+          {/* v83 (الجولتان 88+89 #٣+٤ — مطابق أندرويد v76): الرصيد
+              المعروض لكل قناة هو دفترها عبر التاريخ (رصيد «الآن» نفسه
+              الذي يسقّف سندات السحب/المصروف)، وحركة الفترة المحددة سطر
+              تفصيلي تحته. كانت البطاقة تجمع صافي الفترة تحت عنوان
+              «أرصدة» فيقرأه التاجر رصيداً حالياً فيرى «الأرصدة بالسالب»
+              بعد تصفير بالسحب ثم بيع/إيداع جديد — طلب التاجر نصاً
+              («لخبطة في فهم الحسابات»). اضغط القناة لسجلها التفصيلي
+              وكشفها (ميزة سطح المكتب). ── */}
+          {activeTab === 'cash' && channelNowRows.length > 0 && (
             <div className="card sv57-sec">
               <div className="sv57-sec-head">
                 <div>
-                  <div className="sv57-sec-title">أرصدة المحافظ والبنوك — الرصيد الصافي</div>
+                  <div className="sv57-sec-title">أرصدة المحافظ والبنوك الآن</div>
                   <div className="sv57-sec-hint">
-                    لكل قناة خلال الفترة: الوارد (مبيعات + سدادات ديون +
-                    إيداعات) مطروحاً منه الصادر (مرتجعات وفروق استبدال +
-                    مسحوبات + مصروفات) — اضغط القناة لسجلها التفصيلي وكشفها
+                    رصيد كل قناة الآن (دفترها عبر التاريخ) — وحركة الفترة
+                    المحددة تحته
                   </div>
                 </div>
               </div>
-              <div className="sv57-kpis">
-                {payMethods.map(row => {
-                  const method = displayMethod(row.method);
+              <div className="sv57-ch-now-list">
+                {channelNowRows.map(row => {
+                  const method = displayMethod(row.id);
+                  const liveNet = row.live?.net ?? 0;
+                  const period = row.period;
                   return (
                     <button
                       type="button"
-                      className="sv57-kpi sv57-kpi-btn"
-                      key={row.method}
-                      onClick={() => setMethodDetail(row.method)}
-                      title={`سجل ${method.label} التفصيلي وكشف PDF`}>
+                      className="sv57-ch-now-row"
+                      key={row.id}
+                      onClick={() => setMethodDetail(row.id)}
+                      title={`سجل ${method.label} التفصيلي وكشف PDF — الرصيد المعروض هو دفتر القناة عبر التاريخ`}>
+                      <PaymentMethodIcon method={method} size={40} />
+                      <span className="sv57-ch-now-txts">
+                        <span className="sv57-ch-now-name">{method.label}</span>
+                        <span className="sv57-ch-now-sub">
+                          {period == null
+                            ? 'لا حركة بالفترة — رصيد قائم من قبلها'
+                            : (period.salesCount > 0 || period.repaymentsCount > 0
+                                ? `الفترة: دخل ${formatMoney(
+                                    period.salesIn + period.repaymentsIn,
+                                  )}`
+                                : 'الفترة: لا عمليات بيع') +
+                              (period.depositsIn > 0
+                                ? ` + إيداعات ${formatMoney(period.depositsIn)}`
+                                : '') +
+                              (period.refundsOut > 0
+                                ? ` · رُدّ ${formatMoney(period.refundsOut)}`
+                                : '') +
+                              (period.withdrawalsOut + period.expensesOut > 0
+                                ? ` · خرج ${formatMoney(
+                                    period.withdrawalsOut + period.expensesOut,
+                                  )}`
+                                : '')}
+                        </span>
+                      </span>
                       <span
-                        className="label"
+                        className="sv57-ch-now-value"
                         style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8,
+                          color:
+                            method.color === '#16A34A'
+                              ? liveNet < 0
+                                ? 'var(--danger)'
+                                : 'var(--ok)'
+                              : method.color,
                         }}>
-                        {/* v74 (الجولة 78 — سطح المكتب #١): شعار أكبر
-                            مرئي بوضوح (كان ٢٢px). */}
-                        <PaymentMethodIcon method={method} size={36} />
-                        {method.label}
-                      </span>
-                      <span
-                        className="value"
-                        style={{color: method.color}}
-                        title={PAYMENT_KIND_LABELS[method.kind]}>
-                        {formatMoney(row.net)}
-                      </span>
-                      <span className="sub">
-                        {row.salesCount > 0 || row.repaymentsCount > 0
-                          ? `دخل ${formatMoney(
-                              row.salesIn + row.repaymentsIn,
-                            )}${row.depositsIn > 0 ? ` + إيداعات ${formatMoney(row.depositsIn)}` : ''}`
-                          : 'لا عمليات بيع'}
-                        {row.refundsOut > 0
-                          ? ` · رُدّ ${formatMoney(row.refundsOut)}`
-                          : ''}
-                        {row.withdrawalsOut + row.expensesOut > 0
-                          ? ` · خرج ${formatMoney(
-                              row.withdrawalsOut + row.expensesOut,
-                            )}`
-                          : ''}
+                        {formatMoney(liveNet)}
                       </span>
                     </button>
                   );
                 })}
               </div>
+              {/* v83: المجاميع — البنوك والمحافظ معاً، ثم الإجمالي
+                  الشامل مع النقد بالدرج. */}
+              <div className="sv57-total-rule" />
+              <div className="sv57-row-line total">
+                <span className="k">البنوك والمحافظ معاً الآن</span>
+                <span
+                  className={`v ${channelsNowTotal < 0 ? 'danger' : 'ok'}`}>
+                  {formatMoney(channelsNowTotal)}
+                </span>
+              </div>
+              <div className="sv57-row-line total">
+                <span className="k">إجمالي الخزينة الآن — نقد + بنوك ومحافظ</span>
+                <span
+                  className={`v ${treasuryNowTotal < 0 ? 'danger' : 'brand'}`}>
+                  {formatMoney(treasuryNowTotal)}
+                </span>
+              </div>
               <div className="sv57-note">
-                منظور حركة المال: كل مبلغ يدخل القناة أو يخرج منها بتاريخه
-                الفعلي — فواتير الدين لا تُحتسب عند البيع (لم يُدفع منها شيء
-                بعد) لكن سداداتها تدخل بقناتها يوم السداد، ومرتجعات/فروق
-                الاستبدال تُخصم من قناة التسوية التي اخترتها. المبيعات
-                المسجلة قبل إصدار طرق الدفع محسوبة نقدياً.
+                الرصيد الكبير لكل قناة هو دفترها عبر التاريخ (مبيعات +
+                سدادات + إيداعات − مرتجعات − مسحوبات − مصروفات) — نفس
+                السقف الذي تسقّفه سندات السحب والمصروف. رقم «الفترة» تحته
+                يوضح ما دخل وخرج خلال الفترة المحددة فقط وقد يكون سالباً
+                بعد سحب رصيد؛ لا يعني ذلك رصيداً سالباً. فواتير الدين لا
+                تُحتسب عند البيع (لم يُدفع منها شيء بعد) لكن سداداتها تدخل
+                بقناتها يوم السداد، ومرتجعات/فروق الاستبدال تُخصم من قناة
+                التسوية التي اخترتها.
               </div>
             </div>
           )}

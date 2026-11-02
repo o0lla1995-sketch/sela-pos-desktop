@@ -6,8 +6,10 @@
  *  • مؤشرات اليوم (ReportService.loadBundle('today')): الإيراد، صافي
  *    الربح، عدد الفواتير (+ المتوسط)، عدد الأصناف (+ الخصومات) —
  *    الإرجاعات تُخصم من يوم الفاتورة الأصلية تلقائياً.
- *  • بطاقات v57: النقد المتوقع بالخزينة الآن (CashService
- *    .drawerNowMinor)، ديون المتجر المحلية القائمة (LocalDebtsRepo
+ *  • بطاقات v57 → v83 (الجولتان 88+89): «إجمالي في الخزينة» — النقد
+ *    بالدرج + كل البنوك والمحافظ برقم واحد (CashService
+ *    .drawerNowMinor + أرصدة القنوات)، ديون المتجر المحلية القائمة
+ *    (LocalDebtsRepo
  *    .totals)، ديون صِلة من دفاتر هذا المتجر (SilaRepo
  *    .storeOwnOutstandingTotal — لا أرصدة الخادم المختلطة) + بانتظار
  *    المزامنة، وطلبات البيع أونلاين الجديدة (OnlineRepo
@@ -215,6 +217,17 @@ export function HomeScreen({goTo}: {goTo: (screen: string) => void}) {
   const expiredCount = alerts.filter(a => a.state === 'expired').length;
   const expiringCount = alerts.filter(a => a.state === 'expiring').length;
 
+  /** v83 (الجولتان 88+89 — مطابق أندرويد v77 #١): إجمالي الخزينة =
+   *  النقد بالدرج + كل البنوك والمحافظ برقم واحد — هو قيمة الخلية
+   *  الكبرى الأولى في بطاقة الخزينة (طلب التاجر: «بدلا من قسم النقد
+   *  بالخزينة اجعله إجمالي في الخزينة»). الأرصدة التفصيلية لكل قناة
+   *  تبقى بالشريط أسفل. */
+  const methodsTotal = methodBalances.reduce(
+    (sum, ch) => sum + ch.balance,
+    0,
+  );
+  const treasuryTotalNow = (drawerMinor ?? 0) / 100 + methodsTotal;
+
   const onlineEnabled = online?.enabled ?? false;
   const onlineNewCount = online?.newCount ?? 0;
 
@@ -269,12 +282,20 @@ export function HomeScreen({goTo}: {goTo: (screen: string) => void}) {
       {/* ── بطاقات v57: الخزينة والديون والطلبات ──────────────── */}
       <div className="grid-4" style={{marginTop: 14}}>
         <div className="card kpi">
-          <span className="label">النقد المتوقع بالخزينة الآن</span>
-          <span className={`value ${(drawerMinor ?? 0) >= 0 ? 'ok' : ''}`} style={(drawerMinor ?? 0) < 0 ? {color: 'var(--danger)'} : undefined}>
-            {drawerMinor == null ? '…' : formatMoney(drawerMinor / 100)}
+          {/* v83 (الجولتان 88+89 #١): الخلية الكبرى صارت «إجمالي في
+              الخزينة» — النقد بالدرج + كل البنوك والمحافظ برقم واحد
+              (طلب التاجر: بدل النقد يظهر الإجمالي). رقم واحد كبير
+              أولاً؛ الأرصدة التفصيلية لكل قناة تبقى بالشريط أسفل. */}
+          <span className="label">إجمالي في الخزينة</span>
+          <span
+            className={`value ${treasuryTotalNow >= 0 ? 'ok' : ''}`}
+            style={
+              treasuryTotalNow < 0 ? {color: 'var(--danger)'} : undefined
+            }>
+            {drawerMinor == null ? '…' : formatMoney(treasuryTotalNow)}
           </span>
           <span className="label">
-            مبيعات نقدية + تحصيلات − مصروفات ومسحوبات — لحظة بلحظة
+            النقد بالدرج + البنوك والمحافظ — بعد كل الحركات
           </span>
         </div>
         <div className="card kpi">

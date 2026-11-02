@@ -270,7 +270,11 @@ export const ReportService = {
       VouchersRepo.settlementsReceivedInRange(range.from, range.to),
       VouchersRepo.campaignsTotals(),
       // v25 (round-32 #3): the cash-movements ledger of the period.
-      CashRepo.totalsFor(range.from, range.to),
+      // v83 (الجولتان 88+89 — مطابق أندرويد v76/v77): النطاق الشامل
+      //  بكل القنوات — بطاقة الحركات في التقارير صارت «صافي حركة
+      //  الخزينة بالفترة (كل القنوات)» فتُحتسب حركات المحافظ والبنوك
+      //  في كل رقم، تماماً كالأندرويد (totalsFor عنده بلا نطاق أصلاً).
+      CashRepo.totalsFor(range.from, range.to, 'all'),
       // v26 (round-34 #6): the live «النقد بالخزينة الآن» cell in
       // the الدين القائم الآن grid of the reports page.
       this.treasurySnapshot(),

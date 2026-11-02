@@ -395,6 +395,66 @@
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
+/* v83 (الجولتان 88+89 #٣): شبكة الدين القائم صارت ثلاث خلايا —
+   الدين + النقد بالخزينة الآن + إجمالي الخزينة الآن (نقد + قنوات). */
+.sv57-trio {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+/* ── v83 (الجولتان 88+89 #٣+٤): صفوف أرصدة القنوات «الآن» ───── */
+.sv57-ch-now-list {
+  display: flex;
+  flex-direction: column;
+}
+button.sv57-ch-now-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  cursor: pointer;
+  text-align: start;
+  font: inherit;
+  color: inherit;
+}
+button.sv57-ch-now-row:last-of-type {
+  border-bottom: 0;
+}
+button.sv57-ch-now-row:hover {
+  background: var(--surface-2);
+}
+.sv57-ch-now-txts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sv57-ch-now-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+.sv57-ch-now-sub {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.sv57-ch-now-value {
+  font-size: 17px;
+  font-weight: 800;
+  white-space: nowrap;
+  direction: ltr;
+  unicode-bidi: embed;
+}
+/* فاصل المجاميع أسفل صفوف القنوات. */
+.sv57-total-rule {
+  border-top: 1px dashed var(--line);
+  margin: 8px 0 4px;
+}
 
 /* ── الأكثر إيراداً وربحاً ───────────────────────────────────── */
 .sv57-rank {
@@ -777,6 +837,10 @@ table.sv57-table tbody tr:hover {
     grid-column: span 1;
   }
   .sv57-duo {
+    grid-template-columns: 1fr;
+  }
+  /* v83: الشبكة الثلاثية تنتظم عمودياً في الشاشات الضيقة. */
+  .sv57-trio {
     grid-template-columns: 1fr;
   }
 }
