@@ -92,13 +92,13 @@ describe('v79 — ٢ شريط السلة الفارغة بلا عبارة «ال
 
 describe('v79 — ٦ الإصدار', () => {
   test('79.0.0 (23) في config والبناء', () => {
-    expect(read(CONFIG)).toContain("APP_VERSION = '81.0.0'");
-    expect(read(CONFIG)).toContain('APP_BUILD_CODE = 25');
-    expect(read('package.json')).toContain('"version": "81.0.0"');
+    expect(read(CONFIG)).toContain("APP_VERSION = '82.0.0'");
+    expect(read(CONFIG)).toContain('APP_BUILD_CODE = 26');
+    expect(read('package.json')).toContain('"version": "82.0.0"');
     expect(read('src-tauri/tauri.conf.json')).toContain(
-      '"version": "81.0.0"',
+      '"version": "82.0.0"',
     );
-    expect(read('src-tauri/Cargo.toml')).toContain('version = "81.0.0"');
+    expect(read('src-tauri/Cargo.toml')).toContain('version = "82.0.0"');
   });
 });
 
