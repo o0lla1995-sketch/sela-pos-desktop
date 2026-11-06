@@ -59,11 +59,12 @@ function payMethodLabel(method: string): string {
 /** أغورات → «1,234.50 ₪» (formatMoney يعمل بالشيكل الكامل). */
 const money = (minor: number): string => formatMoney(minor / 100);
 
-/** رسائل معايير التسجيل الفلسطينية (نفس نصوص الأندرويد v19). */
+/** رسائل معايير التسجيل الفلسطينية (نفس نصوص الأندرويد v19).
+ *  v85 (الجولة 91 #٣): الهوية اختيارية — طلب التاجر نصاً: «يجب
+ *  جعل إدخال رقم الهوية غير اجباري في دفتر الديون عند اضافة او
+ *  تعديل زبون». الفارغ مقبول؛ وإن أُدخل فـ9 أرقام بالضبط. */
 function idError(value: string): string {
-  return value.length === 0
-    ? 'رقم الهوية مطلوب'
-    : `رقم الهوية 9 أرقام بالضبط (${value.length} حالياً)`;
+  return `رقم الهوية 9 أرقام بالضبط (${value.length} حالياً) — أو اتركه فارغاً`;
 }
 
 function phoneError(value: string): string {
@@ -217,7 +218,8 @@ export function LocalDebtsScreen() {
     const id = addId.replace(/\s+/g, '');
     const phone = addPhone.replace(/[\s-]/g, '');
     const errors: FieldErrors = {};
-    if (!isValidIdNumber(id)) {
+    // v85 (الجولة 91 #٣): الفارغ مسموح — التحقق لمن أدخل قيمة فقط.
+    if (id.length > 0 && !isValidIdNumber(id)) {
       errors.id = idError(id);
     }
     if (addName.trim().length === 0) {
@@ -272,7 +274,8 @@ export function LocalDebtsScreen() {
     const id = editId.replace(/\s+/g, '');
     const phone = editPhone.replace(/[\s-]/g, '');
     const errors: FieldErrors = {};
-    if (!isValidIdNumber(id)) {
+    // v85 (الجولة 91 #٣): الفارغ مسموح (حذف الهوية = بلا هوية).
+    if (id.length > 0 && !isValidIdNumber(id)) {
       errors.id = idError(id);
     }
     if (editName.trim().length === 0) {
@@ -281,8 +284,9 @@ export function LocalDebtsScreen() {
     if (!isValidLocalPhone(phone)) {
       errors.phone = phoneError(phone);
     }
-    // الهوية وحدها إن تغيّرت: لا يجوز أن يملكها زبون آخر (v35).
-    if (errors.id == null && id !== detail.customer.id_number) {
+    // الهوية وحدها إن تغيّرت: لا يجوز أن يملكها زبون آخر (v35) —
+    // v85: فقط لمن أدخل هوية فعلية.
+    if (errors.id == null && id.length > 0 && id !== detail.customer.id_number) {
       const holder = await LocalDebtsRepo.byIdNumber(id);
       if (holder != null && holder.id !== detail.customer.id) {
         errors.id = `رقم الهوية مسجّل لزبون آخر (${holder.name})`;
@@ -581,7 +585,8 @@ export function LocalDebtsScreen() {
                 <span className="who">
                   <b>{b.customer.name}</b>
                   <span className="sub" dir="ltr">
-                    {b.customer.id_number}
+                    {/* v85: الهوية اختيارية — بلا هوية تُعرض كما هي. */}
+                    {b.customer.id_number || 'بلا رقم هوية'}
                     {b.customer.phone != null ? ` · ${b.customer.phone}` : ''}
                   </span>
                 </span>
@@ -617,7 +622,15 @@ export function LocalDebtsScreen() {
                   <b style={{fontSize: 16}}>{detail.customer.name}</b>
                   <div className="dc-idline">
                     <span className="chip muted">
-                      هوية <span className="dc-ref">{detail.customer.id_number}</span>
+                      {/* v85: الهوية اختيارية. */}
+                      {detail.customer.id_number ? (
+                        <>
+                          هوية{' '}
+                          <span className="dc-ref">{detail.customer.id_number}</span>
+                        </>
+                      ) : (
+                        'بلا رقم هوية'
+                      )}
                     </span>
                     <span className="chip muted">
                       جوال{' '}
@@ -801,7 +814,7 @@ export function LocalDebtsScreen() {
             <div className="modal-body">
               <div className="dc-form-grid">
                 <div className="field">
-                  <label>رقم الهوية (9 أرقام بالضبط)</label>
+                  <label>رقم الهوية (اختياري — 9 أرقام)</label>
                   <input
                     className="dc-input-ltr"
                     dir="ltr"
@@ -887,7 +900,7 @@ export function LocalDebtsScreen() {
             <div className="modal-body">
               <div className="dc-form-grid">
                 <div className="field">
-                  <label>رقم الهوية (9 أرقام بالضبط)</label>
+                  <label>رقم الهوية (اختياري — 9 أرقام)</label>
                   <input
                     className="dc-input-ltr"
                     dir="ltr"

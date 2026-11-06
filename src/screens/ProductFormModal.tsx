@@ -389,7 +389,20 @@ export function ProductFormModal({
         setCategoryId(loaded.category_id ?? 'none');
         setImageUri(loaded.image_uri);
         setSaleMode(loaded.sold_by_weight === 1 ? 'weight' : 'piece');
-        setUnitRows(productUnits.map(unitRowToDraft));
+        // v85 (الجولة 91 #١): صفوف الوحدات تُحمّل مرتبة تصاعدياً
+        //  بالسعر الفعلي (تجاوز الوحدة أو سعر الأساس × التحويل) —
+        //  نفس ترتيب ظهورها في نافذة البيع: الأقل في الأعلى.
+        setUnitRows(
+          productUnits
+            .slice()
+            .sort(
+              (a, b) =>
+                (a.retail_price ?? loaded.retail_price * a.conversion) -
+                  (b.retail_price ?? loaded.retail_price * b.conversion) ||
+                a.conversion - b.conversion,
+            )
+            .map(unitRowToDraft),
+        );
         setBaseUnitName(loaded.base_unit_name ?? null);
         setUntrackedStock(loaded.stock_untracked === 1);
         // v35: متغيرات الموديل — ملابس (لون × مقاس) وأحجام المطعم.
@@ -409,12 +422,21 @@ export function ProductFormModal({
           }
           if (sizeVariants.length > 0) {
             setSizesEnabled(true);
+            // v85 (الجولة 91 #١): الأحجام تُحمّل مرتبة تصاعدياً بالسعر
+            //  — الأقل في الأعلى (النموذج ونافذة البيع بنفس الترتيب).
             setSizeDrafts(
-              sizeVariants.map(v => ({
-                size: v.size,
-                price: v.retail_price != null ? String(v.retail_price) : '',
-                cost: v.cost_price != null ? String(v.cost_price) : '',
-              })),
+              sizeVariants
+                .slice()
+                .sort(
+                  (a, b) =>
+                    (a.retail_price ?? loaded.retail_price) -
+                      (b.retail_price ?? loaded.retail_price) || a.id - b.id,
+                )
+                .map(v => ({
+                  size: v.size,
+                  price: v.retail_price != null ? String(v.retail_price) : '',
+                  cost: v.cost_price != null ? String(v.cost_price) : '',
+                })),
             );
           }
         }

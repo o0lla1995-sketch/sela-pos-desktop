@@ -285,16 +285,16 @@ describe('v83 — ٨٩③ السجل: تسويات تعديل الفاتورة �
 
 /* ── الإصدار ───────────────────────────────────────────────────── */
 
-describe('v83 — الإصدار: 84.0.0 (28) في كل ملفات الإصدار', () => {
+describe('v83 — الإصدار: 84.0.0 (29) في كل ملفات الإصدار', () => {
   test('config وpackage وtauri وCargo عند 84.0.0 / 28', () => {
-    expect(read(CONFIG)).toContain("APP_VERSION = '84.0.0'");
-    expect(read(CONFIG)).toContain('APP_BUILD_CODE = 28');
-    expect(read('package.json')).toContain('"version": "84.0.0"');
-    expect(read('src-tauri/tauri.conf.json')).toContain('"version": "84.0.0"');
-    expect(read('src-tauri/Cargo.toml')).toContain('version = "84.0.0"');
+    expect(read(CONFIG)).toContain("APP_VERSION = '85.0.0'");
+    expect(read(CONFIG)).toContain('APP_BUILD_CODE = 29');
+    expect(read('package.json')).toContain('"version": "85.0.0"');
+    expect(read('src-tauri/tauri.conf.json')).toContain('"version": "85.0.0"');
+    expect(read('src-tauri/Cargo.toml')).toContain('version = "85.0.0"');
     // درس v71/v74: القفل يجب أن يطابق Cargo.toml وإلا رفض --locked.
     expect(read('Cargo.lock')).toContain(
-      'name = "sela-pos-desktop"\nversion = "84.0.0"',
+      'name = "sela-pos-desktop"\nversion = "85.0.0"',
     );
   });
 });

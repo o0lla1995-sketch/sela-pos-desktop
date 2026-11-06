@@ -35,6 +35,7 @@ import {
   ReportRepo,
   type DebtSalesSummary,
 } from '../database/repositories/ReportRepo';
+import {MerchantRepo} from '../database/repositories/MerchantRepo';
 import {CashService} from '../services/CashService';
 import {
   dayMonthLabel,
@@ -309,6 +310,20 @@ export function ReportsScreen() {
   const [liveMethods, setLiveMethods] = useState<
     Awaited<ReturnType<typeof ReportRepo.methodLedgerTotals>>
   >([]);
+  /** v85 (الجولة 91 #٢): إجماليات حسابات التجار — المستحق لهم الآن
+   *  وحركة فترة التقرير (توريد/سداد/مرتجع/تحصيل) وأكبر المستحقات. */
+  const [merchantTotals, setMerchantTotals] = useState<
+    Awaited<ReturnType<typeof MerchantRepo.totals>>
+  >({
+    count: 0,
+    owedNow: 0,
+    creditNow: 0,
+    purchasesInRange: 0,
+    paymentsInRange: 0,
+    returnsInRange: 0,
+    collectionsInRange: 0,
+    topOwed: [],
+  });
   /** نافذة تفاصيل قناة واحدة (سجل الحركات + كشف PDF). */
   const [methodDetail, setMethodDetail] = useState<string | null>(null);
   const [methodRows, setMethodRows] = useState<
@@ -335,7 +350,8 @@ export function ReportsScreen() {
         rangeKey === 'custom' ? {from, to} : undefined;
       const key: ReportRangeKey =
         rangeKey === 'custom' ? 'custom' : rangeKey;
-      const [nextBundle, nextTreasury, nextDebt, nextDetail, nextPayMethods, nextLiveMethods] =
+      const merchantRange = rangeFor(key, custom);
+      const [nextBundle, nextTreasury, nextDebt, nextDetail, nextPayMethods, nextLiveMethods, nextMerchantTotals] =
         await Promise.all([
           ReportService.loadBundle(key, custom),
           ReportService.treasurySnapshot(),
@@ -348,6 +364,9 @@ export function ReportsScreen() {
             from: '2000-01-01',
             to: '2999-12-31',
           }),
+          // v85 (الجولة 91 #٢): حسابات التجار — الرصيد الآن دائماً +
+          // حركة فترة التقرير (توريد/سداد/مرتجع/تحصيل).
+          MerchantRepo.totals(merchantRange.from, merchantRange.to),
         ]);
       setBundle(nextBundle);
       setTreasury(nextTreasury);
@@ -355,6 +374,7 @@ export function ReportsScreen() {
       setDetail(nextDetail);
       setPayMethods(nextPayMethods);
       setLiveMethods(nextLiveMethods);
+      setMerchantTotals(nextMerchantTotals);
     } catch (e) {
       toast(
         e instanceof Error ? e.message : 'تعذر تحميل التقارير',
@@ -1361,6 +1381,80 @@ export function ReportsScreen() {
                   بقيمة {formatMoney(cash.voucherCreditSalesAmount)} —
                   مطالبة على المؤسسات حتى وصول التسوية.
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* ── v85 (الجولة 91 #٢): حسابات التجار — المستحق لهم الآن
+              (رصيد حي دائماً) + حركة فترة التقرير (توريد/سداد/
+              مرتجع/تحصيل) + أكبر المستحقات. ── */}
+          {activeTab === 'debts' && (
+            <div className="card sv57-sec">
+              <div className="sv57-sec-head">
+                <div>
+                  <div className="sv57-sec-title">حسابات التجار</div>
+                  <div className="sv57-sec-hint">
+                    فواتير التوريد والسدادات — الرصيد الآن دائماً (من
+                    شاشة «التجار» في القائمة الجانبية)
+                  </div>
+                </div>
+              </div>
+              {merchantTotals.count === 0 ? (
+                <div className="sv57-empty">لا تجار بعد — أضف تجارك من شاشة «التجار» وسجّل فواتير التوريد</div>
+              ) : (
+                <>
+                  <div className="sv57-kpis">
+                    <div className="sv57-kpi">
+                      <span className="label">مستحق للتجار الآن · {merchantTotals.count} تاجر</span>
+                      <span className={merchantTotals.owedNow > 0 ? 'value danger' : 'value ok'}>
+                        {formatMoney(merchantTotals.owedNow)}
+                      </span>
+                    </div>
+                    <div className="sv57-kpi">
+                      <span className="label">لك عند التجار</span>
+                      <span className="value ok">
+                        {formatMoney(merchantTotals.creditNow)}
+                      </span>
+                    </div>
+                    <div className="sv57-kpi">
+                      <span className="label">توريد بالفترة</span>
+                      <span className="value brand">
+                        {formatMoney(merchantTotals.purchasesInRange)}
+                      </span>
+                    </div>
+                    <div className="sv57-kpi">
+                      <span className="label">سدادات بالفترة</span>
+                      <span className="value ok">
+                        {formatMoney(merchantTotals.paymentsInRange)}
+                      </span>
+                    </div>
+                    <div className="sv57-kpi">
+                      <span className="label">مرتجعات/خصومات بالفترة</span>
+                      <span className="value">
+                        {formatMoney(merchantTotals.returnsInRange)}
+                      </span>
+                    </div>
+                    <div className="sv57-kpi">
+                      <span className="label">تحصيلات منه بالفترة</span>
+                      <span className="value">
+                        {formatMoney(merchantTotals.collectionsInRange)}
+                      </span>
+                    </div>
+                  </div>
+                  {merchantTotals.topOwed.length > 0 ? (
+                    <div className="sv57-mer-top">
+                      {merchantTotals.topOwed.map((row, i) => (
+                        <div className="sv57-mer-row" key={row.merchant.id}>
+                          <span className="rank">{i + 1}</span>
+                          <span className="name">{row.merchant.name}</span>
+                          <span className="val danger">
+                            {formatMoney(row.balance)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </>
               )}
             </div>
           )}

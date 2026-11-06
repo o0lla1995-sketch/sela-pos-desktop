@@ -972,3 +972,52 @@ button.sv57-kpi.sv57-kpi-btn:hover {
     font-size: 12px;
   }
 }
+
+/* ── v85 (الجولة 91 #٢): أكبر المستحقات للتجار (تبويب الديون
+      بالتقارير) — صفوف مرقمة بالاسم والرصيد. ── */
+.sv57-mer-top {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 10px;
+}
+
+.sv57-mer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.sv57-mer-row:last-child {
+  border-bottom: 0;
+}
+
+.sv57-mer-row .rank {
+  min-width: 16px;
+  color: var(--accent);
+  font-weight: 900;
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.sv57-mer-row .name {
+  flex: 1;
+  color: var(--text);
+  font-weight: 700;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sv57-mer-row .val {
+  font-weight: 900;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sv57-mer-row .val.danger {
+  color: var(--danger);
+}

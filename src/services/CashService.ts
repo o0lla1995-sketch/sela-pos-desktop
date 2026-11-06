@@ -46,6 +46,7 @@ import type {ReceiptSettings} from './printer/receipt';
  *  pattern, grocery-tuned for the Palestinian market). */
 export const EXPENSE_CATEGORIES: string[] = [
   'شراء بضاعة',
+  'سداد لتاجر',
   'رواتب وأجور',
   'إيجار',
   'كهرباء',
@@ -246,10 +247,13 @@ export const CashService = {
     authMethod?: CashAuthMethod;
     photoPath?: string | null;
     paymentMethod?: string | null;
+    /** v85 (الجولة 91 #٢): فئة الإيداع — «إيداع نقدي» افتراضياً،
+     *  وتحصيلات التجار تُصنّف «تحصيل من تاجر». */
+    category?: string | null;
   }): Promise<CashMovementRecord> {
     const movement = await CashRepo.add({
       kind: 'deposit',
-      category: 'إيداع نقدي',
+      category: input.category?.trim() || 'إيداع نقدي',
       note: input.note,
       amountMinor: input.amountMinor,
       authMethod: input.authMethod ?? 'none',

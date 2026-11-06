@@ -340,7 +340,9 @@ CREATE INDEX IF NOT EXISTS idx_sila_dq_state ON sila_debt_queue(state, created_a
 CREATE INDEX IF NOT EXISTS idx_sila_pq_state ON sila_payment_queue(state, created_at);
 CREATE TABLE IF NOT EXISTS local_customers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  id_number TEXT NOT NULL UNIQUE,
+  -- v85 (الجولة 91 #٣): الهوية اختيارية — NULL لمن بلا هوية
+  --  (التفرد UNIQUE على من أدخل هوية فقط؛ NULL ≠ NULL).
+  id_number TEXT UNIQUE,
   name TEXT NOT NULL,
   phone TEXT,
   notes TEXT,
@@ -375,6 +377,33 @@ CREATE TABLE IF NOT EXISTS local_payments (
 );
 CREATE INDEX IF NOT EXISTS idx_local_debts_cust ON local_debts(local_customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_local_pays_cust ON local_payments(local_customer_id, created_at DESC);
+-- v85 (الجولة 91 #٢): حسابات التجار (الموردين) — دفتر الذمم
+-- الدائنة. فاتورة التوريد (invoice) ترفع ما علينا له؛ السداد
+-- (payment) والمرتجع/الخصم (return) والتحصيل منه (collection)
+-- تخفضه؛ بنود الفاتورة JSON في items_json؛ method تحمل قناة
+-- السداد/التحصيل و cash_ref يربط سند الخزينة المرافق.
+CREATE TABLE IF NOT EXISTS merchants (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  phone TEXT,
+  id_number TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS merchant_movements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  merchant_id INTEGER NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  ref TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('invoice','payment','return','collection')),
+  amount REAL NOT NULL CHECK (amount > 0),
+  method TEXT,
+  note TEXT,
+  items_json TEXT,
+  cash_ref TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_merchant_moves ON merchant_movements(merchant_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_merchant_moves_kind ON merchant_movements(kind, created_at DESC);
 CREATE TABLE IF NOT EXISTS sila_app_collections (
   local_id INTEGER PRIMARY KEY AUTOINCREMENT,
   customer_id TEXT NOT NULL,
@@ -569,6 +598,49 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> bool {
 /// شفاء قاعدة سطح المكتب القديمة (v1.0.0 — مخطط أندرويد v6):
 /// إضافة كل أعمدة v57 الناقصة بأعمدة ALTER محروسة (idempotent)،
 /// وإعادة بناء stocktake_items بصفوف المتغيرات (نفس ترحيل v22).
+/// v85 (الجولة 91 #٣): الهوية اختيارية في دفتر الديون — عمود
+/// local_customers.id_number كان NOT NULL فيرفض زبوناً بلا هوية.
+/// إعادة البناء بالمسار الرسمي (بناء بديل ← نسخ ← حذف ← rename)
+/// عند الترقية من تثبيتات أقدم؛ DDL التثبيتات الجديدة اختياري
+/// أصلاً فيتخطى نفسه.
+fn heal_v85(conn: &Connection) -> Result<()> {
+    let notnull: i64 = conn
+        .query_row(
+            "SELECT \"notnull\" FROM pragma_table_info('local_customers') WHERE name = 'id_number'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if notnull == 0 {
+        return Ok(());
+    }
+    conn.execute_batch("PRAGMA foreign_keys = OFF")?;
+    let rebuild = conn.execute_batch(
+        "BEGIN;
+         CREATE TABLE local_customers_v85 (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           id_number TEXT UNIQUE,
+           name TEXT NOT NULL,
+           phone TEXT,
+           notes TEXT,
+           sila_customer_id TEXT,
+           sila_linked_at TEXT,
+           created_at TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         INSERT INTO local_customers_v85
+           SELECT id, id_number, name, phone, notes, sila_customer_id,
+                  sila_linked_at, created_at
+         FROM local_customers;
+         DROP TABLE local_customers;
+         ALTER TABLE local_customers_v85 RENAME TO local_customers;
+         CREATE INDEX IF NOT EXISTS idx_local_debts_cust ON local_debts(local_customer_id, created_at DESC);
+         CREATE INDEX IF NOT EXISTS idx_local_pays_cust ON local_payments(local_customer_id, created_at DESC);
+         COMMIT;",
+    );
+    conn.execute_batch("PRAGMA foreign_keys = ON")?;
+    rebuild
+}
+
 fn heal_v57(conn: &Connection) -> Result<()> {
     let upgrades: &[(&str, &str, &str)] = &[
         ("categories", "store_mode", "TEXT"),
@@ -770,6 +842,7 @@ pub fn open_session(path: &std::path::Path) -> Result<Connection> {
 pub fn init_with(conn: &Connection) -> Result<()> {
     conn.execute_batch(DDL)?;
     heal_v57(conn)?;
+    heal_v85(conn)?;
 
     // ── بذر التصنيفات/الوحدات مرة واحدة ── (نفس initDatabase)
     let cats: i64 = conn.query_row("SELECT COUNT(*) FROM categories", [], |r| r.get(0))?;
@@ -816,6 +889,8 @@ pub const BUSINESS_TABLES: [&str; 27] = [
     "local_payments",
     "local_debts",
     "local_customers",
+    "merchant_movements",
+    "merchants",
     "campaign_settlements",
     "campaign_debts",
     "voucher_redemptions",
@@ -841,7 +916,8 @@ pub fn wipe_all(conn: &mut Connection) -> Result<()> {
           'sale_returns','sale_return_items','sale_return_exchanges',
           'sila_debt_queue','sila_payment_queue','sila_app_collections',
           'local_customers','local_debts','local_payments','voucher_redemptions',
-          'campaign_settlements','cash_movements','online_order_items')",
+          'campaign_settlements','cash_movements','online_order_items',
+          'merchants','merchant_movements')",
         [],
     )?;
     // إعادة البذر بعد المسح (نفس سلوك إعادة أول تشغيل).

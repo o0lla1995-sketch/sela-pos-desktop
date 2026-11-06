@@ -35,6 +35,7 @@ import {NotificationsScreen} from './screens/NotificationsScreen';
 import {SettingsScreen} from './screens/SettingsScreen';
 import {CashiersScreen} from './screens/CashiersScreen';
 import {LocalDebtsScreen} from './screens/LocalDebtsScreen';
+import {MerchantsScreen} from './screens/MerchantsScreen';
 import {CashMovementsScreen} from './screens/CashMovementsScreen';
 import {SilaScreen} from './screens/SilaScreen';
 import {StockAlertsScreen} from './screens/StockAlertsScreen';
@@ -52,6 +53,7 @@ type ScreenKey =
   | 'inventory'
   | 'stocktake'
   | 'debts'
+  | 'merchants'
   | 'cash'
   | 'sila'
   | 'stock-alerts'
@@ -68,6 +70,9 @@ const NAV: {key: ScreenKey; label: string; icon: IconName}[] = [
   {key: 'inventory', label: 'المخزون', icon: 'box'},
   {key: 'stocktake', label: 'الجرد', icon: 'clipboard'},
   {key: 'debts', label: 'ديون المتجر', icon: 'book'},
+  // v85 (الجولة 91 #٢): حسابات التجار — فواتير التوريد والمستحقات
+  // وصفحة كشف حساب لكل تاجر (ذمم دائنة بمعيار الأنظمة الاحترافية).
+  {key: 'merchants', label: 'التجار', icon: 'store'},
   {key: 'cash', label: 'الخزينة', icon: 'wallet'},
   {key: 'sila', label: 'صِلة والقسائم', icon: 'link'},
   {key: 'reports', label: 'التقارير', icon: 'chart'},
@@ -410,6 +415,11 @@ export function App() {
               {screen === 'debts' && (
                 <ErrorBoundary label="ديون المتجر">
                   <LocalDebtsScreen />
+                </ErrorBoundary>
+              )}
+              {screen === 'merchants' && (
+                <ErrorBoundary label="التجار والموردون">
+                  <MerchantsScreen />
                 </ErrorBoundary>
               )}
               {screen === 'cash' && (

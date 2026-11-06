@@ -2950,8 +2950,19 @@ function VariantPicker({
     [variants, color],
   );
   const sizeVariants = useMemo(
-    () => variants.filter(v => v.kind === 'size'),
-    [variants],
+    () =>
+      // v85 (الجولة 91 #١): خيارات البيع (الأحجام) تُرتّب تصاعدياً
+      //  بالسعر الفعلي — الأقل في الأعلى إلى الأكبر في الأسفل (طلب
+      //  التاجر: «من الاقل في الأعلي الي الاكبر»)؛ مفاضلة بسعر
+      //  الحجم وإلا سعر الأساس مع فاصل بالمعرّف للثبات.
+      [...variants]
+        .filter(v => v.kind === 'size')
+        .sort(
+          (a, b) =>
+            (a.retail_price ?? product.retail_price) -
+              (b.retail_price ?? product.retail_price) || a.id - b.id,
+        ),
+    [variants, product.retail_price],
   );
   const quantity = Math.max(1, Number(qty) || 1);
 
