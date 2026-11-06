@@ -520,3 +520,37 @@
     min-width: 90px;
   }
 }
+
+
+/* ── v86 (الجولة 92 #٤): شارة نوع الحركة الملونة في كشف الحساب ──
+   نفس دلالات الألوان في أندرويد v79: توريد/دين يرفعان ما علينا
+   (أحمر/برتقالي)، سداد/تحصيل يخفضانه (أخضر)، مرتجع أزرق. */
+.mer-kind-chip {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 800;
+  border-radius: 6px;
+  padding: 2px 8px;
+  margin-inline-end: 6px;
+  vertical-align: middle;
+}
+
+.mer-kind-chip.danger {
+  background: rgba(220, 38, 38, 0.14);
+  color: #DC2626;
+}
+
+.mer-kind-chip.warn {
+  background: rgba(217, 119, 6, 0.14);
+  color: #D97706;
+}
+
+.mer-kind-chip.ok {
+  background: rgba(22, 163, 74, 0.14);
+  color: #16A34A;
+}
+
+.mer-kind-chip.info {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563EB;
+}

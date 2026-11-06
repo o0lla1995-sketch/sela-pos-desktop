@@ -14,6 +14,12 @@
  *  • السداد والتحصيل عبر قنوات الدفع الفعلية (درج/بنوك/محافظ) مع
  *    سند خزينة مصاحب (فئة «سداد لتاجر» / «تحصيل من تاجر»)؛
  *    المرتجع/الخصم بلا حركة خزينة.
+ *
+ * v86 (الجولة 92 #٣+٤) — مطابقة أندرويد v79:
+ *  • دين مستحق مباشر بلا فاتورة توريد — يرفع المستحق له بلا بنود
+ *    وبلا حركة خزينة (نوع خامس debt + شفاء نواة Rust v86).
+ *  • تنزيل كشف حساب التاجر ودفتر التجار ككل — PDF احترافي أو CSV.
+ *  • شارات أنواع ملونة في كشف الحساب وتفكيك الدين في بطاقة الرصيد.
  */
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {useToastStore} from '../state/appStores';
@@ -27,13 +33,19 @@ import {formatMoney, formatDateTime} from '../core/format';
 import {activePaymentMethods, paymentMethodById} from '../core/paymentMethods';
 import {useSettingsStore} from '../stores/settingsStore';
 import {CashService} from '../services/CashService';
+import {MerchantExports} from '../services/MerchantExports';
 import {Icon} from '../components/Icon';
 import {PaymentMethodIcon} from '../components/PaymentMethodIcon';
 import './merchants.css';
 
-type FinanceKind = 'payment' | 'return' | 'collection';
+type FinanceKind = 'payment' | 'return' | 'collection' | 'debt';
 
 const FINANCE_OPTIONS: {key: FinanceKind; label: string; hint: string}[] = [
+  {
+    key: 'debt',
+    label: 'دين مستحق',
+    hint: 'التزام مالي مباشر على حساب التاجر بلا فاتورة توريد (رسوم، نقد، توريد ضاعت فاتورته) — يرفع المستحق له ولا يمس الخزينة',
+  },
   {
     key: 'payment',
     label: 'سداد له',
@@ -56,6 +68,17 @@ const KIND_LABELS: Record<string, string> = {
   payment: 'سداد له',
   return: 'مرتجع / خصم',
   collection: 'تحصيل منه',
+  debt: 'دين مستحق مباشر',
+};
+
+/** v86 (#٤): لون شارة النوع في كشف الحساب — قراءة فورية لاتجاه
+ *  الحركة بمعيار الأنظمة الاحترافية (نفس خريطة أندرويد v79). */
+const KIND_TONES: Record<string, string> = {
+  invoice: 'danger',
+  debt: 'warn',
+  payment: 'ok',
+  return: 'info',
+  collection: 'ok',
 };
 
 interface DraftItem {
@@ -120,6 +143,35 @@ export function MerchantsScreen() {
   const [financeMethod, setFinanceMethod] = useState('cash');
   const [financeNote, setFinanceNote] = useState('');
   const [financeBusy, setFinanceBusy] = useState(false);
+
+  // ── v86 (الجولة 92 #٣): تصدير الكشوف — PDF وCSV ──
+  const [exportBusy, setExportBusy] = useState<
+    'statementPdf' | 'statementCsv' | 'bookPdf' | 'bookCsv' | null
+  >(null);
+
+  const runExport = useCallback(
+    async (
+      which: 'statementPdf' | 'statementCsv' | 'bookPdf' | 'bookCsv',
+      run: () => Promise<string>,
+    ) => {
+      if (exportBusy != null) {
+        return;
+      }
+      setExportBusy(which);
+      try {
+        const path = await run();
+        toast(`تم حفظ الملف: ${path}`, 'success', 6000);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (!message.includes('أُلغيت')) {
+          toast(message, 'error', 6000);
+        }
+      } finally {
+        setExportBusy(null);
+      }
+    },
+    [exportBusy, toast],
+  );
 
   const reload = useCallback(async () => {
     try {
@@ -359,6 +411,22 @@ export function MerchantsScreen() {
     try {
       const merchantId = detail.merchant.id;
       const merchantName = detail.merchant.name;
+      // v86 (الجولة 92 #٣): الدين المستحق المباشر — بلا فاتورة وبلا
+      // حركة خزينة؛ يرفع المستحق له ويُسدّد لاحقاً كأي سداد.
+      if (financeKind === 'debt') {
+        const movement = await MerchantRepo.addDirectDebt({
+          merchantId,
+          amount,
+          note: financeNote,
+        });
+        setFinanceOpen(false);
+        await refreshDetail(merchantId);
+        toast(
+          `سُجّل دين مستحق ${movement.ref} — ${formatMoney(amount)} على حساب ${merchantName}`,
+          'success',
+        );
+        return;
+      }
       if (financeKind === 'return') {
         await MerchantRepo.addReturn({merchantId, amount, note: financeNote});
         setFinanceOpen(false);
@@ -462,6 +530,23 @@ export function MerchantsScreen() {
         </div>
         <button className="btn primary" onClick={() => setAddOpen(true)}>
           <Icon name="plus" size={13} /> تاجر جديد
+        </button>
+        <button
+          className="btn"
+          disabled={exportBusy != null}
+          onClick={() =>
+            void runExport('bookPdf', () => MerchantExports.exportBookPdf())
+          }>
+          <Icon name="download" size={13} />
+          {exportBusy === 'bookPdf' ? 'جارٍ الإنشاء…' : 'تنزيل دفتر التجار PDF'}
+        </button>
+        <button
+          className="btn ghost"
+          disabled={exportBusy != null}
+          onClick={() =>
+            void runExport('bookCsv', () => MerchantExports.exportBookCsv())
+          }>
+          <Icon name="download" size={13} /> دفتر CSV
         </button>
       </div>
 
@@ -626,8 +711,11 @@ export function MerchantsScreen() {
                   {formatMoney(Math.abs(detail.balance))}
                 </span>
                 <span className="b">
-                  توريد {formatMoney(detail.invoiceTotal)} · سداد{' '}
-                  {formatMoney(detail.paymentTotal)} · مرتجع/خصم{' '}
+                  توريد {formatMoney(detail.invoiceTotal)}
+                  {detail.debtTotal > 0.005
+                    ? ` · دين مباشر ${formatMoney(detail.debtTotal)}`
+                    : ''}{' '}
+                  · سداد {formatMoney(detail.paymentTotal)} · مرتجع/خصم{' '}
                   {formatMoney(detail.returnTotal)} · تحصيل{' '}
                   {formatMoney(detail.collectionTotal)}
                 </span>
@@ -637,6 +725,9 @@ export function MerchantsScreen() {
               <div className="mer-actions">
                 <button className="btn primary" onClick={openInvoice}>
                   <Icon name="plus" size={13} /> فاتورة توريد
+                </button>
+                <button className="btn" onClick={() => openFinance('debt')}>
+                  <Icon name="book" size={13} /> دين مستحق
                 </button>
                 <button
                   className="btn"
@@ -652,6 +743,29 @@ export function MerchantsScreen() {
                   className="btn"
                   onClick={() => openFinance('collection')}>
                   <Icon name="download" size={13} /> تحصيل منه
+                </button>
+                <button
+                  className="btn ghost"
+                  disabled={exportBusy != null}
+                  onClick={() =>
+                    void runExport('statementPdf', () =>
+                      MerchantExports.exportStatementPdf(detail.merchant.id),
+                    )
+                  }>
+                  <Icon name="save" size={13} />
+                  {exportBusy === 'statementPdf'
+                    ? 'جارٍ الإنشاء…'
+                    : 'تنزيل الكشف PDF'}
+                </button>
+                <button
+                  className="btn ghost"
+                  disabled={exportBusy != null}
+                  onClick={() =>
+                    void runExport('statementCsv', () =>
+                      MerchantExports.exportStatementCsv(detail.merchant.id),
+                    )
+                  }>
+                  <Icon name="download" size={13} /> كشف CSV
                 </button>
                 <button className="btn ghost" onClick={openEdit}>
                   <Icon name="edit" size={13} /> تعديل البيانات
@@ -670,11 +784,21 @@ export function MerchantsScreen() {
                     لا حركات بعد — ابدأ بفاتورة توريد أو سداد
                   </div>
                 ) : (
-                  statement.map(row => (
+                  statement.map(row => {
+                    const tone = KIND_TONES[row.movement.kind] ?? '';
+                    const positive =
+                      row.movement.kind === 'invoice' ||
+                      row.movement.kind === 'debt';
+                    return (
                     <div key={row.movement.id} className="mer-move">
                       <div className="t">
                         <b>
-                          {KIND_LABELS[row.movement.kind]} · {row.movement.ref}
+                          {tone ? (
+                            <span className={`mer-kind-chip ${tone}`}>
+                              {KIND_LABELS[row.movement.kind]}
+                            </span>
+                          ) : null}
+                          {row.movement.ref}
                         </b>
                         <span>
                           {formatDateTime(row.movement.createdAt)}
@@ -697,14 +821,15 @@ export function MerchantsScreen() {
                         ) : null}
                       </div>
                       <div className="n">
-                        <b className={row.movement.kind === 'invoice' ? 'danger' : 'ok'}>
-                          {row.movement.kind === 'invoice' ? '+' : '−'}
+                        <b className={positive ? 'danger' : 'ok'}>
+                          {positive ? '+' : '−'}
                           {formatMoney(row.movement.amount)}
                         </b>
                         <span>الرصيد {formatMoney(row.runningBalance)}</span>
                       </div>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -976,7 +1101,9 @@ export function MerchantsScreen() {
                 disabled={financeBusy}
                 onClick={() => void saveFinance()}>
                 <Icon name="check" size={14} />
-                {financeKind === 'payment'
+                {financeKind === 'debt'
+                  ? 'تسجيل الدين المستحق'
+                  : financeKind === 'payment'
                   ? 'تسجيل السداد'
                   : financeKind === 'return'
                   ? 'تسجيل المرتجع/الخصم'

@@ -382,6 +382,8 @@ CREATE INDEX IF NOT EXISTS idx_local_pays_cust ON local_payments(local_customer_
 -- (payment) والمرتجع/الخصم (return) والتحصيل منه (collection)
 -- تخفضه؛ بنود الفاتورة JSON في items_json؛ method تحمل قناة
 -- السداد/التحصيل و cash_ref يربط سند الخزينة المرافق.
+-- v86 (الجولة 92 #٣): دين مستحق مباشر (debt) بلا فاتورة توريد
+-- يرفع المستحق له كذلك — بلا بنود وبلا حركة خزينة.
 CREATE TABLE IF NOT EXISTS merchants (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -394,7 +396,7 @@ CREATE TABLE IF NOT EXISTS merchant_movements (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   merchant_id INTEGER NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
   ref TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('invoice','payment','return','collection')),
+  kind TEXT NOT NULL CHECK (kind IN ('invoice','payment','return','collection','debt')),
   amount REAL NOT NULL CHECK (amount > 0),
   method TEXT,
   note TEXT,
@@ -641,6 +643,56 @@ fn heal_v85(conn: &Connection) -> Result<()> {
     rebuild
 }
 
+
+/// v86 (الجولة 92 #٣): الدين المستحق المباشر للتجار بلا فاتورة —
+/// قيد CHECK على نوع الحركة لا يقبل 'debt' في قواعد v85، وSQLite
+/// لا يعدّل CHECK إلا بإعادة بناء الجدول (نفس مسار heal_v85:
+/// بناء بديل ← نسخ ← حذف ← rename ← إعادة الفهارس). التثبيتات
+/// الجديدة يبنيها DDL v86 موسّعاً أصلاً فيتخطى الشفاء نفسه.
+fn heal_v86(conn: &Connection) -> Result<()> {
+    let ddl: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'merchant_movements'",
+            [],
+            |r| r.get(0),
+        )
+        .ok();
+    let ddl = match ddl {
+        Some(d) => d,
+        None => return Ok(()), // الجدول غير موجود بعد — DDL سيبنيه موسّعاً.
+    };
+    if ddl.contains("'debt'") {
+        return Ok(());
+    }
+    conn.execute_batch("PRAGMA foreign_keys = OFF")?;
+    let rebuild = conn.execute_batch(
+        "BEGIN;
+         CREATE TABLE merchant_movements_v86 (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           merchant_id INTEGER NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+           ref TEXT NOT NULL,
+           kind TEXT NOT NULL CHECK (kind IN ('invoice','payment','return','collection','debt')),
+           amount REAL NOT NULL CHECK (amount > 0),
+           method TEXT,
+           note TEXT,
+           items_json TEXT,
+           cash_ref TEXT,
+           created_at TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         INSERT INTO merchant_movements_v86
+           SELECT id, merchant_id, ref, kind, amount, method, note,
+                  items_json, cash_ref, created_at
+         FROM merchant_movements;
+         DROP TABLE merchant_movements;
+         ALTER TABLE merchant_movements_v86 RENAME TO merchant_movements;
+         CREATE INDEX IF NOT EXISTS idx_merchant_moves ON merchant_movements(merchant_id, created_at DESC, id DESC);
+         CREATE INDEX IF NOT EXISTS idx_merchant_moves_kind ON merchant_movements(kind, created_at DESC);
+         COMMIT;",
+    );
+    conn.execute_batch("PRAGMA foreign_keys = ON")?;
+    rebuild
+}
+
 fn heal_v57(conn: &Connection) -> Result<()> {
     let upgrades: &[(&str, &str, &str)] = &[
         ("categories", "store_mode", "TEXT"),
@@ -843,6 +895,7 @@ pub fn init_with(conn: &Connection) -> Result<()> {
     conn.execute_batch(DDL)?;
     heal_v57(conn)?;
     heal_v85(conn)?;
+    heal_v86(conn)?;
 
     // ── بذر التصنيفات/الوحدات مرة واحدة ── (نفس initDatabase)
     let cats: i64 = conn.query_row("SELECT COUNT(*) FROM categories", [], |r| r.get(0))?;

@@ -322,6 +322,7 @@ export function ReportsScreen() {
     paymentsInRange: 0,
     returnsInRange: 0,
     collectionsInRange: 0,
+    debtsInRange: 0,
     topOwed: [],
   });
   /** نافذة تفاصيل قناة واحدة (سجل الحركات + كشف PDF). */
@@ -1420,6 +1421,12 @@ export function ReportsScreen() {
                       <span className="label">توريد بالفترة</span>
                       <span className="value brand">
                         {formatMoney(merchantTotals.purchasesInRange)}
+                      </span>
+                    </div>
+                    <div className="sv57-kpi">
+                      <span className="label">ديون مباشرة بالفترة</span>
+                      <span className="value">
+                        {formatMoney(merchantTotals.debtsInRange)}
                       </span>
                     </div>
                     <div className="sv57-kpi">

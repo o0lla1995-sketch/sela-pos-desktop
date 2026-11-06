@@ -629,3 +629,243 @@ export async function exportMethodStatementPdf(
   );
   return {path, pages: state.pages.length};
 }
+
+/* ══════════════ ③ كشف حساب تاجر واحد (v86 — الجولة 92 #٣) ══════════════ */
+
+export interface MerchantStatementPdfData {
+  storeName: string;
+  merchantName: string;
+  merchantPhone: string | null;
+  merchantIdNumber: string | null;
+  /** الأقدم أولاً — كدفتر محاسبي. */
+  rows: {
+    at: string;
+    kindLabel: string;
+    ref: string;
+    detail: string;
+    methodLabel: string;
+    /** موجب = يرفع ما علينا له (توريد/دين). */
+    positive: boolean;
+    amount: number;
+    runningBalance: number;
+  }[];
+  /** الرصيد الحالي (موجب = علينا له). */
+  balanceNow: number;
+}
+
+const MERCHANT_COLS: TableCol[] = [
+  {label: 'التاريخ', width: 132},
+  {label: 'النوع', width: 104},
+  {label: 'المرجع', width: 112},
+  {label: 'البيان / البنود', width: 258},
+  {label: 'القناة', width: 96},
+  {label: 'عليه (₪)', width: 100, numeric: true},
+  {label: 'له (₪)', width: 100, numeric: true},
+  {label: 'الرصيد', width: 134, numeric: true},
+];
+
+export async function exportMerchantStatementPdf(
+  data: MerchantStatementPdfData,
+): Promise<{path: string; pages: number}> {
+  await ensureFontsReady();
+  const tableW = MERCHANT_COLS.reduce((sum, c) => sum + c.width, 0);
+  const first = newPage();
+  const state: PageState = {
+    pages: [first],
+    storeName: data.storeName,
+    title: `كشف حساب تاجر — ${data.merchantName}`,
+  };
+  const contact = [
+    data.merchantPhone ? `جوال ${data.merchantPhone}` : '',
+    data.merchantIdNumber ? `هوية ${data.merchantIdNumber}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  let y = drawFirstHeader(
+    first.ctx,
+    MARGIN,
+    data.storeName,
+    state.title,
+    `${contact || 'دفتر الذمم الدائنة'} — ${data.rows.length} حركة بالرصيد الجاري بعد كل حركة`,
+    tableW,
+  );
+
+  const totalPositive = data.rows
+    .filter(r => r.positive)
+    .reduce((sum, r) => sum + r.amount, 0);
+  const totalNegative = data.rows
+    .filter(r => !r.positive)
+    .reduce((sum, r) => sum + r.amount, 0);
+  y = drawCards(
+    first.ctx,
+    y,
+    [
+      {
+        label: 'الرصيد الحالي (علينا له)',
+        value: data.balanceNow.toFixed(2),
+        color: data.balanceNow > 0.005 ? DANGER : OK,
+      },
+      {label: 'إجمالي التوريد والديون', value: totalPositive.toFixed(2), color: DANGER},
+      {label: 'إجمالي السداد والمرتجع والتحصيل', value: totalNegative.toFixed(2), color: OK},
+    ],
+    tableW,
+  );
+
+  const rowsText = data.rows.map(row => [
+    row.at,
+    row.kindLabel,
+    row.ref,
+    row.detail,
+    row.methodLabel,
+    row.positive ? row.amount.toFixed(2) : '—',
+    row.positive ? '—' : row.amount.toFixed(2),
+    row.runningBalance.toFixed(2),
+  ]);
+  const rowColors = data.rows.map(row => (row.positive ? 'neg' : 'pos'));
+
+  const endY = renderTable(state, y, MERCHANT_COLS, rowsText, rowColors, {
+    cells: [
+      'الإجماليات',
+      `${data.rows.length} حركة`,
+      '',
+      '',
+      '',
+      totalPositive.toFixed(2),
+      totalNegative.toFixed(2),
+      data.balanceNow.toFixed(2),
+    ],
+    color: BRAND,
+  });
+  const lastCtx = state.pages[state.pages.length - 1].ctx;
+  if (endY + 46 < PAGE_H_PX - MARGIN - 10) {
+    text(
+      lastCtx,
+      data.balanceNow > 0.005
+        ? `المستحق للتاجر ${data.merchantName} الآن: ${formatMoney(data.balanceNow)}`
+        : data.balanceNow < -0.005
+        ? `لك عند التاجر ${data.merchantName}: ${formatMoney(Math.abs(data.balanceNow))}`
+        : `حساب ${data.merchantName} مسدد`,
+      MARGIN + tableW,
+      endY + 22,
+      `800 14px ${FONT}`,
+      BRAND,
+    );
+  }
+  drawPageFooter(lastCtx, state, state.pages.length, tableW);
+
+  const bytes = await pagesToPdf(state.pages);
+  const path = await savePdf(
+    bytes,
+    `sela-merchant-${data.merchantName.replace(/\s+/g, '_')}-statement.pdf`,
+  );
+  return {path, pages: state.pages.length};
+}
+
+/* ══════════════ ④ دفتر التجار ككل (v86 — الجولة 92 #٣) ══════════════ */
+
+export interface MerchantsBookPdfData {
+  storeName: string;
+  rows: {
+    name: string;
+    phone: string;
+    invoiceTotal: number;
+    debtTotal: number;
+    paymentTotal: number;
+    returnTotal: number;
+    collectionTotal: number;
+    balance: number;
+    lastAt: string;
+  }[];
+  owedNow: number;
+  creditNow: number;
+}
+
+const BOOK_COLS: TableCol[] = [
+  {label: 'التاجر', width: 220},
+  {label: 'الجوال', width: 130},
+  {label: 'توريد', width: 106, numeric: true},
+  {label: 'دين مباشر', width: 110, numeric: true},
+  {label: 'سداد', width: 100, numeric: true},
+  {label: 'مرتجع', width: 100, numeric: true},
+  {label: 'تحصيل', width: 100, numeric: true},
+  {label: 'الرصيد', width: 130, numeric: true},
+];
+
+export async function exportMerchantsBookPdf(
+  data: MerchantsBookPdfData,
+): Promise<{path: string; pages: number}> {
+  await ensureFontsReady();
+  const tableW = BOOK_COLS.reduce((sum, c) => sum + c.width, 0);
+  const first = newPage();
+  const state: PageState = {
+    pages: [first],
+    storeName: data.storeName,
+    title: 'دفتر حسابات التجار',
+  };
+  let y = drawFirstHeader(
+    first.ctx,
+    MARGIN,
+    data.storeName,
+    state.title,
+    `${data.rows.length} تاجر — تفكيك الرصيد الكامل لكل تاجر وإجمالي المستحقات`,
+    tableW,
+  );
+
+  y = drawCards(
+    first.ctx,
+    y,
+    [
+      {label: 'مستحق للتجار الآن', value: data.owedNow.toFixed(2), color: DANGER},
+      {label: 'لك عند التجار', value: data.creditNow.toFixed(2), color: OK},
+      {label: 'عدد التجار', value: String(data.rows.length), color: INK},
+    ],
+    tableW,
+  );
+
+  const rowsText = data.rows.map(row => [
+    row.name,
+    row.phone,
+    row.invoiceTotal.toFixed(2),
+    row.debtTotal.toFixed(2),
+    row.paymentTotal.toFixed(2),
+    row.returnTotal.toFixed(2),
+    row.collectionTotal.toFixed(2),
+    row.balance.toFixed(2),
+  ]);
+  const rowColors = data.rows.map(
+    row => (row.balance > 0.005 ? 'neg' : row.balance < -0.005 ? 'pos' : ''),
+  ) as ('' | 'neg' | 'pos')[];
+
+  const sum = (pick: (row: MerchantsBookPdfData['rows'][number]) => number) =>
+    data.rows.reduce((acc, row) => acc + pick(row), 0);
+
+  const endY = renderTable(state, y, BOOK_COLS, rowsText, rowColors, {
+    cells: [
+      'الإجماليات',
+      '',
+      sum(r => r.invoiceTotal).toFixed(2),
+      sum(r => r.debtTotal).toFixed(2),
+      sum(r => r.paymentTotal).toFixed(2),
+      sum(r => r.returnTotal).toFixed(2),
+      sum(r => r.collectionTotal).toFixed(2),
+      sum(r => r.balance).toFixed(2),
+    ],
+    color: BRAND,
+  });
+  const lastCtx = state.pages[state.pages.length - 1].ctx;
+  if (endY + 46 < PAGE_H_PX - MARGIN - 10) {
+    text(
+      lastCtx,
+      `مستحق للتجار: ${formatMoney(data.owedNow)} · لك عند التجار: ${formatMoney(data.creditNow)}`,
+      MARGIN + tableW,
+      endY + 22,
+      `800 14px ${FONT}`,
+      BRAND,
+    );
+  }
+  drawPageFooter(lastCtx, state, state.pages.length, tableW);
+
+  const bytes = await pagesToPdf(state.pages);
+  const path = await savePdf(bytes, 'sela-merchants-book.pdf');
+  return {path, pages: state.pages.length};
+}

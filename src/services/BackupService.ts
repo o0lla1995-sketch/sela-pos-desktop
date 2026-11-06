@@ -361,7 +361,7 @@ export interface BackupFile {
   merchant_movements?: {
     merchant_id: number;
     ref: string;
-    kind: 'invoice' | 'payment' | 'return' | 'collection';
+    kind: 'invoice' | 'payment' | 'return' | 'collection' | 'debt';
     amount: number;
     method: string | null;
     note: string | null;
@@ -1004,11 +1004,11 @@ export const BackupService = {
       merchant_movements: rowsOf(merchantMovesRaw).map(row => ({
         merchant_id: Number(row.merchant_id ?? 0),
         ref: String(row.ref ?? ''),
-        kind: (['invoice', 'payment', 'return', 'collection'].includes(
+        kind: (['invoice', 'payment', 'return', 'collection', 'debt'].includes(
           String(row.kind ?? ''),
         )
           ? String(row.kind)
-          : 'invoice') as 'invoice' | 'payment' | 'return' | 'collection',
+          : 'invoice') as 'invoice' | 'payment' | 'return' | 'collection' | 'debt',
         amount: Number(row.amount ?? 0),
         method: row.method == null ? null : String(row.method),
         note: row.note == null ? null : String(row.note),

@@ -63,7 +63,7 @@ describe('v85 — ② ميزة حسابات التجار', () => {
     expect(src).toContain('CREATE TABLE IF NOT EXISTS merchants');
     expect(src).toContain('CREATE TABLE IF NOT EXISTS merchant_movements');
     expect(src).toContain(
-      "kind TEXT NOT NULL CHECK (kind IN ('invoice','payment','return','collection'))",
+      "kind TEXT NOT NULL CHECK (kind IN ('invoice','payment','return','collection','debt'))",
     );
     expect(src).toContain('idx_merchant_moves');
     expect(src).toMatch(/"merchant_movements",\s*\n\s*"merchants",/);
@@ -71,9 +71,8 @@ describe('v85 — ② ميزة حسابات التجار', () => {
 
   test('المستودع: المعادلة والمراجع والحذف المحروس والكشف الجاري', () => {
     const src = read(MERCHANT_REPO);
-    expect(src).toContain(
-      'invoiceTotal - paymentTotal - returnTotal - collectionTotal',
-    );
+    expect(src).toContain('invoiceTotal +');
+    expect(src).toContain('debtTotal -');
     expect(src).toContain("invoice: 'توريد'");
     expect(src).toContain('لا يمكن حذف التاجر');
     expect(src).toContain('runningBalance');
@@ -175,9 +174,9 @@ describe('v85 — ④ لا إشعارات نفاد للمنتجات بلا تت�
 });
 
 describe('v85 — الإصدار', () => {
-  test('config عند 85.0.0 / 29', () => {
+  test('config عند 86.0.0 / 29', () => {
     const src = read(CONFIG);
-    expect(src).toContain("APP_VERSION = '85.0.0'");
-    expect(src).toContain('APP_BUILD_CODE = 29');
+    expect(src).toContain("APP_VERSION = '86.0.0'");
+    expect(src).toContain('APP_BUILD_CODE = 30');
   });
 });

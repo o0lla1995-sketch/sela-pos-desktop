@@ -88,10 +88,10 @@ describe('v82 — ١ فرق التعديل يتحرك وحده (لا كامل ا
 
 describe('v82 — ٢ الإصدار', () => {
   test('84.0.0 (29) في كل ملفات الإصدار', () => {
-    expect(read(CONFIG)).toContain("APP_VERSION = '85.0.0'");
-    expect(read(CONFIG)).toContain('APP_BUILD_CODE = 29');
-    expect(read('package.json')).toContain('"version": "85.0.0"');
-    expect(read('src-tauri/tauri.conf.json')).toContain('"version": "85.0.0"');
-    expect(read('src-tauri/Cargo.toml')).toContain('version = "85.0.0"');
+    expect(read(CONFIG)).toContain("APP_VERSION = '86.0.0'");
+    expect(read(CONFIG)).toContain('APP_BUILD_CODE = 30');
+    expect(read('package.json')).toContain('"version": "86.0.0"');
+    expect(read('src-tauri/tauri.conf.json')).toContain('"version": "86.0.0"');
+    expect(read('src-tauri/Cargo.toml')).toContain('version = "86.0.0"');
   });
 });
