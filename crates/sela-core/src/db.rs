@@ -640,7 +640,9 @@ fn heal_v85(conn: &Connection) -> Result<()> {
          COMMIT;",
     );
     conn.execute_batch("PRAGMA foreign_keys = ON")?;
-    rebuild
+    // v86: execute_batch يرجع Result<(), rusqlite::Error> — يُحوَّل عبر
+    // #[from] إلى SelaError (درس فشل تجميع v85: إرجاع rebuild كما هو).
+    Ok(rebuild?)
 }
 
 
@@ -690,7 +692,9 @@ fn heal_v86(conn: &Connection) -> Result<()> {
          COMMIT;",
     );
     conn.execute_batch("PRAGMA foreign_keys = ON")?;
-    rebuild
+    // v86: execute_batch يرجع Result<(), rusqlite::Error> — يُحوَّل عبر
+    // #[from] إلى SelaError (درس فشل تجميع v85: إرجاع rebuild كما هو).
+    Ok(rebuild?)
 }
 
 fn heal_v57(conn: &Connection) -> Result<()> {
@@ -921,7 +925,7 @@ pub fn init_with(conn: &Connection) -> Result<()> {
 }
 
 /// كل جداول بيانات العمل (للمسح والنسخ) — بنفس ترتيب wipeAllData().
-pub const BUSINESS_TABLES: [&str; 27] = [
+pub const BUSINESS_TABLES: [&str; 29] = [
     "stocktake_items",
     "stocktakes",
     "sale_return_items",
