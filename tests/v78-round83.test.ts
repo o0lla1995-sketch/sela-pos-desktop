@@ -141,10 +141,10 @@ describe('v78 — ٦ الإجراءات السريعة: ديون المتجر و
 
 describe('v78 — الإصدار', () => {
   test('79.0.0 (23) في config والبناء', () => {
-    expect(read('src/core/config.ts')).toContain("APP_VERSION = '86.0.0'");
-    expect(read('src/core/config.ts')).toContain('APP_BUILD_CODE = 30');
-    expect(read('package.json')).toContain('"version": "86.0.0"');
-    expect(read('src-tauri/tauri.conf.json')).toContain('"version": "86.0.0"');
-    expect(read('src-tauri/Cargo.toml')).toContain('version = "86.0.0"');
+    expect(read('src/core/config.ts')).toContain("APP_VERSION = '87.0.0'");
+    expect(read('src/core/config.ts')).toContain('APP_BUILD_CODE = 31');
+    expect(read('package.json')).toContain('"version": "87.0.0"');
+    expect(read('src-tauri/tauri.conf.json')).toContain('"version": "87.0.0"');
+    expect(read('src-tauri/Cargo.toml')).toContain('version = "87.0.0"');
   });
 });

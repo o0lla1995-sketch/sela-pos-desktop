@@ -95,7 +95,7 @@ describe('v74 — ② الفواتير مميزة بطريقة الدفع', () =
 describe('v74 — ③ الإصدار', () => {
   test('79.0.0 (23) — محدّث للجولة 81', () => {
     const src = read(CONFIG);
-    expect(src).toContain("APP_VERSION = '86.0.0'");
-    expect(src).toContain('APP_BUILD_CODE = 30');
+    expect(src).toContain("APP_VERSION = '87.0.0'");
+    expect(src).toContain('APP_BUILD_CODE = 31');
   });
 });

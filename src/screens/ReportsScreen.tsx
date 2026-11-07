@@ -307,6 +307,8 @@ export function ReportsScreen() {
    *  وكأن القيمة أُضيفت إلى ما سُحب («لخبطة في فهم الحسابات»).
    *  الرصيد الحقيقي هو دفتر القناة عبر التاريخ؛ حركة الفترة سطر
    *  تفصيلي تحته. */
+  /** v87 (الجولة 93 #٧): إنشاء تقرير الفترة PDF الشامل. */
+  const [periodPdfBusy, setPeriodPdfBusy] = useState(false);
   const [liveMethods, setLiveMethods] = useState<
     Awaited<ReturnType<typeof ReportRepo.methodLedgerTotals>>
   >([]);
@@ -392,6 +394,53 @@ export function ReportsScreen() {
     () => rangeFor(rangeKey, rangeKey === 'custom' ? {from, to} : undefined),
     [rangeKey, from, to],
   );
+
+  /** v87 (الجولة 93 #٧): تقرير الفترة الشامل PDF — وثيقة قابلة
+   *  للطباعة تضم عمليات التجار المختصرة (طلب التاجر نصاً). */
+  const openPeriodPdf = useCallback(async () => {
+    if (periodPdfBusy || bundle == null) {
+      return;
+    }
+    setPeriodPdfBusy(true);
+    try {
+      const {exportPeriodReportPdf, buildPeriodPayload} = await import(
+        '../services/PeriodReportPdf'
+      );
+      const {useSettingsStore} = await import('../stores/settingsStore');
+      const storeName = useSettingsStore.getState().settings.storeName || 'سيلا';
+      const periodByMethod = new Map(payMethods.map(r => [r.method, r]));
+      const result = await exportPeriodReportPdf(
+        buildPeriodPayload({
+          rangeKey,
+          from: currentRange.from,
+          to: currentRange.to,
+          storeName,
+          summary: bundle.summary,
+          methodsLive: liveMethods.map(row => ({
+            method: row.method,
+            net: row.net,
+            salesIn: periodByMethod.get(row.method)?.salesIn,
+            salesCount: periodByMethod.get(row.method)?.salesCount,
+          })),
+          cash: bundle.cash,
+          merchantTotals,
+          topByRevenue: bundle.topByRevenue,
+        }),
+      );
+      toast(
+        `تم حفظ تقرير الفترة الشامل (${result.pages} صفحة): ${result.path}`,
+        'success',
+        7000,
+      );
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (!message.includes('أُلغيت')) {
+        toast(message, 'error', 6000);
+      }
+    } finally {
+      setPeriodPdfBusy(false);
+    }
+  }, [periodPdfBusy, bundle, rangeKey, currentRange, payMethods, liveMethods, merchantTotals, toast]);
 
   /* ── v83 (الجولتان 88+89 #٣+٤): صفوف القنوات «الآن» — اتحاد من
      له حركة بالفترة مع من له رصيد قائم عبر التاريخ (غير الصفري)،
@@ -976,6 +1025,77 @@ export function ReportsScreen() {
               يظهر هنا.
             </div>
           </div>
+
+          {/* ── v87 (الجولة 93 #٧): عمليات التجار بشكل مختصر — طلب
+              التاجر نصاً: «لا يوجد في التقارير ما يوضح عمليات التجار
+              بشكل مختصر ويضاف الي التقارير في حال طباعتها». البطاقة
+              في تبويب الملخص نفسه، والتفصيل في تبويب الديون. ── */}
+          {merchantTotals.count > 0 && (
+            <div className="card sv57-sec">
+              <div className="sv57-sec-head">
+                <div className="sv57-sec-title">عمليات التجار — ملخص مختصر</div>
+                <div className="sv57-sec-hint">فواتير التوريد والسدادات لهذه الفترة</div>
+              </div>
+              <div className="sv57-kpis">
+                <div className="sv57-kpi">
+                  <span className="label">مستحق للتجار الآن · {merchantTotals.count} تاجر</span>
+                  <span className={merchantTotals.owedNow > 0 ? 'value danger' : 'value ok'}>
+                    {formatMoney(merchantTotals.owedNow)}
+                  </span>
+                </div>
+                <div className="sv57-kpi">
+                  <span className="label">توريد بالفترة</span>
+                  <span className="value brand">
+                    {formatMoney(merchantTotals.purchasesInRange)}
+                  </span>
+                </div>
+                <div className="sv57-kpi">
+                  <span className="label">سدادات بالفترة</span>
+                  <span className="value ok">
+                    {formatMoney(merchantTotals.paymentsInRange)}
+                  </span>
+                </div>
+                <div className="sv57-kpi">
+                  <span className="label">تحصيلات بالفترة</span>
+                  <span className="value">
+                    {formatMoney(merchantTotals.collectionsInRange)}
+                  </span>
+                </div>
+              </div>
+              {merchantTotals.topOwed.length > 0 && (
+                <div className="sv57-note">
+                  أكبر المستحقات:{' '}
+                  {merchantTotals.topOwed
+                    .slice(0, 3)
+                    .map(row => `${row.merchant.name} (${formatMoney(row.balance)})`)
+                    .join(' · ')}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── v87 (الجولة 93 #٧): تقرير الفترة PDF الشامل — وثيقة
+              قابلة للطباعة تشمل عمليات التجار المختصرة. ── */}
+          <div className="card sv57-sec">
+            <div className="sv57-sec-head">
+              <div className="sv57-sec-title">تقرير الفترة PDF</div>
+              <div className="sv57-sec-hint">وثيقة شاملة قابلة للطباعة — تشمل عمليات التجار</div>
+            </div>
+            <div className="sv57-actions">
+              <button
+                type="button"
+                className="btn primary"
+                disabled={periodPdfBusy}
+                onClick={() => void openPeriodPdf()}>
+                {periodPdfBusy ? '…يُنشأ التقرير' : 'إنشاء تقرير PDF شامل للفترة'}
+              </button>
+            </div>
+            <div className="sv57-note">
+              يضم ملخص المبيعات والأرباح وأرصدة القنوات والنقد بالدرج
+              والديون القائمة وعمليات التجار المختصرة والأكثر إيراداً —
+              جاهز للطباعة أو المشاركة.
+            </div>
+          </div>
           </>)}
 
           {/* ── 4) النقد والديون ─────────────────────────────── */}
@@ -991,22 +1111,27 @@ export function ReportsScreen() {
                 </div>
               </div>
 
-              {/* البطل: النقد المحصّل */}
+              {/* البطل: النقد المحصّل — v87 (الجولة 93 #١): درج نقدي
+                  صافٍ؛ مبيعات ومقبوضات البنوك والمحافظ بصفها المعلوماتي
+                  أسفله وأرصدتها في بطاقة القنوات، فلا يُقرأ المبلغ
+                  واحده مرتين (شكوى التاجر نصاً). */}
               <div className="sv57-hero">
-                <span className="label">النقد المحصّل بالفترة</span>
+                <span className="label">النقد المحصّل بالدرج بالفترة</span>
                 <span className="amount">
                   {formatMoney(cash.collected)}
                 </span>
-                {/* v83 (الجولتان 88+89 #٤): salesCash = الإيراد مطروحاً
-                    منه فواتير الدين وبضاعة القسائم — أي كل المبيعات
-                    المدفوعة لحظة البيع بكل القنوات (نقد + بنوك
-                    ومحافظ)، فالتسمية القديمة «مبيعات نقدية» كانت
-                    تُلبِس — طلب التاجر: «حتى في الخزينة يظهر فقط
-                    النقد دون باقي المحافظ والبنوك». */}
                 <span className="meta">
-                  مبيعات (نقد + بنوك ومحافظ) {formatMoney(cash.salesCash)} +
-                  مقبوضات (ديون وحملات) {formatMoney(cash.collections)}
+                  مبيعات نقدية {formatMoney(cash.salesCash)} +
+                  مقبوضات نقدية (ديون وحملات) {formatMoney(cash.collections)}
                 </span>
+                {(cash.nonCashSalesAmount ?? 0) > 0.005 ||
+                (cash.nonCashRepaymentsAmount ?? 0) > 0.005 ? (
+                  <span className="meta">
+                    عبر البنوك والمحافظ (أرصدتها في بطاقة القنوات): مبيعات{' '}
+                    {formatMoney(cash.nonCashSalesAmount)} · سدادّات{' '}
+                    {formatMoney(cash.nonCashRepaymentsAmount)}
+                  </span>
+                ) : null}
               </div>
 
               {/* المقبوضات المستلمة بالفترة */}
@@ -1055,7 +1180,7 @@ export function ReportsScreen() {
                 (cash.withdrawalsCount ?? 0) > 0 ||
                 (cash.depositsCount ?? 0) > 0 ? (
                 <CollapseSection
-                  title="صافي حركة الخزينة بالفترة (كل القنوات)"
+                  title="صافي حركة الدرج النقدي بالفترة"
                   valueText={formatMoney(cash.netCashAfterMovements)}
                   tone={(cash.netCashAfterMovements ?? 0) >= 0 ? 'ok' : 'danger'}
                   open={openSections.movements === true}
@@ -1096,13 +1221,14 @@ export function ReportsScreen() {
                       {formatMoney(cash.netCashAfterMovements)}
                     </span>
                   </div>
-                  {/* v83 (الجولتان 88+89 #٤): تمييز صريح — حركة الفترة قد
-                      تكون سالبة بعد سحب الأرصدة (تصفير) وهذا طبيعي ولا
-                      يعني رصيداً سالباً؛ الأرصدة الحقيقية الآن في الخلايا
+                  {/* v87 (الجولة 93 #١): تمييز صريح — هذه حركة الدرج
+                      النقدي فقط؛ حركات البنوك والمحافظ لا تدخلها أصلاً
+                      (قد يكون سالباً بعد سحب رصيد وهذا طبيعي ولا يعني
+                      رصيداً سالباً). الأرصدة الحقيقية الآن في الخلايا
                       وبطاقة القنوات أدناه. */}
                   <div className="sv57-note">
-                    هذا صافي ما دخل وخرج خلال الفترة المحددة فقط (كل
-                    القنوات معاً) — قد يكون سالباً بعد سحب رصيد، وهذا
+                    هذا صافي ما دخل الدرج النقدي وخرج منه خلال الفترة
+                    المحددة فقط — قد يكون سالباً بعد سحب رصيد، وهذا
                     طبيعي ولا يعني رصيداً سالباً. الأرصدة الحقيقية الآن:
                     «النقد بالخزينة الآن» و«إجمالي الخزينة الآن» وبطاقة
                     أرصدة المحافظ والبنوك أدناه.

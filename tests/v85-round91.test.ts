@@ -174,9 +174,9 @@ describe('v85 — ④ لا إشعارات نفاد للمنتجات بلا تت�
 });
 
 describe('v85 — الإصدار', () => {
-  test('config عند 86.0.0 / 29', () => {
+  test('config عند 87.0.0 / 31', () => {
     const src = read(CONFIG);
-    expect(src).toContain("APP_VERSION = '86.0.0'");
-    expect(src).toContain('APP_BUILD_CODE = 30');
+    expect(src).toContain("APP_VERSION = '87.0.0'");
+    expect(src).toContain('APP_BUILD_CODE = 31');
   });
 });

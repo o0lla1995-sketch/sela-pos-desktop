@@ -540,14 +540,6 @@ export function MerchantsScreen() {
           <Icon name="download" size={13} />
           {exportBusy === 'bookPdf' ? 'جارٍ الإنشاء…' : 'تنزيل دفتر التجار PDF'}
         </button>
-        <button
-          className="btn ghost"
-          disabled={exportBusy != null}
-          onClick={() =>
-            void runExport('bookCsv', () => MerchantExports.exportBookCsv())
-          }>
-          <Icon name="download" size={13} /> دفتر CSV
-        </button>
       </div>
 
       {/* القائمة */}
@@ -721,31 +713,35 @@ export function MerchantsScreen() {
                 </span>
               </div>
 
-              {/* أزرار العمليات */}
+              {/* v87 (الجولة 93 #٤): أزرار العمليات أُعيد تنظيمها —
+                  كانت ثمانية متساوية متراكبة في صف واحد (شكوى التاجر:
+                  «الأزرار المتراكمة بشكل كبير جانبا الي جنب»).
+                  الهرمية: الفاتورة اليومية بحجم كامل، ثم عمليات المال
+                  الأربع في شبكة مضغوطة، ثم الكشف PDF، والإدارة في
+                  الأسفل هامشة لا تنافس المال. CSV أُلغي بطلب التاجر
+                  («لغيهما») — PDF قابل للطباعة فقط. */}
               <div className="mer-actions">
-                <button className="btn primary" onClick={openInvoice}>
-                  <Icon name="plus" size={13} /> فاتورة توريد
+                <button className="btn primary wide" onClick={openInvoice}>
+                  <Icon name="plus" size={13} /> فاتورة توريد جديدة
+                </button>
+              </div>
+              <div className="mer-actions grid">
+                <button className="btn" onClick={() => openFinance('payment')}>
+                  <Icon name="wallet" size={13} /> سداد له
                 </button>
                 <button className="btn" onClick={() => openFinance('debt')}>
                   <Icon name="book" size={13} /> دين مستحق
                 </button>
-                <button
-                  className="btn"
-                  onClick={() => openFinance('payment')}>
-                  <Icon name="wallet" size={13} /> سداد له
-                </button>
-                <button
-                  className="btn"
-                  onClick={() => openFinance('return')}>
+                <button className="btn" onClick={() => openFinance('return')}>
                   <Icon name="undo" size={13} /> مرتجع/خصم
                 </button>
-                <button
-                  className="btn"
-                  onClick={() => openFinance('collection')}>
+                <button className="btn" onClick={() => openFinance('collection')}>
                   <Icon name="download" size={13} /> تحصيل منه
                 </button>
+              </div>
+              <div className="mer-actions">
                 <button
-                  className="btn ghost"
+                  className="btn ghost wide"
                   disabled={exportBusy != null}
                   onClick={() =>
                     void runExport('statementPdf', () =>
@@ -755,22 +751,15 @@ export function MerchantsScreen() {
                   <Icon name="save" size={13} />
                   {exportBusy === 'statementPdf'
                     ? 'جارٍ الإنشاء…'
-                    : 'تنزيل الكشف PDF'}
+                    : 'كشف حساب PDF قابل للطباعة'}
                 </button>
-                <button
-                  className="btn ghost"
-                  disabled={exportBusy != null}
-                  onClick={() =>
-                    void runExport('statementCsv', () =>
-                      MerchantExports.exportStatementCsv(detail.merchant.id),
-                    )
-                  }>
-                  <Icon name="download" size={13} /> كشف CSV
-                </button>
-                <button className="btn ghost" onClick={openEdit}>
+              </div>
+              <div className="mer-actions admin">
+                <button className="btn link" onClick={openEdit}>
                   <Icon name="edit" size={13} /> تعديل البيانات
                 </button>
-                <button className="btn danger" onClick={() => void removeMerchant()}>
+                <span className="mer-admin-divider" />
+                <button className="btn link danger" onClick={() => void removeMerchant()}>
                   <Icon name="trash" size={13} /> حذف التاجر
                 </button>
               </div>

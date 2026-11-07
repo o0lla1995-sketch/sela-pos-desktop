@@ -273,6 +273,53 @@
   flex-wrap: wrap;
 }
 
+/* v87 (الجولة 93 #٤): الهرمية الجديدة — زر بحجم كامل، شبكة ٢×٢
+ * لعمليات المال، وصف إدارة هامشي رقيق لا ينافس العمليات. */
+.mer-actions + .mer-actions {
+  margin-top: 8px;
+}
+
+.mer-actions.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.mer-actions.admin {
+  justify-content: center;
+  align-items: center;
+  margin-top: 10px;
+  gap: 4px;
+}
+
+.mer-admin-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--line-soft);
+}
+
+.btn.wide {
+  width: 100%;
+}
+
+.btn.link {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.btn.link:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+.btn.link.danger {
+  color: var(--danger);
+}
+
 .mer-statement {
   max-height: 300px;
   overflow-y: auto;

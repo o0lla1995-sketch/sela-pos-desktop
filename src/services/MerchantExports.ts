@@ -11,6 +11,9 @@ import {useSettingsStore} from '../stores/settingsStore';
 import {paymentMethodById} from '../core/paymentMethods';
 import {logDiag} from '../core/diagnostics';
 
+/** v87 (الجولة 93 #٢): تصدير كشوف التجار CSV أُلغي بطلب التاجر
+ * («اريده تقرير pdf قابل للطباعة وليس تقرير اكسل او csv لغيهما»). */
+
 export const MERCHANT_KIND_LABELS: Record<string, string> = {
   invoice: 'فاتورة توريد',
   payment: 'سداد له',
@@ -99,82 +102,6 @@ export const MerchantExports = {
     return path;
   },
 
-  /** كشف حساب تاجر واحد — CSV يفتح في Excel. */
-  async exportStatementCsv(merchantId: number): Promise<string> {
-    const merchant = await MerchantRepo.byId(merchantId);
-    if (merchant == null) {
-      throw new Error('حساب التاجر غير موجود');
-    }
-    const rows = await statementAsc(merchantId);
-    if (rows.length === 0) {
-      throw new Error('لا حركات في كشف حساب هذا التاجر بعد');
-    }
-    const totalPositive = rows
-      .filter(
-        row =>
-          row.movement.kind === 'invoice' || row.movement.kind === 'debt',
-      )
-      .reduce((sum, row) => sum + row.movement.amount, 0);
-    const totalNegative = rows
-      .filter(
-        row =>
-          row.movement.kind !== 'invoice' && row.movement.kind !== 'debt',
-      )
-      .reduce((sum, row) => sum + row.movement.amount, 0);
-    const table: (string | number)[][] = [
-      [`كشف حساب التاجر — ${merchant.name}`],
-      [
-        merchant.phone ? `جوال: ${merchant.phone}` : '',
-        merchant.id_number ? `هوية: ${merchant.id_number}` : '',
-      ],
-      [],
-      [
-        'التاريخ والوقت',
-        'نوع الحركة',
-        'المرجع',
-        'عليه (₪)',
-        'له (₪)',
-        'قناة السداد',
-        'سند الخزينة',
-        'البيان / البنود',
-        'الرصيد الجاري (₪)',
-      ],
-      ...rows.map(row => {
-        const positive =
-          row.movement.kind === 'invoice' || row.movement.kind === 'debt';
-        return [
-          row.movement.createdAt,
-          MERCHANT_KIND_LABELS[row.movement.kind] ?? row.movement.kind,
-          row.movement.ref,
-          positive ? row.movement.amount.toFixed(2) : '',
-          positive ? '' : row.movement.amount.toFixed(2),
-          methodLabel(row),
-          row.movement.cashRef ?? '',
-          rowDetail(row),
-          row.runningBalance.toFixed(2),
-        ];
-      }),
-      [],
-      [
-        'الإجماليات',
-        '',
-        '',
-        totalPositive.toFixed(2),
-        totalNegative.toFixed(2),
-        '',
-        '',
-        '',
-        `الرصيد الحالي: ${(
-          rows[rows.length - 1].runningBalance ?? 0
-        ).toFixed(2)} ₪`,
-      ],
-    ];
-    return saveCsv(
-      `sela-merchant-${merchant.name.replace(/\s+/g, '_')}-statement.csv`,
-      table,
-    );
-  },
-
   /** دفتر التجار ككل — PDF. */
   async exportBookPdf(): Promise<string> {
     const list = await MerchantRepo.listWithBalances();
@@ -210,66 +137,5 @@ export const MerchantExports = {
     });
     logDiag('merchants', `أُنشئ دفتر التجار PDF (${list.length} تاجر)`);
     return path;
-  },
-
-  /** دفتر التجار ككل — CSV. */
-  async exportBookCsv(): Promise<string> {
-    const list = await MerchantRepo.listWithBalances();
-    if (list.length === 0) {
-      throw new Error('لا تجار مسجلون بعد');
-    }
-    const sum = (pick: (entry: (typeof list)[number]) => number) =>
-      list.reduce((acc, entry) => acc + pick(entry), 0);
-    const table: (string | number)[][] = [
-      ['دفتر حسابات التجار — سيلا'],
-      [],
-      [
-        'التاجر',
-        'الجوال',
-        'الهوية',
-        'فواتير التوريد (₪)',
-        'ديون مباشرة (₪)',
-        'سداد (₪)',
-        'مرتجع/خصم (₪)',
-        'تحصيل (₪)',
-        'الرصيد الحالي (₪)',
-        'حالة الرصيد',
-        'آخر حركة',
-      ],
-      ...list.map(entry => [
-        entry.merchant.name,
-        entry.merchant.phone ?? '',
-        entry.merchant.id_number ?? '',
-        entry.invoiceTotal.toFixed(2),
-        entry.debtTotal.toFixed(2),
-        entry.paymentTotal.toFixed(2),
-        entry.returnTotal.toFixed(2),
-        entry.collectionTotal.toFixed(2),
-        entry.balance.toFixed(2),
-        entry.balance > 0.005
-          ? 'مستحق له'
-          : entry.balance < -0.005
-          ? 'لك عنده'
-          : 'مسدد',
-        entry.lastAt ?? 'لا حركات',
-      ]),
-      [],
-      [
-        'الإجماليات',
-        '',
-        '',
-        sum(e => e.invoiceTotal).toFixed(2),
-        sum(e => e.debtTotal).toFixed(2),
-        sum(e => e.paymentTotal).toFixed(2),
-        sum(e => e.returnTotal).toFixed(2),
-        sum(e => e.collectionTotal).toFixed(2),
-        sum(e => e.balance).toFixed(2),
-        `مستحق للتجار: ${sum(e => Math.max(0, e.balance)).toFixed(2)} ₪ · لك عند التجار: ${sum(
-          e => Math.max(0, -e.balance),
-        ).toFixed(2)} ₪`,
-        '',
-      ],
-    ];
-    return saveCsv('sela-merchants-book.csv', table);
   },
 };

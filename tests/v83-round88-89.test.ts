@@ -136,28 +136,27 @@ describe('v83 — ٨٨③+④ التقارير: أرصدة حية + إجمالي
     expect(trioBlock).toContain('نقد بالدرج + بنوك ومحافظ');
   });
 
-  test('بطل النقد: «مبيعات (نقد + بنوك ومحافظ)» بدل «مبيعات نقدية»', () => {
-    const src = read(REPORTS);
-    expect(src).toContain('مبيعات (نقد + بنوك ومحافظ)');
-    // التسمية الملبِسة القديمة زالت من بطاقة النقد (يبقى قسيم الدين
-    // «والباقي مبيعات نقدية» — هناك المقصود فعلاً نقدي الديون).
-    const heroIdx = src.indexOf('النقد المحصّل بالفترة');
-    const heroBlock = src.slice(heroIdx, heroIdx + 500);
-    expect(heroBlock).not.toContain('مبيعات نقدية');
+  test('v87 (الجولة 93 #١): بطل النقد صار درجاً نقدياً صافياً + سطر القنوات', () => {
+    const src = read('src/screens/ReportsScreen.tsx');
+    // البطل نقدي فقط — مبيعات ومقبوضات القنوات بصفها المعلوماتي.
+    expect(src).toContain('النقد المحصّل بالدرج بالفترة');
+    expect(src).toContain('مبيعات نقدية');
+    expect(src).toContain('عبر البنوك والمحافظ (أرصدتها في بطاقة القنوات)');
   });
 
-  test('«صافي حركة الخزينة بالفترة (كل القنوات)» + تمييز السالبية', () => {
-    const src = read(REPORTS);
-    expect(src).toContain('صافي حركة الخزينة بالفترة (كل القنوات)');
-    expect(src).toContain('صافي حركة الفترة (بعد المصروفات والمسحوبات)');
-    // النص في JSX مقسوم على سطرين — نطابق كلا السطرين.
-    expect(src).toContain('قد يكون سالباً بعد سحب رصيد، وهذا');
-    expect(src).toContain('طبيعي ولا يعني رصيداً سالباً');
+  test('v87 (الجولة 93 #١): «صافي حركة الدرج النقدي بالفترة» + تمييز السالبية', () => {
+    const src = read('src/screens/ReportsScreen.tsx');
+    expect(src).toContain('صافي حركة الدرج النقدي بالفترة');
+    expect(src).toContain('هذا صافي ما دخل الدرج النقدي وخرج منه');
   });
 
-  test('بطاقة الحركات في التقارير بكل القنوات (scope all)', () => {
-    const src = read(REPORT_SERVICE);
-    expect(src).toContain("CashRepo.totalsFor(range.from, range.to, 'all')");
+  test('v87 (الجولة 93 #١): حركات الفترة مفصولة نقدي/قنوات (totalsForSplit)', () => {
+    const src = read('src/services/ReportService.ts');
+    // استُبدلت totalsFor الشاملة بالمفصولة — الدرج نقدي صافٍ
+    // وحركات القنوات في سطر معلوماتي (لا ازدواج مع أرصدتها).
+    expect(src).toContain('CashRepo.totalsForSplit(range.from, range.to)');
+    expect(src).toContain('ReportRepo.nonCashInRange(range)');
+    expect(src).toContain('cashMovementsSplit.cash.expensesMinor / 100');
   });
 });
 
@@ -287,14 +286,14 @@ describe('v83 — ٨٩③ السجل: تسويات تعديل الفاتورة �
 
 describe('v83 — الإصدار: 84.0.0 (29) في كل ملفات الإصدار', () => {
   test('config وpackage وtauri وCargo عند 84.0.0 / 28', () => {
-    expect(read(CONFIG)).toContain("APP_VERSION = '86.0.0'");
-    expect(read(CONFIG)).toContain('APP_BUILD_CODE = 30');
-    expect(read('package.json')).toContain('"version": "86.0.0"');
-    expect(read('src-tauri/tauri.conf.json')).toContain('"version": "86.0.0"');
-    expect(read('src-tauri/Cargo.toml')).toContain('version = "86.0.0"');
+    expect(read(CONFIG)).toContain("APP_VERSION = '87.0.0'");
+    expect(read(CONFIG)).toContain('APP_BUILD_CODE = 31');
+    expect(read('package.json')).toContain('"version": "87.0.0"');
+    expect(read('src-tauri/tauri.conf.json')).toContain('"version": "87.0.0"');
+    expect(read('src-tauri/Cargo.toml')).toContain('version = "87.0.0"');
     // درس v71/v74: القفل يجب أن يطابق Cargo.toml وإلا رفض --locked.
     expect(read('Cargo.lock')).toContain(
-      'name = "sela-pos-desktop"\nversion = "86.0.0"',
+      'name = "sela-pos-desktop"\nversion = "87.0.0"',
     );
   });
 });

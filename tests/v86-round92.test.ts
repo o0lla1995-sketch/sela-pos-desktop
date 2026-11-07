@@ -11,7 +11,7 @@
  *     (Canvas A4 150DPI) وCSV.
  *   ٤ نوافذ احترافية: شارات أنواع ملونة، تفكيك الدين في بطاقة
  *     الرصيد والتقارير.
- *   ٥ مسامير الإصدار 86.0.0 (30).
+ *   ٥ مسامير الإصدار — حُدّثت للجولة 93 (87.0.0 / 31).
  */
 import {describe, expect, test} from 'vitest';
 import {readFileSync} from 'node:fs';
@@ -92,13 +92,12 @@ describe('v86 — ٢ الدين المستحق المباشر بلا فاتور�
 });
 
 describe('v86 — ٣ تنزيل الكشف والدفتر', () => {
-  test('خدمة التصدير: كشف التاجر ودفتر التجار PDF وCSV', () => {
-    const service = read(MERCHANT_EXPORTS);
-    expect(service).toContain('async exportStatementPdf(');
-    expect(service).toContain('async exportStatementCsv(');
-    expect(service).toContain('async exportBookPdf(');
-    expect(service).toContain('async exportBookCsv(');
-    expect(service).toContain('دين مستحق مباشر');
+  test('خدمة التصدير: PDF فقط — CSV أُلغي بطلب التاجر («لغيهما»)', () => {
+    const src = read('src/services/MerchantExports.ts');
+    expect(src).toContain('async exportStatementPdf(');
+    expect(src).toContain('async exportBookPdf(');
+    expect(src).not.toContain('async exportStatementCsv(');
+    expect(src).not.toContain('async exportBookCsv(');
   });
 
   test('محرك PDF: كشف التاجر ودفتر التجار بنفس هوية الكشوف', () => {
@@ -109,13 +108,13 @@ describe('v86 — ٣ تنزيل الكشف والدفتر', () => {
     expect(pdf).toContain('BOOK_COLS');
   });
 
-  test('أزرار التنزيل في صفحة التاجر وفي شريط القائمة', () => {
-    const screen = read(MERCHANT_SCREEN);
-    expect(screen).toContain('تنزيل الكشف PDF');
-    expect(screen).toContain('كشف CSV');
-    expect(screen).toContain('تنزيل دفتر التجار PDF');
-    expect(screen).toContain('دفتر CSV');
-    expect(screen).toContain("runExport('bookPdf'");
+  test('أزرار PDF في صفحة التاجر وفي شريط القائمة — لا CSV', () => {
+    const src = read('src/screens/MerchantsScreen.tsx');
+    expect(src).toContain('كشف حساب PDF قابل للطباعة');
+    expect(src).toContain('تنزيل دفتر التجار PDF');
+    expect(src).toContain('فاتورة توريد جديدة');
+    expect(src).not.toContain('دفتر CSV');
+    expect(src).not.toContain('كشف CSV');
   });
 });
 
@@ -136,20 +135,20 @@ describe('v86 — ٤ النوافذ الاحترافية', () => {
 });
 
 describe('v86 — مسامير الإصدار', () => {
-  test('config.ts عند 86.0.0 (30)', () => {
+  test('config.ts عند 87.0.0 (31)', () => {
     const config = read(CONFIG);
-    expect(config).toContain("APP_VERSION = '86.0.0'");
-    expect(config).toContain('APP_BUILD_CODE = 30');
+    expect(config).toContain("APP_VERSION = '87.0.0'");
+    expect(config).toContain('APP_BUILD_CODE = 31');
   });
 
   test('package.json وtauri وCargo متطابقة (درس --locked)', () => {
-    expect(read('package.json')).toContain('"version": "86.0.0"');
+    expect(read('package.json')).toContain('"version": "87.0.0"');
     expect(read('src-tauri/tauri.conf.json')).toContain(
-      '"version": "86.0.0"',
+      '"version": "87.0.0"',
     );
-    expect(read('src-tauri/Cargo.toml')).toContain('version = "86.0.0"');
+    expect(read('src-tauri/Cargo.toml')).toContain('version = "87.0.0"');
     expect(read('Cargo.lock')).toContain(
-      'name = "sela-pos-desktop"\nversion = "86.0.0"',
+      'name = "sela-pos-desktop"\nversion = "87.0.0"',
     );
   });
 });
